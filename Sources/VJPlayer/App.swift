@@ -28,13 +28,33 @@ struct VJPlayerApp: App {
         }
         .defaultSize(width: 1440, height: 820)
         .windowResizability(.contentMinSize)
+        Settings {
+            SettingsView()
+                .environmentObject(engine)
+        }
         .commands {
-            CommandGroup(replacing: .newItem) {}
+            CommandGroup(replacing: .newItem) {
+                Button("新規プロジェクト") { ProjectMenu.new() }
+                    .keyboardShortcut("n", modifiers: .command)
+                Button("プロジェクトを開く…") { ProjectMenu.open() }
+                    .keyboardShortcut("o", modifiers: .command)
+                RecentProjectsMenu(engine: engine)
+                Divider()
+                Button("見つからない動画を探す…") { ProjectMenu.findMissing() }
+            }
+            CommandGroup(replacing: .saveItem) {
+                Button("保存") { ProjectMenu.save() }
+                    .keyboardShortcut("s", modifiers: .command)
+                Button("別名で保存…") { ProjectMenu.saveAs() }
+                    .keyboardShortcut("s", modifiers: [.command, .shift])
+            }
             CommandMenu("出力") {
                 Button("出力を閉じる／元に戻す") { OutputController.shared.toggle() }
                     .keyboardShortcut("f", modifiers: [.command, .shift])
-                Button("ブラックアウト") { Engine.shared.blackout() }
+                Button("ブラックアウト／解除") { Engine.shared.toggleBlackout() }
                     .keyboardShortcut(.escape, modifiers: [])
+                Button("全レイヤーを停止") { Engine.shared.stopAll() }
+                    .keyboardShortcut(.escape, modifiers: [.shift])
             }
         }
     }
@@ -53,9 +73,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             options: [.userInitiated, .idleDisplaySleepDisabled, .latencyCritical],
             reason: "VJ 出力中")
 
+        // 画面確認用：VJ_SELECT_CLIP=番号 で起動時にそのクリップを選んでおく
+        if let v = ProcessInfo.processInfo.environment["VJ_SELECT_CLIP"], let i = Int(v) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { Engine.shared.selectClip(i) }
+        }
+
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
             Self.handleKey(event) ? nil : event
         }
+    }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        // プロジェクトを開いていて未保存の変更があれば聞く（今の状態は自動保存にも残る）
+        if Engine.shared.projectURL != nil && Engine.shared.isDirty {
+            return ProjectMenu.confirmDiscard("終了する") ? .terminateNow : .terminateCancel
+        }
+        return .terminateNow
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -64,20 +97,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
-    /// 1〜8 / Q〜I / A〜K / Z〜, でスロットを再生（段 = レイヤー）、Esc で全レイヤーをブラックアウト
+    /// Esc でブラックアウト切り替え、⇧Esc で全レイヤー停止。
+    /// （クリップのキー割り当ては、あとで手動で決められるようにする予定。今は割り当てなし）
     private static func handleKey(_ event: NSEvent) -> Bool {
         let mods = event.modifierFlags.intersection([.command, .control, .option])
         guard mods.isEmpty else { return false }
+        let shift = event.modifierFlags.contains(.shift)
         // テキスト入力中は横取りしない
         if NSApp.keyWindow?.firstResponder is NSTextView { return false }
 
         if event.keyCode == 53 { // Esc
-            Engine.shared.blackout()
+            if event.isARepeat { return true }
+            if shift { Engine.shared.stopAll() } else { Engine.shared.toggleBlackout() }
             return true
         }
-        guard !event.isARepeat, let ch = event.charactersIgnoringModifiers?.uppercased(),
-              let i = Engine.keyLabels.firstIndex(of: ch) else { return false }
-        Engine.shared.trigger(i)
-        return true
+        return false
     }
 }

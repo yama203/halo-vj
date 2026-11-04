@@ -1,4 +1,5 @@
 import AVFoundation
+import ObjCSupport
 import AudioToolbox
 import CoreAudio
 import CryptoKit
@@ -69,9 +70,87 @@ final class AudioClip {
     let file: AVAudioFile
     let node = AVAudioPlayerNode()
     let timePitch = AVAudioUnitTimePitch()
-    private(set) var isScheduledFromStart = false
+    /// 予約済みでまだ鳴らしていない区間の開始位置（鳴らした・止めたら nil）
+    private(set) var pendingStart: Double?
     /// 予約した区間の開始位置（秒）。プレイヤーの時刻はここからの経過になる
     private(set) var scheduledStart = 0.0
+    /// 逆再生の区間を予約しているか（位置は scheduledStart から戻っていく）
+    private(set) var scheduledReverse = false
+
+    /// 逆再生用：lower〜upper 秒の区間を逆順に書き出したファイル（往復モードのときだけ作る）
+    private var reversed: (file: AVAudioFile, lower: Double, upper: Double)?
+    private lazy var reversedURL: URL = AudioCache.directory
+        .appendingPathComponent("reverse-\(UUID().uuidString).caf")
+
+    /// lower〜upper 秒を逆順にした音声ファイルを用意する（音声キューで呼ぶ）。
+    /// 順再生と同じく「ファイルの区間を予約」で鳴らすため、メモリに全部は持たない
+    func prepareReversed(lower: Double, upper: Double) {
+        if let r = reversed, abs(r.lower - lower) < 0.0005, abs(r.upper - upper) < 0.0005 { return }
+        let sr = sampleRate
+        let f0 = AVAudioFramePosition(max(lower, 0) * sr)
+        let f1 = min(AVAudioFramePosition(upper * sr), file.length)
+        guard f1 > f0 else { reversed = nil; return }
+        let fmt = file.processingFormat
+        let tmp = reversedURL.deletingPathExtension().appendingPathExtension("tmp.caf")
+        do {
+            // 再生中のプレイヤーが使っているファイルの読み位置を動かさないよう、別に開いて読む
+            let src = try AVAudioFile(forReading: file.url, commonFormat: fmt.commonFormat, interleaved: fmt.isInterleaved)
+            try? FileManager.default.removeItem(at: tmp)
+            let dst = try AVAudioFile(forWriting: tmp, settings: src.fileFormat.settings,
+                                      commonFormat: fmt.commonFormat, interleaved: fmt.isInterleaved)
+            let chunk = AVAudioFrameCount(sr)   // 1 秒ずつ後ろから
+            guard let buf = AVAudioPCMBuffer(pcmFormat: fmt, frameCapacity: chunk),
+                  let out = AVAudioPCMBuffer(pcmFormat: fmt, frameCapacity: chunk) else { return }
+            var end = f1
+            while end > f0 {
+                let start = max(f0, end - AVAudioFramePosition(chunk))
+                let n = AVAudioFrameCount(end - start)
+                src.framePosition = start
+                try src.read(into: buf, frameCount: n)
+                guard let ch = buf.floatChannelData, let o = out.floatChannelData else { return }
+                let len = Int(buf.frameLength), st = buf.stride
+                for c in 0..<Int(fmt.channelCount) {
+                    for i in 0..<len { o[c][i * st] = ch[c][(len - 1 - i) * st] }
+                }
+                out.frameLength = buf.frameLength
+                try dst.write(from: out)
+                end = start
+            }
+        } catch {
+            NSLog("VJPlayer: 逆再生用の音声を作れません \(error)")
+            reversed = nil
+            return
+        }
+        do {
+            try? FileManager.default.removeItem(at: reversedURL)
+            try FileManager.default.moveItem(at: tmp, to: reversedURL)
+            let f = try AVAudioFile(forReading: reversedURL, commonFormat: fmt.commonFormat, interleaved: fmt.isInterleaved)
+            reversed = (f, Double(f0) / sr, Double(f0) / sr + Double(f.length) / sr)
+        } catch {
+            NSLog("VJPlayer: 逆再生用の音声を開けません \(error)")
+            reversed = nil
+        }
+    }
+
+    func dropReversed() {
+        reversed = nil
+        try? FileManager.default.removeItem(at: reversedURL)
+    }
+
+    /// pos 秒から逆向きに鳴らせるように予約する。用意が無ければ false（その間は無音）
+    @discardableResult
+    func scheduleReversed(from pos: Double) -> Bool {
+        node.stop()
+        pendingStart = nil
+        guard let r = reversed, pos > r.lower else { return false }
+        let sr = sampleRate
+        let skip = AVAudioFramePosition(max(min((r.upper - pos) * sr, Double(r.file.length)), 0))
+        guard skip < r.file.length else { return false }
+        scheduledStart = r.upper - Double(skip) / sr
+        scheduledReverse = true
+        node.scheduleSegment(r.file, startingFrame: skip, frameCount: AVAudioFrameCount(r.file.length - skip), at: nil)
+        return true
+    }
 
     var sampleRate: Double { file.processingFormat.sampleRate }
     var duration: Double { Double(file.length) / sampleRate }
@@ -82,6 +161,7 @@ final class AudioClip {
     }
 
     deinit {
+        try? FileManager.default.removeItem(at: reversedURL)
         node.stop()
         let engine = AudioOutput.shared.engine
         engine.detach(node)
@@ -106,33 +186,52 @@ final class AudioClip {
     func schedule(from pos: Double) {
         node.stop()
         let start = AVAudioFramePosition(max(pos, 0) * sampleRate)
-        isScheduledFromStart = start == 0
         scheduledStart = Double(start) / sampleRate
+        scheduledReverse = false
+        pendingStart = scheduledStart
         guard start < file.length else { return }
         node.scheduleSegment(file, startingFrame: start, frameCount: AVAudioFrameCount(file.length - start), at: nil)
     }
 
     func play(atHostSeconds s: Double) {
         AudioOutput.shared.ensureRunning()
-        isScheduledFromStart = false
-        node.play(at: AudioOutput.audioTime(atHostSeconds: s))
+        pendingStart = nil
+        // AVAudioPlayerNode は条件によって時刻指定の再生を例外（player did not see an IO cycle）で
+        // 断ることがある。落ちないようにつかまえて、少し待ってやり直し、だめなら時刻指定なしで鳴らす
+        let when = AudioOutput.audioTime(atHostSeconds: s)
+        if VJTryCatch({ node.play(at: when) }) == nil { return }
+        usleep(5_000)
+        if let e = VJTryCatch({ node.play(at: when) }) {
+            NSLog("VJPlayer: 時刻指定の再生に失敗（%@）。時刻指定なしで鳴らします", e.reason ?? e.name.rawValue)
+            _ = VJTryCatch { node.play() }
+        }
     }
 
     func stop() {
         node.stop()
-        isScheduledFromStart = false
+        pendingStart = nil
     }
 
     /// 現在の音声の再生位置（秒）と、その位置が鳴る時刻。同期チェック用。
     func renderedPosition() -> (pos: Double, hostSeconds: Double)? {
         guard let nodeTime = node.lastRenderTime, nodeTime.isHostTimeValid,
               let pt = node.playerTime(forNodeTime: nodeTime) else { return nil }
-        return (scheduledStart + Double(pt.sampleTime) / pt.sampleRate, AVAudioTime.seconds(forHostTime: nodeTime.hostTime))
+        let t = Double(pt.sampleTime) / pt.sampleRate
+        return (scheduledReverse ? scheduledStart - t : scheduledStart + t,
+                AVAudioTime.seconds(forHostTime: nodeTime.hostTime))
     }
 }
 
 /// 動画の音声トラックを PCM の .caf に書き出してキャッシュする（~/Library/Caches/VJPlayer/audio）
 enum AudioCache {
+    /// ~/Library/Caches/VJPlayer/audio
+    static var directory: URL {
+        let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("VJPlayer/audio", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
     static func file(for asset: AVURLAsset, url: URL) async throws -> AVAudioFile? {
         guard let track = try await asset.loadTracks(withMediaType: .audio).first else { return nil }
 

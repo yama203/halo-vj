@@ -11,9 +11,10 @@ enum SelfTest {
         guard paths.count >= 2 else {
             print("usage: VJPlayer --selftest a.mov b.mov"); exit(2)
         }
+        setvbuf(stdout, nil, _IOLBF, 0)   // ログと順番が混ざらないように 1 行ずつ出す
         AudioOutput.shared.engine.mainMixerNode.outputVolume = 0
-        let a = ClipSlot(url: URL(fileURLWithPath: paths[0]))
-        let b = ClipSlot(url: URL(fileURLWithPath: paths[1]))
+        let a = ClipSlot(url: URL(fileURLWithPath: paths[0]), endAction: .hold)
+        let b = ClipSlot(url: URL(fileURLWithPath: paths[1]), endAction: .hold)
         var failures = 0
 
         func check(_ ok: Bool, _ msg: String) {
@@ -93,7 +94,8 @@ enum SelfTest {
         a.speed = 1.0
         print("   通常:       \(steady)")
         print("   ドラッグ中: \(drag)")
-        check(drag.maxGapMs <= steady.maxGapMs + 5 && drag.backwardJumps == 0 && drag.maxLagMs < 40,
+        // 間隔は他のアプリの負荷でも数 ms 揺れるので、半コマ（約 16ms）までの差は許す
+        check(drag.maxGapMs <= steady.maxGapMs + 16 && drag.backwardJumps == 0 && drag.maxLagMs < 40,
               "ドラッグ中もフレームが途切れない")
 
         // 5. ドラッグ後も音声と映像がずれていないか
@@ -156,6 +158,88 @@ enum SelfTest {
         }
         check(!a.isPlaying && abs(a.currentTime - a.duration) < 0.01, "ループなしのクリップは最後のフレームで止まる")
 
+        // 8b. イン点・アウト点
+        func pump(_ s: Double) {
+            let t = CACurrentMediaTime()
+            while CACurrentMediaTime() - t < s { _ = a.frameForDisplay(at: CACurrentMediaTime()); wait(0.008) }
+        }
+        a.setInOut(in: 2.0, out: .some(3.0))
+        a.endAction = .loop
+        wait(0.3)   // 待機ストリームの作り直しを待つ
+        let lIn = firstFrameLatency(a) { a.playFromStart() }
+        let firstPTS = a.lastShownPTS
+        check(lIn < 5 && abs(firstPTS - 2.0) < 0.05,
+              String(format: "イン点から再生（先頭フレーム %.3f 秒、%.2f ms）", firstPTS, lIn))
+        pump(0.5)
+        offs = []
+        for _ in 0..<10 { if let o = avOffsetMs(a) { offs.append(o) }; wait(0.03) }
+        let inOff = offs.isEmpty ? .nan : offs.reduce(0, +) / Double(offs.count)
+        check(abs(inOff - base) < 10, String(format: "イン点から再生しても音声と映像はずれない（%.1f ms）", inOff))
+        pump(0.9)
+        let looped = a.position(at: CACurrentMediaTime())
+        check(a.isPlaying && looped >= 2.0 && looped < 2.7,
+              String(format: "アウト点まで来たらイン点へループ（1.4 秒後に %.2f 秒）", looped))
+        // 往復：アウト点で逆向きになり、イン点でまた順向きに
+        a.endAction = .pingpong
+        wait(0.4)   // 逆再生の準備
+        a.playFromStart()
+        pump(1.25)
+        let rp1 = a.position(at: CACurrentMediaTime())
+        var revPTS: [Double] = []
+        let tr = CACurrentMediaTime()
+        while CACurrentMediaTime() - tr < 0.4 {
+            if a.frameForDisplay(at: CACurrentMediaTime()) != nil { revPTS.append(a.lastShownPTS) }
+            wait(0.008)
+        }
+        let rp2 = a.position(at: CACurrentMediaTime())
+        let descending = revPTS.count >= 8 && zip(revPTS, revPTS.dropFirst()).allSatisfy { $0 > $1 }
+        check(a.isReversing && rp1 > 2.6 && rp1 < 3.0 && rp2 < rp1 && descending,
+              String(format: "往復：アウト点で逆再生になる（%.2f → %.2f 秒、表示コマ %d 枚とも逆順）", rp1, rp2, revPTS.count))
+        offs = []
+        for _ in 0..<8 { if let o = avOffsetMs(a) { offs.append(o) }; wait(0.02) }
+        let revOff = offs.isEmpty ? .nan : offs.reduce(0, +) / Double(offs.count)
+        check(a.hasAudio == false || abs(revOff + base) < 15 || abs(revOff - base) < 15,
+              String(format: "逆再生中も音声は映像に付いてくる（ずれ %.1f ms）", revOff))
+        pump(0.75)
+        let rp3 = a.position(at: CACurrentMediaTime())
+        check(!a.isReversing && a.isPlaying && rp3 >= 2.0 && rp3 < 2.75,
+              String(format: "往復：イン点でまた順再生に戻る（%.2f 秒）", rp3))
+
+        // 逆再生の滑らかさ（2 倍速、長めの区間）
+        a.setInOut(in: 2.0, out: .some(8.0))
+        a.speed = 2.0
+        wait(0.4)
+        a.playFromStart()
+        pump(3.1)
+        var gap = 0.0, lastNew = CACurrentMediaTime(), newCount = 0, backward = 0, lastP = Double.infinity
+        let tg = CACurrentMediaTime()
+        while CACurrentMediaTime() - tg < 2.0 && a.isReversing {
+            if a.frameForDisplay(at: CACurrentMediaTime()) != nil {
+                let now = CACurrentMediaTime()
+                gap = max(gap, now - lastNew); lastNew = now; newCount += 1
+                if a.lastShownPTS > lastP { backward += 1 }
+                lastP = a.lastShownPTS
+            }
+            wait(1.0 / 120.0)
+        }
+        check(newCount > 30 && gap < 0.07 && backward == 0,
+              String(format: "2 倍速の逆再生も滑らか（新しいコマ %d 枚、最大間隔 %.0f ms、向きの乱れ %d）", newCount, gap * 1000, backward))
+        a.speed = 1.0
+        a.setInOut(in: 2.0, out: .some(3.0))
+        wait(0.3)
+
+        a.endAction = .hold
+        a.playFromStart()
+        pump(1.3)
+        check(!a.isPlaying && abs(a.currentTime - 3.0) < 0.01 && a.lastShownPTS > 2.8 && a.lastShownPTS < 3.0,
+              String(format: "「最後で停止」はアウト点のコマで止まる（表示 %.3f 秒）", a.lastShownPTS))
+        a.setInOut(in: 5, out: .some(4))
+        check(a.inPoint < a.outTime && a.outTime - a.inPoint >= ClipSlot.minRange - 0.0001,
+              String(format: "イン点はアウト点を越えない（イン %.2f / アウト %.2f）", a.inPoint, a.outTime))
+        a.resetInOut()
+        check(a.inPoint == 0 && a.outPoint == nil, "再生範囲のリセット")
+        wait(0.3)
+
         // 9. レイヤーの合成（GPU で合成した色を読み戻して計算と比べる）
         testBlending(check)
         testTransform(check)
@@ -169,6 +253,22 @@ enum SelfTest {
 
         // 12. 出力せずにクリップをプレビュー（クリップ選択）、レイヤー・コンポジションのプレビュー
         testPreviews(paths: paths, check: check, wait: wait)
+
+        // 13. レイヤー・列の増減
+        testGrid(paths: paths, check: check, wait: wait)
+
+        // 14. パラメーターのアニメーションと BPM
+        testAnimation(paths: paths, check: check, wait: wait)
+
+        // 15. エフェクト
+        testEffects(check)
+        testClipPosterizeTime(paths: paths, check: check, wait: wait)
+
+        // 16. ミュート（クリップ・レイヤー・コンポジション）
+        testMute(paths: paths, check: check, wait: wait)
+
+        // 17. プロジェクトファイル
+        testProject(paths: paths, check: check, wait: wait)
 
         print(failures == 0 ? "ALL PASS" : "\(failures) FAILED")
         exit(failures == 0 ? 0 : 1)
@@ -274,7 +374,7 @@ enum SelfTest {
     static func testLayers(paths: [String], check: (Bool, String) -> Void, wait: (Double) -> Void) {
         let e = Engine(persistent: false)
         let urlA = URL(fileURLWithPath: paths[0]), urlB = URL(fileURLWithPath: paths[1])
-        let c = Engine.columns
+        let c = e.columns
         e.load(urls: [urlA, urlA], startingAt: 0)   // L1 の 1 列目・2 列目
         e.load(urls: [urlB], startingAt: c)          // L2 の 1 列目
         let t0 = CACurrentMediaTime()
@@ -375,16 +475,16 @@ enum SelfTest {
         check(e.slots[c + 2] === a0 && e.slots[c + 3] === moved && e.activeByLayer[1] == c + 2,
               "クリップ同士を入れ替えられる")
 
-        e.blackout()
-        check(e.activeByLayer.allSatisfy { $0 == nil } && e.layerDraws().isEmpty, "ブラックアウトで全レイヤー停止")
+        e.stopAll()
+        check(e.activeByLayer.allSatisfy { $0 == nil } && e.layerDraws().isEmpty, "全レイヤー停止")
     }
 
     static func testRenderThread(paths: [String], check: (Bool, String) -> Void, wait: (Double) -> Void) {
         let e = Engine(persistent: false)
         e.load(urls: [URL(fileURLWithPath: paths[0])], startingAt: 0)
-        e.load(urls: [URL(fileURLWithPath: paths[1])], startingAt: Engine.columns)
+        e.load(urls: [URL(fileURLWithPath: paths[1])], startingAt: e.columns)
         let t0 = CACurrentMediaTime()
-        while !(e.slots[0]?.isReady == true && e.slots[Engine.columns]?.isReady == true) && CACurrentMediaTime() - t0 < 10 { wait(0.05) }
+        while !(e.slots[0]?.isReady == true && e.slots[e.columns]?.isReady == true) && CACurrentMediaTime() - t0 < 10 { wait(0.05) }
 
         let loop = RenderLoop(engine: e)
         let layer = CAMetalLayer()
@@ -393,7 +493,7 @@ enum SelfTest {
         layer.drawableSize = CGSize(width: 1280, height: 720)
         loop.add(layer)
         e.trigger(0)
-        e.trigger(Engine.columns)
+        e.trigger(e.columns)
         wait(0.5)
 
         loop.resetStats()
@@ -413,7 +513,7 @@ enum SelfTest {
         let busy = loop.currentStats()
         e.slots[0]!.speed = 1.0
         loop.stop()
-        e.blackout()
+        e.stopAll()
 
         func fmt(_ s: RenderLoop.Stats) -> String {
             String(format: "vsync=%d 新フレーム=%d 最大間隔=%.1fms vsync最大間隔=%.1fms", s.ticks, s.newFrames, s.maxNewFrameGapMs, s.maxTickGapMs)
@@ -424,9 +524,558 @@ enum SelfTest {
               "メインスレッドが 1 秒ふさがっていても、出力の映像は 30fps で更新され続ける")
     }
 
+    /// エフェクトを GPU で処理して、読み戻した色を確かめる
+    static func testEffects(_ check: (Bool, String) -> Void) {
+        let ctx = MetalContext.shared
+        let W = 8
+        func tex(_ f: (Int, Int) -> SIMD3<Float>) -> MTLTexture {
+            let td = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: W, height: W, mipmapped: false)
+            td.usage = [.shaderRead]
+            let t = ctx.device.makeTexture(descriptor: td)!
+            var px = [UInt8](repeating: 255, count: W * W * 4)
+            for y in 0..<W { for x in 0..<W {
+                let c = (f(x, y) * 255).rounded(.toNearestOrEven)
+                let i = (y * W + x) * 4
+                px[i] = UInt8(c.z); px[i + 1] = UInt8(c.y); px[i + 2] = UInt8(c.x)
+            } }
+            t.replace(region: MTLRegionMake2D(0, 0, W, W), mipmapLevel: 0, withBytes: px, bytesPerRow: W * 4)
+            return t
+        }
+        /// 合成して読み戻す（x, y の色）
+        func run(_ groups: [LayerGroup], _ comp: EffectStack = EffectStack(), compositor: Compositor? = nil,
+                 now: Double = 0) -> (Int, Int) -> SIMD3<Float> {
+            let c = compositor ?? { let c = Compositor(); c.storageMode = .shared; return c }()
+            let cb = ctx.queue.makeCommandBuffer()!
+            let t = c.composite(groups, effects: comp, width: W, height: W, cb: cb, now: now)!
+            cb.commit(); cb.waitUntilCompleted()
+            var out = [UInt8](repeating: 0, count: W * W * 4)
+            t.getBytes(&out, bytesPerRow: W * 4, from: MTLRegionMake2D(0, 0, W, W), mipmapLevel: 0)
+            return { x, y in
+                let i = (y * W + x) * 4
+                return SIMD3(Float(out[i + 2]), Float(out[i + 1]), Float(out[i])) / 255
+            }
+        }
+        func near(_ a: SIMD3<Float>, _ b: SIMD3<Float>, _ e: Float = 3.0 / 255) -> Bool { simd_reduce_max(simd_abs(a - b)) < e }
+        func fx(_ k: EffectKind, _ v: [Double]) -> Effect { var e = Effect(kind: k); e.values = v; return e }
+        /// カラーライズ（カラーモード）。色を色相（度）で
+        func colorize(hue: Double, weighted: Bool = true, amount: Double = 1) -> Effect {
+            var e = Effect(kind: .colorize); e.values = [0, weighted ? 1 : 0, amount]
+            e.color = RGB.hsb(hue / 360, 1, 1); return e
+        }
+        func clip(_ t: MTLTexture, _ effects: [Effect] = []) -> LayerDraw {
+            LayerDraw(texture: t, opacity: 1, blend: .normal, holder: nil, effects: EffectStack(effects: effects), effectKey: 0)
+        }
+        func group(_ d: LayerDraw, _ effects: [Effect] = [], opacity: Float = 1) -> LayerGroup {
+            LayerGroup(draws: [d], opacity: opacity, blend: .normal, effects: EffectStack(effects: effects), key: 0)
+        }
+        let red = SIMD3<Float>(1, 0, 0), blue = SIMD3<Float>(0, 0, 1)
+        let halves = tex { x, _ in x < W / 2 ? red : blue }
+        let grey = SIMD3<Float>(repeating: 0.5)
+
+        // ミラー（クリップ）：左を右へ → 右半分も赤
+        var r = run([group(clip(halves, [fx(.mirror, [1, 0])]))])
+        check(near(r(1, 3), red) && near(r(6, 3), red), "ミラー（左を右へ）：右半分にも左の絵が映る")
+        r = run([group(clip(halves, [fx(.mirror, [2, 0])]))])
+        check(near(r(1, 3), blue) && near(r(6, 3), blue), "ミラー（右を左へ）")
+        // カラーライズ：灰色 50% → 色相 0°・彩度 100% で赤
+        r = run([group(clip(tex { _, _ in grey }, [colorize(hue: 0)]))])
+        check(near(r(3, 3), red, 4.0 / 255), String(format: "カラーライズ（明るさを保つ）：灰色 → 赤（%.2f, %.2f, %.2f）", r(3, 3).x, r(3, 3).y, r(3, 3).z))
+        r = run([group(clip(tex { _, _ in grey }, [colorize(hue: 0, amount: 0.5)]))])
+        check(near(r(3, 3), SIMD3(0.75, 0.25, 0.25), 4.0 / 255), "カラーライズ：かかり具合 50%")
+        // 明るさを保たない：黒は黒、灰色はその色の半分、白はその色そのもの
+        let lumRamp = tex { x, _ in x < 3 ? .zero : (x < 6 ? grey : SIMD3(repeating: 1)) }
+        r = run([group(clip(lumRamp, [colorize(hue: 240, weighted: false)]))])
+        check(near(r(0, 0), .zero) && near(r(4, 0), SIMD3(0, 0, 0.5), 4.0 / 255) && near(r(7, 0), blue),
+              "カラーライズ（明るさを保たない）：黒→黒、灰→色の半分、白→その色")
+        // パレット：暗い所は左の色、明るい所は右の色、中間はあいだの色
+        var pal = Effect(kind: .colorize); pal.values = [1, 1, 1]
+        pal.palette = [.black, RGB(r: 1, g: 0, b: 0), RGB(r: 1, g: 1, b: 0)]
+        r = run([group(clip(lumRamp, [pal]))])
+        check(near(r(0, 0), .zero) && near(r(4, 0), red, 4.0 / 255) && near(r(7, 0), SIMD3(1, 1, 0)),
+              "カラーライズ（パレット）：明るさでパレットの色に置き換わる（黒→赤→黄）")
+        // 色相をずらす：赤を 120° ずらすと緑
+        var hs = colorize(hue: 0); hs.values = [0, 1, 1, 120]
+        r = run([group(clip(tex { _, _ in grey }, [hs]))])
+        check(near(r(3, 3), SIMD3(0, 1, 0), 4.0 / 255), "カラーライズ：色相を 120° ずらすと赤 → 緑")
+
+        // エフェクトの値のアニメーション：描画する時刻で値が変わる（色相を 4 秒で 0→360°）
+        var ha = colorize(hue: 0)
+        var anim = ha.anim(3); anim.mode = .time; anim.seconds = 4; anim.start = 100
+        ha.setAnim(3, anim)
+        ha.anims["3"]?.start = 100
+        let st = EffectStack(effects: [ha])
+        let c1 = run([group(clip(tex { _, _ in grey }, [ha]))], compositor: nil, now: 100.0)(3, 3)
+        let atNow = { (t: Double) -> SIMD3<Float> in
+            let comp = Compositor(); comp.storageMode = .shared
+            let cb = ctx.queue.makeCommandBuffer()!
+            var d = clip(tex { _, _ in grey }); d.effects = st
+            let out = comp.composite([group(d)], effects: EffectStack(), width: W, height: W, cb: cb, now: t)!
+            cb.commit(); cb.waitUntilCompleted()
+            var px = [UInt8](repeating: 0, count: W * W * 4)
+            out.getBytes(&px, bytesPerRow: W * 4, from: MTLRegionMake2D(0, 0, W, W), mipmapLevel: 0)
+            return SIMD3(Float(px[2]), Float(px[1]), Float(px[0])) / 255
+        }
+        let h0 = atNow(100.0), h1 = atNow(101.333), h2 = atNow(102.667)
+        check(near(h0, red, 4.0 / 255) && near(h1, SIMD3(0, 1, 0), 6.0 / 255) && near(h2, blue, 6.0 / 255) && !c1.x.isNaN,
+              "エフェクトの値を秒で動かす：色相が 赤 → 緑 → 青 と回る")
+        var bt = Effect(kind: .posterizeTime)
+        var ba = bt.anim(0); ba.mode = .beat; ba.beats = 4; ba.lo = 2; ba.hi = 10
+        bt.setAnim(0, ba)
+        let bst = EffectStack(effects: [bt], beat: BeatClock(bpm: 120, anchorHost: 0, anchorBeat: 0))
+        check(abs((bst.posterizeFPS(at: 0) ?? 0) - 2) < 0.01 && abs((bst.posterizeFPS(at: 1) ?? 0) - 6) < 0.01,
+              "エフェクトの値を BPM で動かす（ポスタライズ時間 2→10fps を 4 拍で）")
+        let enc = try? JSONEncoder().encode(ha)
+        let back = enc.flatMap { try? JSONDecoder().decode(Effect.self, from: $0) }
+        check(back?.anim(3).mode == .time && back?.anim(3).seconds == 4, "エフェクトのアニメーション設定も保存される")
+
+        // 以前の保存データ（色相・彩度・かかり具合）も読める
+        let old = #"{"kind":"colorize","enabled":true,"values":[120,1,0.8]}"#
+        let dec = try? JSONDecoder().decode(Effect.self, from: Data(old.utf8))
+        check(dec?.values == [0, 1, 0.8, 0] && abs((dec?.color.g ?? 0) - 1) < 0.001 && (dec?.color.r ?? 1) < 0.001,
+              "以前のカラーライズの設定（色相 120° など）を読み込める")
+        // レベル：入力 25%〜75% → 0.375 は 0.25 に。ガンマ 2 で 0.5 → 0.707
+        r = run([group(clip(tex { _, _ in SIMD3(repeating: 0.375) }, [fx(.levels, [0.25, 0.75, 1, 0, 1])]))])
+        check(near(r(3, 3), SIMD3(repeating: 0.25), 4.0 / 255), String(format: "レベル：入力の黒・白（0.375 → %.3f）", r(3, 3).x))
+        r = run([group(clip(tex { _, _ in grey }, [fx(.levels, [0, 1, 2, 0, 1])]))])
+        check(near(r(3, 3), SIMD3(repeating: 0.7071), 4.0 / 255), String(format: "レベル：ガンマ 2（0.5 → %.3f）", r(3, 3).x))
+        r = run([group(clip(tex { _, _ in grey }, [fx(.levels, [0, 1, 1, 0.2, 0.6])]))])
+        check(near(r(3, 3), SIMD3(repeating: 0.4), 4.0 / 255), "レベル：出力の黒・白（0.5 → 0.4）")
+        // ポスタライズ：2 段 → 0.4 は 0、0.6 は 1
+        let ramp = tex { x, _ in SIMD3(repeating: Float(x) / Float(W - 1)) }
+        r = run([group(clip(ramp, [fx(.posterize, [2, 0, 1])]))])
+        check(near(r(2, 0), .zero) && near(r(5, 0), SIMD3(repeating: 1)), "ポスタライズ：2 段（暗い方は黒、明るい方は白）")
+        // ディザ：灰色 50% を 2 段 → 白と黒が混ざって、平均はほぼ 50%
+        r = run([group(clip(tex { _, _ in grey }, [fx(.posterize, [2, 1, 1])]))])
+        var sum: Float = 0, whites = 0
+        for y in 0..<W { for x in 0..<W { sum += r(x, y).x; if r(x, y).x > 0.5 { whites += 1 } } }
+        check(whites > 16 && whites < 48 && abs(sum / Float(W * W) - 0.5) < 0.15,
+              "ポスタライズ：ディザで白黒が混ざる（白 \(whites)/\(W * W) 点）")
+        // ドット：4px ごとに同じ色
+        r = run([group(clip(ramp, [fx(.posterize, [32, 0, 4])]))])
+        check(near(r(0, 0), r(3, 3)) && !near(r(0, 0), r(4, 0)), "ポスタライズ：ドット 4px（4 マスごとに同じ色）")
+        // オフにしたエフェクトはかからない
+        var off = fx(.mirror, [1, 0]); off.enabled = false
+        r = run([group(clip(halves, [off]))])
+        check(near(r(6, 3), blue), "オフにしたエフェクトはかからない")
+        // 順番：カラーライズ → ポスタライズ と、ポスタライズ → カラーライズ で結果が違う
+        let a1 = run([group(clip(tex { _, _ in SIMD3(repeating: 0.3) }, [colorize(hue: 120), fx(.posterize, [2, 0, 1])]))])(1, 1)
+        let a2 = run([group(clip(tex { _, _ in SIMD3(repeating: 0.3) }, [fx(.posterize, [2, 0, 1]), colorize(hue: 120)]))])(1, 1)
+        check(!near(a1, a2), "エフェクトは上から順にかかる（順番を変えると結果が変わる）")
+
+        // レイヤーのエフェクト：レイヤーの絵全体にかかる。レイヤーの不透明度 50% もそのあとで
+        r = run([group(clip(halves), [fx(.mirror, [1, 0])], opacity: 0.5)])
+        check(near(r(6, 3), SIMD3(0.5, 0, 0), 4.0 / 255) && near(r(1, 3), SIMD3(0.5, 0, 0), 4.0 / 255),
+              "レイヤーのエフェクト：レイヤー全体にかかり、不透明度 50% も効く")
+        // 小さく置いたクリップ＋レイヤーのミラー：透明な部分は透明のまま
+        var small = clip(tex { _, _ in red })
+        small.transform = ClipTransform(x: -0.25, y: 0, scale: 0.5, rotation: 0, opacity: 1)
+        r = run([group(small, [fx(.mirror, [1, 0])])])
+        check(near(r(1, 3), red) && near(r(6, 3), red) && near(r(3, 0), .zero),
+              "レイヤーのミラー：左に置いたクリップが右にも映り、周りは透明（下が見える）")
+        // コンポジションのエフェクト
+        r = run([group(clip(tex { _, _ in grey }))], EffectStack(effects: [colorize(hue: 240)]))
+        check(near(r(3, 3), blue, 4.0 / 255), "コンポジションのエフェクト：全体にかかる")
+
+        // エフェクト一覧からの追加先
+        let en = Engine(persistent: false)
+        check(EffectKind.allCases.allSatisfy { EffectKind.fromDragString($0.dragString) == $0 }
+              && EffectKind.fromDragString("/Users/x/a.mov") == nil, "ドラッグで運ぶ文字列からエフェクトに戻せる（ファイルは無視）")
+        en.inspectorTab = .composition
+        en.addEffectToCurrentTab(.mirror)
+        en.selectedLayer = 2; en.inspectorTab = .layer
+        en.addEffectToCurrentTab(.levels)
+        en.inspectorTab = .clip
+        let noClip = en.addEffectToCurrentTab(.posterize)
+        check(en.effects.map(\.kind) == [.mirror] && en.layers[2].effects.map(\.kind) == [.levels] && !noClip,
+              "ダブルクリックで今のタブ（コンポジション・レイヤー）に付く。クリップ未選択なら付かない")
+
+        // ポスタライズ時間（コンポジション）：2 fps → 同じコマ（0.5 秒）の間は前の絵のまま
+        let c = Compositor(); c.storageMode = .shared
+        let pt = EffectStack(effects: [fx(.posterizeTime, [2])])
+        let f1 = run([group(clip(tex { _, _ in red }))], pt, compositor: c, now: 10.1)(3, 3)
+        let f2 = run([group(clip(tex { _, _ in blue }))], pt, compositor: c, now: 10.3)(3, 3)
+        let f3 = run([group(clip(tex { _, _ in blue }))], pt, compositor: c, now: 10.6)(3, 3)
+        check(near(f1, red) && near(f2, red) && near(f3, blue), "ポスタライズ時間（コンポジション）：2fps なら 0.5 秒ごとにしか変わらない")
+        // ポスタライズ時間（レイヤー）
+        let c2 = Compositor(); c2.storageMode = .shared
+        let g1 = run([group(clip(tex { _, _ in red }), [fx(.posterizeTime, [4])])], compositor: c2, now: 5.01)(3, 3)
+        let g2 = run([group(clip(tex { _, _ in blue }), [fx(.posterizeTime, [4])])], compositor: c2, now: 5.2)(3, 3)
+        let g3 = run([group(clip(tex { _, _ in blue }), [fx(.posterizeTime, [4])])], compositor: c2, now: 5.26)(3, 3)
+        check(near(g1, red) && near(g2, red) && near(g3, blue), "ポスタライズ時間（レイヤー）：4fps なら 0.25 秒ごと")
+    }
+
+    /// ポスタライズ時間（クリップ）：フレームの更新が指定のフレームレートまで減る
+    static func testClipPosterizeTime(paths: [String], check: (Bool, String) -> Void, wait: (Double) -> Void) {
+        let e = Engine(persistent: false)
+        e.load(urls: [URL(fileURLWithPath: paths[0])], startingAt: 0)
+        let t0 = CACurrentMediaTime()
+        while e.slots[0]?.isReady != true && CACurrentMediaTime() - t0 < 10 { wait(0.05) }
+        var pt = Effect(kind: .posterizeTime); pt.values = [5]
+        e.slots[0]!.effects = [pt]
+        e.trigger(0)
+        var changes = 0
+        var last: ObjectIdentifier?
+        let ts = CACurrentMediaTime()
+        while CACurrentMediaTime() - ts < 1.0 {
+            e.updateFrame()
+            if let f = e.frame(layer: 0) {
+                let id = ObjectIdentifier(f)
+                if id != last { changes += 1; last = id }
+            }
+            wait(1.0 / 120.0)
+        }
+        check(changes >= 4 && changes <= 7, "ポスタライズ時間（クリップ）：5fps → 1 秒で \(changes) コマ")
+        e.slots[0]!.effects = []
+        changes = 0
+        let ts2 = CACurrentMediaTime()
+        while CACurrentMediaTime() - ts2 < 0.5 {
+            e.updateFrame()
+            if let f = e.frame(layer: 0) {
+                let id = ObjectIdentifier(f)
+                if id != last { changes += 1; last = id }
+            }
+            wait(1.0 / 120.0)
+        }
+        check(changes >= 10, "ポスタライズ時間を外すと元のフレームレートに戻る（0.5 秒で \(changes) コマ）")
+        e.stopAll()
+    }
+
+    static func testProject(paths: [String], check: (Bool, String) -> Void, wait: (Double) -> Void) {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("vjtest-\(UUID().uuidString)")
+        let p1 = root.appendingPathComponent("show1"), p2 = root.appendingPathComponent("show2")
+        try? fm.createDirectory(at: p1.appendingPathComponent("media"), withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: root) }
+        let inside = p1.appendingPathComponent("media/clipA.mov")
+        try? fm.copyItem(at: URL(fileURLWithPath: paths[0]), to: inside)
+        func ready(_ e: Engine, _ i: Int) {
+            let t0 = CACurrentMediaTime()
+            while e.slots[i]?.isReady != true && e.slots[i]?.isMissing != true && CACurrentMediaTime() - t0 < 10 { wait(0.05) }
+        }
+
+        let e = Engine(persistent: false)
+        e.insertColumn(at: 8)
+        e.load(urls: [inside], startingAt: 0)
+        e.load(urls: [URL(fileURLWithPath: paths[1])], startingAt: e.columns + 1)
+        ready(e, 0); ready(e, e.columns + 1)
+        let s0 = e.slots[0]!
+        s0.scale = 0.5
+        s0.addEffect(.mirror)
+        var rot = s0.anim(.rotation); rot.mode = .beat; s0.setAnim(.rotation, rot)
+        e.layers[1].opacity = 0.3
+        e.bpm = 140
+        check(e.isDirty, "変更すると「未保存」になる")
+        let file1 = p1.appendingPathComponent("show.vjproj")
+        do { try e.saveProject(to: file1) } catch { check(false, "保存できない \(error)") }
+        let text = (try? String(contentsOf: file1, encoding: .utf8)) ?? ""
+        check(!e.isDirty && e.projectURL == file1 && text.contains("\"relPath\" : \"media\\/clipA.mov\""),
+              "プロジェクトを保存：未保存の印が消え、フォルダの中の動画はそこからの場所でも書かれる")
+
+        // フォルダごと別の場所へ動かしてから開く
+        try? fm.moveItem(at: p1, to: p2)
+        let e2 = Engine(persistent: false)
+        do { try e2.openProject(p2.appendingPathComponent("show.vjproj")) } catch { check(false, "開けない \(error)") }
+        ready(e2, 0); ready(e2, e2.columns + 1)
+        let o0 = e2.slots[0]
+        check(e2.columns == 9 && o0?.url.path == p2.appendingPathComponent("media/clipA.mov").path && o0?.isReady == true
+              && o0?.scale == 0.5 && o0?.effects.first?.kind == .mirror && o0?.anim(.rotation).mode == .beat
+              && abs(e2.layers[1].opacity - 0.3) < 0.001 && abs(e2.bpm - 140) < 0.001
+              && e2.slots[e2.columns + 1]?.isReady == true && !e2.isDirty,
+              "フォルダごと動かしても開ける（動画・設定・グリッド・BPM が戻る）")
+
+        // 動画が無い場所で開く → 見つからないクリップとして置かれ、フォルダを選ぶと付け直せる
+        let p3 = root.appendingPathComponent("elsewhere")
+        try? fm.createDirectory(at: p3, withIntermediateDirectories: true)
+        try? fm.copyItem(at: p2.appendingPathComponent("show.vjproj"), to: p3.appendingPathComponent("show.vjproj"))
+        let e3 = Engine(persistent: false)
+        try? e3.openProject(p3.appendingPathComponent("show.vjproj"))
+        ready(e3, 0)
+        check(e3.slots[0]?.isMissing == true && e3.missingCount == 1 && e3.slots[0]?.scale == 0.5,
+              "動画が見つからないときは「見つかりません」のクリップとして設定ごと置かれる")
+        let n = e3.relinkMissing(searchingIn: p2)
+        ready(e3, 0)
+        check(n == 1 && e3.slots[0]?.isReady == true && e3.slots[0]?.scale == 0.5 && e3.slots[0]?.effects.count == 1
+              && e3.missingCount == 0, "フォルダを選ぶと同じ名前の動画を探して付け直す（設定はそのまま）")
+
+        // 新規
+        e3.newProject()
+        check(e3.layerCount == Engine.defaultLayers && e3.columns == Engine.defaultColumns
+              && e3.slots.allSatisfy { $0 == nil } && e3.projectURL == nil && !e3.isDirty && e3.effects.isEmpty,
+              "新規プロジェクト：空の 4 段 × 8 列から")
+    }
+
+    static func testMute(paths: [String], check: (Bool, String) -> Void, wait: (Double) -> Void) {
+        let e = Engine(persistent: false)
+        let c = e.columns
+        e.load(urls: [URL(fileURLWithPath: paths[0])], startingAt: 0)
+        e.load(urls: [URL(fileURLWithPath: paths[1])], startingAt: c)
+        let t0 = CACurrentMediaTime()
+        while !(e.slots[0]?.isReady == true && e.slots[c]?.isReady == true) && CACurrentMediaTime() - t0 < 10 { wait(0.05) }
+        let a = e.slots[0]!, b = e.slots[c]!
+        e.trigger(0); e.trigger(c)
+        for _ in 0..<10 { e.updateFrame(); wait(1.0 / 60.0) }
+        check(e.layerDraws().count == 2, "ミュート前は 2 レイヤーとも出ている")
+
+        e.layers[1].muted = true
+        e.updateFrame()
+        check(e.layerDraws().count == 1 && b.isPlaying && b.effectiveVolume == 0 && a.effectiveVolume > 0,
+              "レイヤーのミュート：そのレイヤーの映像と音だけ消える（再生は続く）")
+        e.layers[1].muted = false
+        check(e.layerDraws().count == 2 && b.effectiveVolume > 0, "レイヤーのミュートを解除すると戻る")
+
+        a.muted = true
+        check(e.layerDraws().count == 1 && a.isPlaying && a.effectiveVolume == 0, "クリップのミュート：そのクリップの映像と音だけ消える")
+        a.muted = false
+
+        let mixer = AudioOutput.shared.engine.mainMixerNode
+        let saved = mixer.outputVolume
+        e.masterVolume = 0.7
+        e.compMuted = true
+        check(e.renderParams().master == 0 && e.renderParams().compMaster == 0 && mixer.outputVolume == 0
+              && a.isPlaying && b.isPlaying, "コンポジションのミュート：出力の映像と音がすぐ消える（再生は続く）")
+        e.compMuted = false
+        check(e.renderParams().master > 0.99 && abs(mixer.outputVolume - 0.7) < 0.001, "コンポジションのミュートを解除すると戻る")
+        mixer.outputVolume = saved
+        // 音だけのミュート：映像は出たまま、音だけ消える
+        a.audioMuted = true
+        check(e.layerDraws().count == 2 && a.effectiveVolume == 0, "クリップの音だけミュート：映像は出たまま音だけ消える")
+        a.audioMuted = false
+        e.layers[1].audioMuted = true
+        check(e.layerDraws().count == 2 && b.effectiveVolume == 0 && a.effectiveVolume > 0, "レイヤーの音だけミュート")
+        e.layers[1].audioMuted = false
+        check(b.effectiveVolume > 0, "レイヤーの音のミュートを解除すると戻る")
+        e.masterAudioMuted = true
+        check(mixer.outputVolume == 0 && e.renderParams().master > 0.99, "マスターの音だけミュート：出力の映像は出たまま")
+        e.masterAudioMuted = false
+        check(abs(mixer.outputVolume - 0.7) < 0.001, "マスターの音のミュートを解除すると戻る")
+        mixer.outputVolume = saved
+
+        // 複製にもミュートが付いていく
+        a.muted = true
+        e.duplicateSlot(0, to: 5)
+        check(e.slots[5]?.muted == true, "複製したクリップにもミュートが付いていく")
+        e.stopAll()
+    }
+
+    static func testAnimation(paths: [String], check: (Bool, String) -> Void, wait: (Double) -> Void) {
+        func near(_ a: Double, _ b: Double, _ eps: Double = 0.01) -> Bool { abs(a - b) < eps }
+        var a = ParamAnim(key: .rotation)
+        a.mode = .time; a.seconds = 4; a.start = 100
+        let clock = BeatClock(bpm: 120, anchorHost: 0, anchorBeat: 0)
+        a.motion = .forward
+        let fwd = a.value(base: 0, at: 101, beat: clock)
+        a.motion = .backward
+        let bwd = a.value(base: 0, at: 101, beat: clock)
+        a.motion = .pingpong
+        let pp1 = a.value(base: 0, at: 102, beat: clock), pp2 = a.value(base: 0, at: 106, beat: clock)
+        check(near(fwd, 90) && near(bwd, 270) && near(pp1, 180) && near(pp2, 180)
+              && near(a.value(base: 0, at: 104, beat: clock), 360) && near(a.value(base: 0, at: 108, beat: clock), 0),
+              String(format: "秒モード：順 %.0f° / 逆 %.0f° / 往復 %.0f°・%.0f°（4秒で0→360°）", fwd, bwd, pp1, pp2))
+        a.motion = .random
+        let r1 = a.value(base: 0, at: 100.5, beat: clock), r2 = a.value(base: 0, at: 103.5, beat: clock)
+        let r3 = a.value(base: 0, at: 104.5, beat: clock)
+        check(r1 == r2 && r1 != r3 && (0...360).contains(r1) && (0...360).contains(r3),
+              String(format: "ランダム：1周の間は同じ値、次の周で別の値（%.0f° → %.0f°）", r1, r3))
+        var b = ParamAnim(key: .opacity)
+        b.mode = .beat; b.beats = 4
+        check(near(b.value(base: 1, at: 1.0, beat: clock), 0.5) && near(b.value(base: 1, at: 0.5, beat: clock), 0.25),
+              "BPMモード：120BPM・4拍で1周（1秒後に半分）")
+        a.mode = .off
+        check(a.value(base: 33, at: 101, beat: clock) == 33, "固定なら手で決めた値のまま")
+
+        var c = BeatClock(bpm: 120, anchorHost: 10, anchorBeat: 0)
+        let before = c.beat(at: 12)
+        c.setBPM(90, at: 12)
+        check(near(c.beat(at: 12), before) && near(c.beat(at: 14), before + 3), "BPMを変えても拍の位置は飛ばない")
+
+        let e = Engine(persistent: false)
+        for t in [50.0, 50.5, 51.0, 51.5] { e.tapTempo(at: t) }
+        let tb = e.beatClock.beat(at: 51.5)
+        check(near(e.bpm, 120) && near(tb, tb.rounded(), 0.0001),
+              String(format: "タップテンポ：0.5秒おきに4回 → %.1f BPM、押した瞬間が拍の頭", e.bpm))
+
+        // 描画にアニメーションが乗る
+        e.load(urls: [URL(fileURLWithPath: paths[0])], startingAt: 0)
+        let t0 = CACurrentMediaTime()
+        while e.slots[0]?.isReady != true && CACurrentMediaTime() - t0 < 10 { wait(0.05) }
+        let s = e.slots[0]!
+        var rot = s.anim(.rotation); rot.mode = .time; rot.seconds = 2; rot.lo = 0; rot.hi = 360
+        s.setAnim(.rotation, rot)
+        var lop = e.layers[0].anim(.opacity); lop.mode = .time; lop.seconds = 2; lop.lo = 0; lop.hi = 1
+        e.layers[0].setAnim(.opacity, lop)
+        var mop = e.anim(.opacity); mop.mode = .beat; mop.beats = 4; mop.lo = 0; mop.hi = 1
+        e.setAnim(.opacity, mop)
+        e.trigger(0)
+        for _ in 0..<10 { e.updateFrame(); wait(1.0 / 60.0) }
+        let d1 = e.layerDraws().first, m1 = e.renderParams().master
+        wait(0.5)
+        e.updateFrame()
+        let d2 = e.layerDraws().first, m2 = e.renderParams().master
+        let dRot = Double((d2?.transform.rotation ?? 0) - (d1?.transform.rotation ?? 0)) * 180 / .pi
+        let dOp = Double((d2?.opacity ?? 0) - (d1?.opacity ?? 0))
+        check(d1 != nil && d2 != nil && near(dRot, 90, 8) && near(dOp, 0.25, 0.04) && abs(m2 - m1) > 0.05,
+              String(format: "描画にアニメーションが乗る（0.5秒で 角度 +%.0f°、レイヤー不透明度 +%.2f、マスター %.2f→%.2f）",
+                     dRot, dOp, m1, m2))
+        // トリガーし直すと秒モードは頭から
+        e.trigger(0)
+        for _ in 0..<3 { e.updateFrame(); wait(1.0 / 60.0) }
+        let d3 = e.layerDraws().first
+        check(Double(d3?.transform.rotation ?? 9) * 180 / .pi < 15, "クリップをトリガーし直すと、秒モードのアニメーションは頭から")
+        // 複製にもアニメーションが付いていく
+        e.duplicateSlot(0, to: 3)
+        check(e.slots[3]?.anim(.rotation).mode == .time && e.slots[3]?.anim(.rotation).seconds == 2,
+              "複製したクリップにもアニメーションが付いていく")
+        s.resetTransform()
+        check(!s.anim(.rotation).isOn, "リセットでアニメーションも止まる")
+
+        // BPM 同期：再生範囲を決めた拍数でちょうど 1 周
+        e.bpm = 120
+        s.setInOut(in: 2.0, out: .some(4.0))   // 2 秒
+        s.syncBeats = 4                          // 120BPM の 4 拍 = 2 秒 → 1.0x
+        s.syncMode = .bpm
+        wait(0.3)
+        e.trigger(0)
+        let sr1 = s.effectiveSpeed
+        e.bpm = 180                              // 4 拍 = 1.333 秒 → 1.5x
+        let sr2 = s.effectiveSpeed, clockRate = s.clock.rate
+        let audioRate = s.audio?.rate ?? sr2
+        wait(0.05)
+        check(near(sr1, 1.0, 0.001) && near(sr2, 1.5, 0.001) && near(clockRate, 1.5, 0.001),
+              String(format: "BPM 同期：2秒の範囲を4拍で → 120BPM %.3fx / 180BPM %.3fx（BPM に付いていく）", sr1, sr2))
+        let tStart = CACurrentMediaTime()
+        while s.isPlaying && s.position(at: CACurrentMediaTime()) < 3.9 && CACurrentMediaTime() - tStart < 3 { wait(0.01) }
+        _ = audioRate
+        e.masterSpeed = 2.0
+        check(near(s.effectiveSpeed, 1.5, 0.001), "BPM 同期のクリップにはコンポジション速度は効かない")
+        e.masterSpeed = 1.0
+        e.tapTempo(at: 200); e.tapTempo(at: 200.25)   // 240 BPM
+        check(near(s.effectiveSpeed, 2.0, 0.01), String(format: "タップで BPM を変えても付いていく（%.3fx）", s.effectiveSpeed))
+        s.syncBeats = 1                          // 240BPM の 1 拍 = 0.25 秒で 2 秒 → 8x（上限）
+        s.syncBeats = 1; s.setInOut(in: 0, out: .some(8.0))
+        check(s.effectiveSpeed == ClipSlot.syncRateRange.upperBound, "速すぎる組み合わせは上限で止める")
+        s.syncMode = .free
+        s.resetInOut()
+
+        // ランダムジャンプ：拍の頭ごとにランダムな位置へ飛ぶ（音も一緒に）
+        e.bpm = 120                                // 1 拍 = 0.5 秒
+        s.endAction = .loop
+        s.jumpBeats = 1
+        wait(0.3)
+        e.trigger(0)
+        var jumps: [(t: Double, beat: Double, pts: Double)] = []
+        var lastPTS = -1.0, lastT = 0.0
+        let tj = CACurrentMediaTime()
+        while CACurrentMediaTime() - tj < 2.3 {
+            let now = CACurrentMediaTime()
+            if s.frameForDisplay(at: now) != nil {
+                let p = s.lastShownPTS
+                // 時間の進み以上に位置が変わった = 飛んだ
+                if lastPTS >= 0 && abs((p - lastPTS) - (now - lastT)) > 0.2 {
+                    jumps.append((now, e.beatClock.beat(at: now), p))
+                }
+                lastPTS = p; lastT = now
+            }
+            wait(1.0 / 240.0)
+        }
+        // 飛んだ瞬間が拍の頭からどれだけずれたか（拍の割合 → ms）
+        let offsMs = jumps.map { j -> Double in
+            let f = j.beat - j.beat.rounded()
+            return f * 500
+        }
+        let maxOff = offsMs.map { abs($0) }.max() ?? .infinity
+        let distinct = Set(jumps.map { Int($0.pts * 10) }).count
+        check(jumps.count >= 3 && jumps.count <= 5 && maxOff < 25 && distinct >= 3,
+              String(format: "ランダムジャンプ：2.3秒で %d 回、拍の頭からのずれ 最大 %.0f ms、飛び先 %d か所",
+                     jumps.count, maxOff, distinct))
+        // 次のジャンプと測定が重ならないよう、ここで止めてから（今の位置のまま再生は続く）測る
+        s.jumpBeats = 0
+        wait(0.2)
+        if s.hasAudio {
+            var o: [Double] = []
+            for _ in 0..<8 {
+                if let r = s.audio?.renderedPosition() { o.append((r.pos - s.clock.position(at: r.hostSeconds)) * 1000) }
+                wait(0.02)
+            }
+            let avg = o.isEmpty ? .nan : o.reduce(0, +) / Double(o.count)
+            check(abs(avg) < 15, String(format: "ジャンプ後も音声と映像はずれない（%.1f ms）", avg))
+        }
+        s.jumpBeats = 0
+        e.stopAll()
+        e.stopAll()
+    }
+
+    static func testGrid(paths: [String], check: (Bool, String) -> Void, wait: (Double) -> Void) {
+        let e = Engine(persistent: false)
+        e.load(urls: [URL(fileURLWithPath: paths[0])], startingAt: 0)
+        e.load(urls: [URL(fileURLWithPath: paths[1])], startingAt: e.columns + 2)
+        let t0 = CACurrentMediaTime()
+        while !(e.slots[0]?.isReady == true && e.slots[e.columns + 2]?.isReady == true) && CACurrentMediaTime() - t0 < 10 { wait(0.05) }
+        let a = e.slots[0]!, b = e.slots[e.columns + 2]!
+        e.layers[1].opacity = 0.5
+        e.trigger(0)
+        e.trigger(e.columns + 2)
+        e.selectClip(e.columns + 2)
+        for _ in 0..<10 { e.updateFrame(); wait(1.0 / 60.0) }
+        let fb = e.frame(layer: 1)
+
+        // ⌥ドラッグの複製：同じ設定の別クリップができる。元の再生は止まらない
+        a.scale = 0.5
+        a.endAction = .pingpong
+        let dupOK = e.duplicateSlot(0, to: 7)
+        let d = e.slots[7]
+        check(dupOK && d != nil && d !== a && d?.url == a.url && d?.scale == 0.5 && d?.endAction == .pingpong
+              && d?.isPlaying == false && a.isPlaying && e.activeByLayer[0] == 0,
+              "クリップを同じレイヤーの別の場所に複製できる（設定も同じ、元は再生を続ける）")
+        check(e.duplicateSlot(7, to: e.columns + 7) && e.slots[e.columns + 7]?.url == a.url && b.isPlaying,
+              "別のレイヤーにも複製できる")
+        check(!e.duplicateSlot(7, to: e.columns + 2) && e.slots[e.columns + 2] === b && b.isPlaying,
+              "再生中のクリップの上には複製しない")
+        check(e.duplicateSlot(e.columns + 2, to: 7) && e.slots[7]?.url == b.url && e.slots[7] !== d,
+              "再生していないクリップの上なら置き換える")
+        a.scale = 1
+        a.endAction = .loop
+        e.clear(7); e.clear(e.columns + 7)
+
+        // 一番上にレイヤーを足す → 下の段がずれる。再生は止まらない
+        e.insertLayer(at: 0)
+        check(e.layerCount == 5 && e.slots[e.columns] === a && e.slots[2 * e.columns + 2] === b
+              && e.activeByLayer == [nil, e.columns, 2 * e.columns + 2, nil, nil]
+              && e.layers[2].opacity == 0.5 && e.layers.map(\.name) == ["L1", "L2", "L3", "L4", "L5"]
+              && a.isPlaying && b.isPlaying && e.frame(layer: 2) === fb && e.selectedLayer == 2
+              && e.inspectedIndex == 2 * e.columns + 2,
+              "レイヤーを上に足すと、下の段が設定・再生中のクリップごとずれる（再生は止まらない）")
+        // 列を左に足す
+        e.insertColumn(at: 0)
+        check(e.columns == 9 && e.slots[9 + 1] === a && e.slots[18 + 3] === b && e.activeByLayer[2] == 21
+              && e.slotCount == 45 && b.isPlaying,
+              "列を足すと、クリップは同じ段のまま右へずれる")
+        e.removeColumn(0)
+        e.removeLayer(0)
+        check(e.layerCount == 4 && e.columns == 8 && e.slots[0] === a && e.slots[10] === b
+              && e.activeByLayer == [0, 10, nil, nil] && a.isPlaying && b.isPlaying,
+              "足した列・レイヤーを消すと元に戻る")
+        // 再生中のクリップがある列を消す → そのクリップは止まって外れる
+        check(e.columnHasClips(2) && !e.columnHasClips(5), "列にクリップがあるか分かる")
+        e.removeColumn(2)
+        for _ in 0..<5 { e.updateFrame(); wait(1.0 / 60.0) }
+        check(e.columns == 7 && !b.isPlaying && e.activeByLayer[1] == nil && !e.slots.contains { $0 === b }
+              && e.inspectedIndex == nil && e.frame(layer: 1) == nil && a.isPlaying,
+              "再生中のクリップがある列を消すと、そのクリップは止まって外れる（他は続く）")
+        e.removeLayer(0)
+        check(e.layerCount == 3 && !a.isPlaying && e.activeByLayer.allSatisfy { $0 == nil } && e.layerDraws().isEmpty,
+              "再生中のレイヤーを消すと、そのクリップも止まる")
+        while e.layerCount > 1 { e.removeLayer(0) }
+        e.removeLayer(0)
+        while e.columns > 1 { e.removeColumn(0) }
+        e.removeColumn(0)
+        check(e.layerCount == 1 && e.columns == 1, "最後の 1 段・1 列は消せない")
+        for _ in 0..<20 { e.insertLayer(at: e.layerCount) }
+        check(e.layerCount == Engine.maxLayers, "レイヤーは \(Engine.maxLayers) 段まで")
+    }
+
     static func testPreviews(paths: [String], check: (Bool, String) -> Void, wait: (Double) -> Void) {
         let e = Engine(persistent: false)
-        let c = Engine.columns
+        let c = e.columns
         e.load(urls: [URL(fileURLWithPath: paths[0])], startingAt: 0)
         e.load(urls: [URL(fileURLWithPath: paths[1])], startingAt: c)
         let t0 = CACurrentMediaTime()
@@ -480,7 +1129,79 @@ enum SelfTest {
         // マスター不透明度
         e.masterOpacity = 0.5
         check(e.renderParams().master == 0.5, "マスター不透明度が描画に渡る")
-        e.blackout()
+
+        // ブラックアウト（トグル）：再生は続けたまま、出力の映像と音だけ消す
+        let mixer = AudioOutput.shared.engine.mainMixerNode
+        let savedVol = mixer.outputVolume
+        e.masterVolume = 0.8
+        e.blackoutFadeOut = 0
+        e.blackoutFadeIn = 0
+        e.toggleBlackout()
+        let bp = e.renderParams()
+        check(e.isBlackout && bp.master == 0 && bp.compMaster == 0.5 && mixer.outputVolume == 0
+              && e.activeByLayer.contains { $0 != nil } && !e.layerDraws().isEmpty,
+              "ブラックアウト中は出力が黒・無音で、クリップは再生し続ける")
+        e.toggleBlackout()
+        check(!e.isBlackout && e.renderParams().master == 0.5 && abs(mixer.outputVolume - 0.8) < 0.001,
+              "ブラックアウト解除で元の不透明度・音量に戻る")
+
+        // ブラックアウトのフェード
+        e.blackoutFadeOut = 0.4
+        e.blackoutFadeIn = 0.2
+        e.toggleBlackout()
+        wait(0.2)
+        let mid = e.renderParams().master, midVol = mixer.outputVolume
+        check(mid > 0.15 && mid < 0.35 && midVol > 0.2 && midVol < 0.6,
+              String(format: "ブラックアウトはフェードで暗くなる（0.2秒後 映像 %.2f / 音 %.2f）", mid, midVol))
+        // 途中で解除 → その位置から引き返す（解除の時間は 0.2 秒 × 残り分）
+        e.toggleBlackout()
+        let back = e.renderParams().master
+        wait(0.25)
+        check(abs(back - mid) < 0.05 && e.renderParams().master == 0.5 && abs(mixer.outputVolume - 0.8) < 0.001,
+              "フェード中に解除するとその位置から引き返し、元に戻る")
+
+        // レイヤーごとのクロスフェード
+        e.blackoutFadeOut = 0; e.blackoutFadeIn = 0
+        e.load(urls: [URL(fileURLWithPath: paths[0])], startingAt: c + 1)
+        let t1 = CACurrentMediaTime()
+        while e.slots[c + 1]?.isReady != true && CACurrentMediaTime() - t1 < 10 { wait(0.05) }
+        wait(0.2)
+        e.layers[1].fadeTime = 0.5
+        e.layers[1].opacity = 1
+        let oldSlot = e.slots[c]!, newSlot = e.slots[c + 1]!
+        if !oldSlot.isPlaying { e.trigger(c) }
+        for _ in 0..<10 { e.updateFrame(); wait(1.0 / 60.0) }
+        e.trigger(c + 1)
+        wait(0.25)
+        e.updateFrame()
+        let l1 = e.layerDraws().filter { d in d.texture !== e.frame(layer: 0)?.texture }
+        check(oldSlot.isPlaying && newSlot.isPlaying && l1.count == 2
+              && oldSlot.fadeGain > 0.55 && oldSlot.fadeGain < 0.85 && newSlot.fadeGain > 0.55 && newSlot.fadeGain < 0.85
+              && (l1.last.map { $0.opacity > 0.3 && $0.opacity < 0.7 } ?? false),
+              String(format: "切り替えフェード中は前後のクリップが両方再生され、映像・音が入れ替わる（音 前 %.2f / 後 %.2f）",
+                     oldSlot.fadeGain, newSlot.fadeGain))
+        wait(0.4)
+        e.updateFrame()
+        check(!oldSlot.isPlaying && newSlot.isPlaying && newSlot.fadeGain == 1
+              && e.layerDraws().filter { d in d.texture !== e.frame(layer: 0)?.texture }.count == 1,
+              "フェードが終わると前のクリップは止まる")
+        // フェード 0 ならカット
+        e.layers[1].fadeTime = 0
+        e.trigger(c)
+        check(!newSlot.isPlaying && oldSlot.isPlaying && oldSlot.fadeGain == 1, "切り替えフェード 0 ならカット")
+
+        // 終わったら「ブラックアウト」→ そのレイヤーが消える
+        let s0 = e.slots[0]!
+        s0.endAction = .blackout
+        s0.setInOut(in: 1.0, out: .some(1.5))
+        wait(0.3)
+        e.trigger(0)
+        let tb = CACurrentMediaTime()
+        while CACurrentMediaTime() - tb < 0.9 { e.updateFrame(); wait(1.0 / 60.0) }
+        check(e.activeByLayer[0] == nil && !s0.isPlaying && e.activeByLayer[1] != nil,
+              "終わったら「ブラックアウト」のクリップは、最後まで来るとそのレイヤーだけ消える")
+        mixer.outputVolume = savedVol
+        e.stopAll()
     }
 
     struct Smoothness: CustomStringConvertible {

@@ -6,6 +6,11 @@ enum UI {
     /// 右列（出力モニター・ライブ操作）の幅
     static let sideWidth: CGFloat = 470
     static let panelBackground = Color.white.opacity(0.035)
+    /// 数値欄・ボタンなどの 1 行の高さ（押しやすさ優先）
+    static let rowHeight: CGFloat = 32
+    /// パラメーター欄 1 列の幅と、2 列ぶんの幅
+    static let paramColumnWidth: CGFloat = 260
+    static let paramsWidth: CGFloat = paramColumnWidth * 2 + 16
 }
 
 struct SectionTitle: View {
@@ -13,7 +18,7 @@ struct SectionTitle: View {
     init(_ text: String) { self.text = text }
     var body: some View {
         Text(text)
-            .font(.system(size: 11, weight: .semibold))
+            .font(.system(size: 12, weight: .semibold))
             .foregroundStyle(.secondary)
     }
 }
@@ -28,16 +33,17 @@ struct ContentView: View {
             Divider()
             GeometryReader { g in
                 // グリッドの高さは横幅から決める（サムネイルが縦長にならないように）。残りは下のパネルへ
+                // 段が多くて入りきらないときはグリッドをスクロール
                 let gridWidth = g.size.width - 24 - 12 - UI.sideWidth
-                let cell = ClipGrid.cellHeight(forWidth: gridWidth)
-                let gridHeight = cell * CGFloat(Engine.layerCount) + ClipGrid.spacing * CGFloat(Engine.layerCount - 1)
+                let cell = ClipGrid.cellSize(forWidth: gridWidth, columns: engine.columns)
+                let gridHeight = ClipGrid.contentHeight(cell: cell.height, layers: engine.layerCount)
                 let monitorHeight = (UI.sideWidth / max(engine.outputAspect, 0.1)) + 24
-                let topHeight = min(max(gridHeight, monitorHeight) + 24, max(g.size.height - 262 - 1, 200))
+                let topHeight = min(max(gridHeight, monitorHeight) + 24, max(g.size.height - 370 - 1, 200))
                 let bottomHeight = g.size.height - topHeight - 1
                 VStack(spacing: 0) {
                     HStack(alignment: .top, spacing: 12) {
-                        ClipGrid(cellHeight: cell)
-                            .frame(maxWidth: .infinity, alignment: .topLeading)
+                        ClipGrid(size: CGSize(width: gridWidth, height: topHeight - 24))
+                            .frame(width: gridWidth, height: topHeight - 24, alignment: .topLeading)
                         OutputMonitor(editCorners: editCorners)
                             .frame(width: UI.sideWidth)
                     }
@@ -47,7 +53,7 @@ struct ContentView: View {
                     HStack(alignment: .top, spacing: 12) {
                         ParameterPanel(previewHeight: min(max(bottomHeight - 100, 176), 420))
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        LivePanel()
+                        SidePanel()
                             .frame(width: UI.sideWidth)
                             .frame(maxHeight: .infinity)
                     }
@@ -56,7 +62,10 @@ struct ContentView: View {
                 }
             }
         }
-        .frame(minWidth: 1240, minHeight: 760)
+        .background(WindowTitleSync(
+            title: (engine.projectURL?.deletingPathExtension().lastPathComponent ?? "名称未設定") + " — VJPlayer",
+            url: engine.projectURL, edited: engine.isDirty))
+        .frame(minWidth: 1300, minHeight: 800)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .preferredColorScheme(.dark)
     }
@@ -80,6 +89,7 @@ struct OutputMonitor: View {
                     .foregroundStyle(output.target == .none ? Color.secondary : Color.primary)
                     .lineLimit(1)
                 Spacer(minLength: 0)
+                MuteButton(muted: $engine.compMuted, what: "コンポジション（出力全体）")
                 if editCorners {
                     Text("四隅の黄色い点をドラッグ")
                         .font(.system(size: 11, weight: .semibold))
@@ -89,9 +99,26 @@ struct OutputMonitor: View {
             ZStack {
                 MetalPreview(kind: .output)
                 if editCorners { CornerPinOverlay() }
+                if engine.compMuted {
+                    Label("コンポジションをミュート中", systemImage: "eye.slash.fill")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(.red)
+                        .allowsHitTesting(false)
+                } else if engine.isBlackout {
+                    Label("ブラックアウト中", systemImage: "eye.slash.fill")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(.red)
+                        .allowsHitTesting(false)
+                }
             }
             .aspectRatio(engine.outputAspect, contentMode: .fit)
-            .overlay(Rectangle().stroke(editCorners ? Color.yellow.opacity(0.6) : Color.gray.opacity(0.35)))
+            .effectDropTarget(cornerRadius: 0) { k in
+                engine.addEffect(k)
+                engine.inspectorTab = .composition
+            }
+            .overlay(Rectangle().stroke(engine.isBlackout || engine.compMuted ? Color.red
+                                        : editCorners ? Color.yellow.opacity(0.6) : Color.gray.opacity(0.35),
+                                        lineWidth: engine.isBlackout || engine.compMuted ? 2 : 1))
             Spacer(minLength: 0)
         }
     }
@@ -160,19 +187,42 @@ struct TopBar: View {
             }
             .toggleStyle(.button)
             .help("テストパターンを出力")
-            Divider().frame(height: 18)
-            Button {
-                engine.blackout()
-            } label: {
-                Label("ブラックアウト", systemImage: "stop.fill")
-            }
-            .tint(.red)
-            .buttonStyle(.borderedProminent)
-            .help("全レイヤーを停止して黒に (Esc)")
+            Divider().frame(height: 24)
+            BlackoutButton()
         }
+        .controlSize(.large)
         .fixedSize(horizontal: false, vertical: true)
         .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .padding(.vertical, 10)
+    }
+}
+
+/// ブラックアウトの切り替え。中は点滅して「今は黒を出している」ことを目立たせる
+struct BlackoutButton: View {
+    @EnvironmentObject var engine: Engine
+    @State private var blink = false
+
+    var body: some View {
+        Button {
+            engine.toggleBlackout()
+        } label: {
+            Label(engine.isBlackout ? "ブラックアウト中" : "ブラックアウト",
+                  systemImage: engine.isBlackout ? "eye.slash.fill" : "moon.fill")
+                .frame(minWidth: 130)
+        }
+        .tint(engine.isBlackout ? .red : Color(white: 0.35))
+        .buttonStyle(.borderedProminent)
+        .opacity(engine.isBlackout && blink ? 0.55 : 1)
+        .help(engine.isBlackout
+              ? "クリックで解除 (Esc)。クリップは裏で再生を続けています"
+              : "出力の映像と音を消す (Esc)。もう一度押すと元に戻る。フェード時間は設定（⌘,）。⇧Esc で全レイヤー停止")
+        .onChange(of: engine.isBlackout) { _, on in
+            if on {
+                withAnimation(.easeInOut(duration: 0.5).repeatForever(autoreverses: true)) { blink = true }
+            } else {
+                withAnimation(.default) { blink = false }
+            }
+        }
     }
 }
 
@@ -181,49 +231,137 @@ struct TopBar: View {
 struct ClipGrid: View {
     @EnvironmentObject var engine: Engine
     static let spacing: CGFloat = 6
-    static let headerWidth: CGFloat = 124
-    let cellHeight: CGFloat
+    static let headerWidth: CGFloat = 156
+    /// 上の列番号の帯と、下の「レイヤーを追加」の高さ
+    static let columnBarHeight: CGFloat = 26
+    static let addRowHeight: CGFloat = 32
+    /// 右端の「列を追加」ボタンの幅
+    static let addColumnWidth: CGFloat = 34
+    /// サムネイルの最小の横幅（これより狭くなるなら横スクロール）
+    static let minCellWidth: CGFloat = 100
+    let size: CGSize
     @StateObject private var drag = SlotDragState()
 
-    /// グリッドの横幅から、1 段の高さ（サムネイル横幅の 3/4）を決める
-    static func cellHeight(forWidth w: CGFloat) -> CGFloat {
-        let cellWidth = (w - headerWidth - spacing * CGFloat(Engine.columns)) / CGFloat(Engine.columns)
-        return min(max(cellWidth * 0.75, 64), 140)
+    /// 1 マスの大きさ。横幅から決め、高さは横幅の 3/4（縦長にならないように）
+    static func cellSize(forWidth w: CGFloat, columns: Int) -> CGSize {
+        let n = CGFloat(max(columns, 1))
+        let cw = max((w - headerWidth - addColumnWidth - spacing * (n + 1)) / n, minCellWidth)
+        // レイヤー欄（名前・停止・不透明度）が収まる高さは確保する
+        return CGSize(width: cw, height: min(max(cw * 0.75, 96), 150))
+    }
+
+    /// 全段を表示したときの高さ
+    static func contentHeight(cell: CGFloat, layers: Int) -> CGFloat {
+        columnBarHeight + spacing + (cell + spacing) * CGFloat(layers) + addRowHeight + 12
     }
 
     var body: some View {
-        let h = cellHeight
-        Group {
-            VStack(spacing: Self.spacing) {
-                ForEach(0..<Engine.layerCount, id: \.self) { r in
+        let cell = Self.cellSize(forWidth: size.width, columns: engine.columns)
+        ScrollView([.horizontal, .vertical]) {
+            VStack(alignment: .leading, spacing: Self.spacing) {
+                ColumnBar(cellWidth: cell.width)
+                    .frame(height: Self.columnBarHeight)
+                ForEach(engine.layers) { layer in
+                    let r = layer.index
                     HStack(spacing: Self.spacing) {
-                        LayerHeader(layer: engine.layers[r])
-                            .frame(width: Self.headerWidth, height: h)
-                        ForEach(0..<Engine.columns, id: \.self) { c in
-                            SlotCell(index: r * Engine.columns + c, height: h)
+                        LayerHeader(layer: layer)
+                            .frame(width: Self.headerWidth, height: cell.height)
+                        ForEach(0..<engine.columns, id: \.self) { c in
+                            SlotCell(index: r * engine.columns + c, width: cell.width, height: cell.height)
                         }
                     }
                 }
+                Button {
+                    engine.insertLayer(at: engine.layerCount)
+                } label: {
+                    Label("レイヤーを追加", systemImage: "plus")
+                        .font(.system(size: 12))
+                        .frame(width: Self.headerWidth - 16)
+                }
+                .controlSize(.large)
+                .disabled(engine.layerCount >= Engine.maxLayers)
+                .help("一番下（一番奥）にレイヤーを足す。途中に入れるときはレイヤー欄を右クリック")
             }
-            .frame(maxWidth: .infinity, alignment: .topLeading)
-        }
-        .coordinateSpace(name: SlotDragState.space)
-        .onPreferenceChange(SlotFramesKey.self) { drag.frames = $0 }
-        .overlay(alignment: .topLeading) {
-            // ⌘ドラッグ中のクリップ名
-            if let s = drag.source, let slot = engine.slots[s] {
-                Label(slot.name, systemImage: "film")
-                    .font(.system(size: 11, weight: .semibold))
-                    .lineLimit(1)
-                    .padding(.horizontal, 8).padding(.vertical, 4)
-                    .background(Color.accentColor.opacity(0.85), in: Capsule())
-                    .fixedSize()
-                    .position(x: drag.location.x, y: drag.location.y - 14)
-                    .allowsHitTesting(false)
+            .coordinateSpace(name: SlotDragState.space)
+            .onPreferenceChange(SlotFramesKey.self) { drag.frames = $0 }
+            .overlay(alignment: .topLeading) {
+                // ⌘ドラッグ中のクリップ名
+                if let s = drag.source, engine.slots.indices.contains(s), let slot = engine.slots[s],
+                   let t = drag.target, t != s {
+                    Label(drag.copying ? "複製：" + slot.name : slot.name,
+                          systemImage: drag.copying ? "plus.square.on.square" : "film")
+                        .font(.system(size: 11, weight: .semibold))
+                        .lineLimit(1)
+                        .padding(.horizontal, 8).padding(.vertical, 4)
+                        .background(Color.accentColor.opacity(0.85), in: Capsule())
+                        .fixedSize()
+                        .position(x: drag.location.x, y: drag.location.y - 14)
+                        .allowsHitTesting(false)
+                }
             }
+            .frame(minWidth: size.width, alignment: .topLeading)
         }
+        .scrollIndicators(.automatic)
         .environmentObject(drag)
     }
+}
+
+/// グリッド上の列番号の帯。右クリックで列を足す・消す。右端の＋で列を足す
+struct ColumnBar: View {
+    @EnvironmentObject var engine: Engine
+    let cellWidth: CGFloat
+
+    var body: some View {
+        HStack(spacing: ClipGrid.spacing) {
+            Color.clear.frame(width: ClipGrid.headerWidth)
+            ForEach(0..<engine.columns, id: \.self) { c in
+                Text("\(c + 1)")
+                    .font(.system(size: 12, weight: .semibold).monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .frame(width: cellWidth, height: ClipGrid.columnBarHeight)
+                    .background(RoundedRectangle(cornerRadius: 4).fill(Color.white.opacity(0.05)))
+                    .contentShape(Rectangle())
+                    .contextMenu {
+                        Button("左に列を追加") { engine.insertColumn(at: c) }
+                            .disabled(engine.columns >= Engine.maxColumns)
+                        Button("右に列を追加") { engine.insertColumn(at: c + 1) }
+                            .disabled(engine.columns >= Engine.maxColumns)
+                        Divider()
+                        Button("この列を削除…", role: .destructive) { removeColumn(c) }
+                            .disabled(engine.columns <= 1)
+                    }
+            }
+            Button {
+                engine.insertColumn(at: engine.columns)
+            } label: {
+                Image(systemName: "plus").font(.system(size: 12, weight: .semibold))
+                    .frame(width: ClipGrid.addColumnWidth - 14)
+            }
+            .controlSize(.regular)
+            .disabled(engine.columns >= Engine.maxColumns)
+            .help("右端に列を足す。途中に入れるときは列番号を右クリック")
+        }
+    }
+
+    private func removeColumn(_ c: Int) {
+        if engine.columnHasClips(c) {
+            guard confirmRemove(title: "\(c + 1) 列目を削除しますか？",
+                                message: "この列のクリップはグリッドから外れます（再生中なら止まります）。") else { return }
+        }
+        engine.removeColumn(c)
+    }
+}
+
+/// 消す前の確認
+func confirmRemove(title: String, message: String) -> Bool {
+    let alert = NSAlert()
+    alert.messageText = title
+    alert.informativeText = message
+    alert.alertStyle = .warning
+    alert.addButton(withTitle: "削除")
+    alert.addButton(withTitle: "キャンセル")
+    alert.buttons.first?.hasDestructiveAction = true
+    return alert.runModal() == .alertFirstButtonReturn
 }
 
 /// ⌘ドラッグでクリップを移動するときの状態
@@ -231,6 +369,8 @@ final class SlotDragState: ObservableObject {
     static let space = "clipGrid"
     @Published var source: Int?
     @Published var target: Int?
+    /// ⌥ドラッグ（複製）中か。false なら ⌘ドラッグ（移動）
+    @Published var copying = false
     @Published var location: CGPoint = .zero
     var frames: [Int: CGRect] = [:]
 
@@ -256,48 +396,55 @@ struct LayerHeader: View {
         let selected = engine.selectedLayer == layer.index
         let playing = engine.activeByLayer[layer.index].flatMap { engine.slots[$0] }
 
-        VStack(alignment: .leading, spacing: 5) {
-            HStack(spacing: 5) {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
                 Circle()
                     .fill(playing != nil ? Color.green : Color.gray.opacity(0.4))
-                    .frame(width: 7, height: 7)
+                    .frame(width: 8, height: 8)
                 Text(layer.name)
-                    .font(.system(size: 12, weight: .bold, design: .monospaced))
+                    .font(.system(size: 14, weight: .bold, design: .monospaced))
                     .fixedSize()
-                Spacer(minLength: 0)
-                if layer.volume == 0 {
-                    Image(systemName: "speaker.slash.fill").font(.system(size: 9)).foregroundStyle(.secondary)
+                if layer.volume == 0 || layer.audioMuted {
+                    Image(systemName: "speaker.slash.fill").font(.system(size: 11)).foregroundStyle(.secondary)
                 }
+                Spacer(minLength: 0)
+                MuteButton(muted: $layer.muted, what: layer.name, compact: true)
                 Button {
                     engine.stopLayer(layer.index)
                 } label: {
-                    Image(systemName: "stop.fill").font(.system(size: 9))
+                    Image(systemName: "stop.fill").font(.system(size: 11))
+                        .frame(width: 18, height: 16)
                 }
-                .buttonStyle(.borderless)
+                .controlSize(.regular)
                 .disabled(playing == nil)
                 .help("このレイヤーを停止")
             }
-            MiniSlider(icon: "circle.lefthalf.filled", value: $layer.opacity, help: "不透明度")
+            // 不透明度：左右ドラッグ（クリックだけでは変わらない）、ダブルクリックで 100%
+            ValueDrag(label: "不透明度", value: $layer.opacity, range: 0...1, perPoint: 0.006,
+                      defaultValue: 1, showsBar: true, format: { String(format: "%.0f%%", $0 * 100) },
+                      live: layerOpacityLive)
+                .frame(height: 28)
             Spacer(minLength: 0)
             HStack(spacing: 4) {
                 if layer.blend != .normal {
                     Text(layer.blend.label)
-                        .font(.system(size: 9, weight: .semibold))
+                        .font(.system(size: 10, weight: .semibold))
                         .lineLimit(1)
                         .fixedSize()
-                        .padding(.horizontal, 4).padding(.vertical, 1)
+                        .padding(.horizontal, 5).padding(.vertical, 2)
                         .background(Color.purple.opacity(0.45), in: RoundedRectangle(cornerRadius: 3))
                 }
                 Text(playing?.name ?? "—")
-                    .font(.system(size: 10))
+                    .font(.system(size: 11))
                     .foregroundStyle(playing != nil ? Color.primary.opacity(0.8) : Color.secondary)
                     .lineLimit(1)
             }
         }
-        .padding(7)
+        .padding(8)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(RoundedRectangle(cornerRadius: 6)
-            .fill(selected ? Color.accentColor.opacity(0.22) : Color.white.opacity(0.04)))
+            .fill(layer.muted ? Color.red.opacity(0.16)
+                  : selected ? Color.accentColor.opacity(0.22) : Color.white.opacity(0.04)))
         .overlay(RoundedRectangle(cornerRadius: 6)
             .stroke(selected ? Color.accentColor : Color.gray.opacity(0.3), lineWidth: selected ? 1.5 : 1))
         .contentShape(Rectangle())
@@ -305,6 +452,37 @@ struct LayerHeader: View {
             engine.selectedLayer = layer.index
             engine.inspectorTab = .layer
         }
+        .effectDropTarget { k in
+            layer.addEffect(k)
+            engine.selectedLayer = layer.index
+            engine.inspectorTab = .layer
+        }
+        .contextMenu {
+            Button("上にレイヤーを追加") { engine.insertLayer(at: layer.index) }
+                .disabled(engine.layerCount >= Engine.maxLayers)
+            Button("下にレイヤーを追加") { engine.insertLayer(at: layer.index + 1) }
+                .disabled(engine.layerCount >= Engine.maxLayers)
+            Divider()
+            Button("このレイヤーを削除…", role: .destructive) {
+                let r = layer.index
+                if engine.layerHasClips(r) {
+                    guard confirmRemove(title: "\(layer.name) を削除しますか？",
+                                        message: "このレイヤーのクリップはグリッドから外れます（再生中なら止まります）。") else { return }
+                }
+                engine.removeLayer(r)
+            }
+            .disabled(engine.layerCount <= 1)
+        }
+    }
+}
+
+extension LayerHeader {
+    /// 不透明度にアニメーションが付いていれば、今の値
+    var layerOpacityLive: (() -> Double)? {
+        let a = layer.anim(.opacity)
+        guard a.isOn else { return nil }
+        let base = layer.opacity, beat = engine.beatClock
+        return { a.value(base: base, at: CACurrentMediaTime(), beat: beat) }
     }
 }
 
@@ -334,6 +512,7 @@ struct MiniSlider: View {
 
 struct SlotCell: View {
     let index: Int
+    var width: CGFloat = 100
     var height: CGFloat = 80
     @EnvironmentObject var engine: Engine
     @EnvironmentObject var drag: SlotDragState
@@ -342,9 +521,11 @@ struct SlotCell: View {
 
     var body: some View {
         let slot = engine.slots[index]
-        let active = engine.activeByLayer[Engine.layerOf(index)] == index
-        let moving = drag.source == index
-        let moveTarget = drag.source != nil && drag.source != index && drag.target == index
+        let active = engine.activeByLayer[engine.layerOf(index)] == index
+        let moving = drag.source == index && !drag.copying
+        let dropHere = drag.source != nil && drag.source != index && drag.target == index
+        let moveTarget = dropHere && (!drag.copying || engine.canDuplicate(to: index))
+        let badTarget = dropHere && drag.copying && !engine.canDuplicate(to: index)
 
         ZStack {
             if let slot {
@@ -354,40 +535,38 @@ struct SlotCell: View {
                     .fill(Color.white.opacity(0.04))
                     .overlay(Image(systemName: "plus").foregroundStyle(.secondary))
             }
-            VStack {
-                HStack {
-                    Text(Engine.keyLabels[index])
-                        .font(.system(size: 11, weight: .bold, design: .monospaced))
-                        .padding(.horizontal, 5).padding(.vertical, 1)
-                        .background(Color.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 3))
-                    Spacer()
-                }
-                Spacer()
-            }
-            .padding(4)
         }
-        .frame(maxWidth: .infinity, minHeight: height, maxHeight: height)
+        .frame(width: width, height: height)
         .opacity(moving ? 0.4 : 1)
         .clipShape(RoundedRectangle(cornerRadius: 6))
         .overlay(
             RoundedRectangle(cornerRadius: 6)
-                .stroke(dropTargeted || moveTarget ? Color.accentColor : (active ? Color.green : Color.gray.opacity(0.3)),
-                        lineWidth: active || dropTargeted || moveTarget ? 3 : 1)
+                .stroke(badTarget ? Color.red
+                        : dropTargeted || moveTarget ? Color.accentColor : (active ? Color.green : Color.gray.opacity(0.3)),
+                        lineWidth: active || dropTargeted || moveTarget || badTarget ? 3 : 1)
         )
         .background(GeometryReader { g in
             Color.clear.preference(key: SlotFramesKey.self, value: [index: g.frame(in: .named(SlotDragState.space))])
         })
         .contentShape(Rectangle())
-        // クリックを離した時ではなく「押した瞬間」に再生する。⌘を押しながらドラッグすると移動（再生しない）
+        // クリックを離した時ではなく「押した瞬間」に再生する。
+        // ⌘ドラッグで移動、⌥ドラッグで複製（どちらも再生しない。⌥クリックだけなら選択）
         .gesture(
             DragGesture(minimumDistance: 0, coordinateSpace: .named(SlotDragState.space))
                 .onChanged { v in
                     if !pressed {
                         pressed = true
                         if slot != nil {
-                            if NSEvent.modifierFlags.contains(.command) {
+                            let mods = NSEvent.modifierFlags
+                            if mods.contains(.command) {
+                                drag.copying = false
                                 drag.source = index
-                            } else if NSEvent.modifierFlags.contains(.option) || inNameStrip(v.startLocation) {
+                            } else if mods.contains(.option) {
+                                // 選択して、そのままドラッグすれば複製
+                                engine.selectClip(index)
+                                drag.copying = true
+                                drag.source = index
+                            } else if inNameStrip(v.startLocation) {
                                 engine.selectClip(index)   // 名前の帯（または ⌥クリック）は選択だけ。出力しない
                             } else {
                                 engine.trigger(index)
@@ -401,28 +580,48 @@ struct SlotCell: View {
                 }
                 .onEnded { _ in
                     if drag.source == index {
-                        if let t = drag.target { engine.moveSlot(index, to: t) }
+                        if let t = drag.target, t != index {
+                            if drag.copying {
+                                if engine.duplicateSlot(index, to: t) { engine.selectClip(t) }
+                            } else {
+                                engine.moveSlot(index, to: t)
+                            }
+                        }
                         drag.source = nil
                         drag.target = nil
+                        drag.copying = false
                     } else if slot == nil {
                         engine.openPanel(for: index)
                     }
                     pressed = false
                 }
         )
-        .onDrop(of: [.fileURL], isTargeted: $dropTargeted) { providers in
-            loadDropped(providers)
-            return true
+        // 動画ファイル → 読み込む。エフェクト一覧から → このクリップに付ける（空きスロットには付けない）
+        .onDrop(of: [.fileURL, .plainText], isTargeted: $dropTargeted) { providers in
+            if providers.contains(where: { $0.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) }) {
+                loadDropped(providers)
+                return true
+            }
+            return EffectDrop.handle(providers) { k in
+                guard let slot = engine.slots[index] else { NSSound.beep(); return }
+                slot.addEffect(k)
+                engine.selectClip(index)
+            }
         }
         .contextMenu {
             if let slot {
-                Toggle("ループ再生", isOn: Binding(get: { slot.loop }, set: { slot.loop = $0 }))
+                Picker("終わったら", selection: Binding(get: { slot.endAction }, set: { slot.endAction = $0 })) {
+                    ForEach(EndAction.allCases) { Text($0.label).tag($0) }
+                }
+                if slot.hasInOut { Button("再生範囲をリセット") { slot.resetInOut() } }
                 Button("速度を 1.0x に戻す") { slot.speed = 1.0 }
                 Button("選択（出力せずに編集）") { engine.selectClip(index) }
+                Button(slot.muted ? "ミュートを解除" : "ミュート（映像と音を出さない）") { slot.muted.toggle() }
                 Button("トランスフォームをリセット") { slot.resetTransform() }
+                Button("動画ファイルを付け直す…（設定はそのまま）") { ProjectMenu.relink(index) }
                 Button("別のクリップに差し替え…") { engine.openPanel(for: index) }
                 if active {
-                    Button("このレイヤーを停止") { engine.stopLayer(Engine.layerOf(index)) }
+                    Button("このレイヤーを停止") { engine.stopLayer(engine.layerOf(index)) }
                 }
                 Divider()
                 Button("このスロットを空にする", role: .destructive) { engine.clear(index) }
@@ -460,7 +659,7 @@ struct SlotContent: View {
     let active: Bool
     let selected: Bool
     /// 名前の帯の高さ（ここをクリックすると選択のみ）
-    static let stripHeight: CGFloat = 20
+    static let stripHeight: CGFloat = 26
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -471,23 +670,41 @@ struct SlotContent: View {
                     }
                 }
                 .clipped()
-                .opacity(slot.isReady ? 1 : 0.4)
+                .opacity(slot.isReady ? (slot.muted ? 0.35 : 1) : 0.4)
+                .overlay(alignment: .topTrailing) {
+                    if slot.muted {
+                        Image(systemName: "eye.slash.fill")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(.white)
+                            .padding(4)
+                            .background(Color.red, in: RoundedRectangle(cornerRadius: 4))
+                            .padding(4)
+                            .help("ミュート中（右クリックで解除）")
+                    }
+                }
 
             VStack(spacing: 2) {
                 HStack(spacing: 4) {
-                    if slot.loop { Image(systemName: "repeat").font(.system(size: 9)) }
-                    if abs(slot.speed - 1) > 0.00005 {
+                    if slot.endAction != .hold { Image(systemName: slot.endAction.icon).font(.system(size: 10)) }
+                    if slot.hasInOut { Image(systemName: "scissors").font(.system(size: 10)) }
+                    if slot.audioMuted { Image(systemName: "speaker.slash.fill").font(.system(size: 10)).foregroundStyle(.red) }
+                    if slot.jumpBeats > 0 { Image(systemName: "die.face.5").font(.system(size: 10)).foregroundStyle(.purple) }
+                    if slot.syncMode == .bpm {
+                        Text(ParamAnim.beatsLabel(slot.syncBeats))
+                            .font(.system(size: 10, weight: .bold).monospacedDigit())
+                            .foregroundStyle(.purple)
+                    } else if abs(slot.speed - 1) > 0.00005 {
                         Text(String(format: "%.3fx", slot.speed))
-                            .font(.system(size: 9, weight: .bold).monospacedDigit())
+                            .font(.system(size: 10, weight: .bold).monospacedDigit())
                             .foregroundStyle(.orange)
                     }
                     Text(slot.errorMessage ?? slot.name)
-                        .font(.system(size: 10))
+                        .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(slot.errorMessage == nil ? Color.white : Color.red)
                         .lineLimit(1)
                     Spacer(minLength: 0)
                 }
-                .padding(.horizontal, 4)
+                .padding(.horizontal, 6)
                 .frame(maxHeight: .infinity)
                 if active {
                     ClockBar(slot: slot, color: .green, track: .clear)
@@ -499,6 +716,31 @@ struct SlotContent: View {
             .help("名前の帯をクリック：選択（出力せずにプレビュー・編集）")
         }
         .clipShape(RoundedRectangle(cornerRadius: 6))
+    }
+}
+
+// MARK: - 右下のパネル（ライブ操作 / エフェクト一覧）
+
+struct SidePanel: View {
+    enum Tab: String { case live, effects }
+    @AppStorage("sidePanelTab") private var tab = Tab.live
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Picker("", selection: $tab) {
+                Text("ライブ").tag(Tab.live)
+                Text("エフェクト").tag(Tab.effects)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .controlSize(.large)
+            switch tab {
+            case .live: LivePanel()
+            case .effects: EffectBrowser()
+            }
+        }
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 8).fill(UI.panelBackground))
     }
 }
 
@@ -521,9 +763,12 @@ struct LivePanel: View {
                     Text("停止中")
                         .font(.system(size: 13))
                         .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+                        .frame(maxWidth: .infinity, minHeight: 70, alignment: .leading)
                 }
             }
+            Divider()
+            SectionTitle("テンポ")
+            BPMControl()
             Divider()
             HStack(spacing: 8) {
                 SectionTitle("コンポジション速度")
@@ -534,16 +779,14 @@ struct LivePanel: View {
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
-                .controlSize(.small)
-                .frame(width: 190)
+                .controlSize(.regular)
+                .frame(width: 230)
             }
             SpeedControl(value: $engine.masterSpeed, springBack: springBack)
-                .frame(height: 54)
+                .frame(height: 72)
                 .help("左右ドラッグで速度 / Shift で微調整 / 右クリック・ダブルクリックで 1.0x")
             Spacer(minLength: 0)
         }
-        .padding(12)
-        .background(RoundedRectangle(cornerRadius: 8).fill(UI.panelBackground))
     }
 }
 
@@ -557,25 +800,32 @@ struct PlayingClipInfo: View {
                 Image(systemName: slot.isPlaying ? "play.fill" : "pause.fill")
                     .font(.system(size: 11))
                     .foregroundStyle(slot.isPlaying ? .green : .secondary)
-                Text(slot.name).font(.system(size: 14, weight: .semibold)).lineLimit(1)
+                Text(slot.name).font(.system(size: 15, weight: .semibold)).lineLimit(1)
                 Spacer(minLength: 0)
-                if slot.loop { Image(systemName: "repeat").font(.system(size: 11)).foregroundStyle(.secondary) }
-                if abs(slot.speed - 1) > 0.00005 {
+                if slot.endAction != .hold {
+                    Image(systemName: slot.endAction.icon).font(.system(size: 11)).foregroundStyle(.secondary)
+                        .help("終わったら：" + slot.endAction.label)
+                }
+                if slot.syncMode == .bpm {
+                    Text("BPM 同期 " + ParamAnim.beatsLabel(slot.syncBeats) + String(format: "（%.3fx）", slot.effectiveSpeed))
+                        .font(.system(size: 10, weight: .semibold).monospacedDigit())
+                        .foregroundStyle(.purple)
+                } else if abs(slot.speed - 1) > 0.00005 {
                     Text(String(format: "クリップ %.3fx", slot.speed))
                         .font(.system(size: 10, weight: .semibold).monospacedDigit())
                         .foregroundStyle(.orange)
                 }
             }
             ScrubBar(slot: slot)
-                .frame(height: 14)
+                .frame(height: 28)
             TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !slot.isPlaying)) { _ in
                 let pos = slot.position(at: CACurrentMediaTime())
                 HStack {
                     Text(fmt(pos))
                     Spacer()
-                    Text("残り " + fmt(max(slot.duration - pos, 0)))
+                    Text("残り " + fmt(max(slot.outTime - pos, 0)))
                 }
-                .font(.system(size: 11, design: .monospaced))
+                .font(.system(size: 12, design: .monospaced))
                 .foregroundStyle(.secondary)
             }
         }
@@ -599,9 +849,15 @@ struct ClockBar: View {
             let pos = slot.position(at: CACurrentMediaTime())
             let f = slot.duration > 0 ? pos / slot.duration : 0
             GeometryReader { g in
+                let d = max(slot.duration, 0.001)
+                let xi = g.size.width * CGFloat(slot.inPoint / d)
+                let xo = g.size.width * CGFloat(slot.outTime / d)
                 ZStack(alignment: .leading) {
                     Rectangle().fill(track)
                     Rectangle().fill(color).frame(width: g.size.width * CGFloat(min(max(f, 0), 1)))
+                    // イン点より前・アウト点より後は暗く
+                    Rectangle().fill(Color.black.opacity(0.55)).frame(width: max(xi, 0))
+                    Rectangle().fill(Color.black.opacity(0.55)).frame(width: max(g.size.width - xo, 0)).offset(x: xo)
                 }
             }
         }
@@ -618,7 +874,7 @@ struct ScrubBar: View {
         GeometryReader { g in
             ZStack {
                 ClockBar(slot: slot, color: .accentColor, track: Color.white.opacity(0.12))
-                    .frame(height: hovering || slot.isScrubbing ? 10 : 6)
+                    .frame(height: hovering || slot.isScrubbing ? 16 : 10)
                     .clipShape(Capsule())
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)

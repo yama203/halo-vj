@@ -58,6 +58,7 @@ struct LayerUniforms {
     float3x3 inv;      // 出力のピクセル → クリップの UV（クリップ・レイヤー・コンポジションのトランスフォームを合成した逆行列）
     float opacity;
     int blend;         // 0: 通常, 1: 加算, 2: スクリーン, 3: 乗算
+    int premul;        // 1: 色に不透明度が掛かった絵（レイヤーのエフェクトを通した絵）
 };
 
 fragment float4 flayer(VOut in [[stage_in]],
@@ -69,9 +70,114 @@ fragment float4 flayer(VOut in [[stage_in]],
     float2 e = min(uv, 1.0 - uv) / max(fwidth(uv), float2(1e-6));
     float cover = saturate(min(e.x, e.y) + 0.5);
     float4 c = tex.sample(s, saturate(uv));
+    if (u.premul == 1) {
+        float cov = saturate(u.opacity * cover);
+        float k = c.a * cov;
+        if (u.blend == 3) return float4(mix(float3(1.0), c.rgb / max(c.a, 1e-4), k), 1.0);
+        return float4(c.rgb * cov, k);
+    }
     float k = saturate(c.a * u.opacity * cover);
     if (u.blend == 3) return float4(mix(float3(1.0), c.rgb, k), 1.0);
     return float4(c.rgb * k, k);
+}
+
+// エフェクト（1 つずつ）。入出力は「色に不透明度が掛かった」絵
+struct EffectUniforms {
+    int kind;          // 0: ミラー, 1: カラーライズ, 2: レベル, 3: ポスタライズ
+    float4 a;
+    float4 b;
+    float2 size;
+    float4 color;      // カラーライズの色
+    float4 pal[8];     // カラーライズのパレット（暗い → 明るい）
+    int palCount;
+};
+
+constant float bayer4[16] = { 0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5 };
+
+static float3 rgb2hsv(float3 c) {
+    float4 K = float4(0.0, -1.0 / 3.0, 2.0 / 3.0, -1.0);
+    float4 p = mix(float4(c.bg, K.wz), float4(c.gb, K.xy), step(c.b, c.g));
+    float4 q = mix(float4(p.xyw, c.r), float4(c.r, p.yzx), step(p.x, c.r));
+    float d = q.x - min(q.w, q.y);
+    return float3(abs(q.z + (q.w - q.y) / (6.0 * d + 1e-10)), d / (q.x + 1e-10), q.x);
+}
+
+static float3 hsv2rgb(float3 c) {
+    float3 p = abs(fract(c.xxx + float3(0.0, 2.0 / 3.0, 1.0 / 3.0)) * 6.0 - 3.0);
+    return c.z * mix(float3(1.0), saturate(p - 1.0), c.y);
+}
+
+static float3 hueShift(float3 c, float h) {
+    float3 hsv = rgb2hsv(c);
+    hsv.x = fract(hsv.x + h);
+    return hsv2rgb(hsv);
+}
+
+static float3 pureHue(float h) {
+    float3 k = abs(fract(float3(h) + float3(0.0, 2.0 / 3.0, 1.0 / 3.0)) * 6.0 - 3.0);
+    return saturate(k - 1.0);
+}
+
+fragment float4 feffect(VOut in [[stage_in]],
+                        constant EffectUniforms& u [[buffer(0)]],
+                        texture2d<float> tex [[texture(0)]],
+                        sampler s [[sampler(0)]]) {
+    float2 px = in.pos.xy;
+    float2 uv = px / u.size;
+    if (u.kind == 0) {
+        int h = int(u.a.x + 0.5), v = int(u.a.y + 0.5);
+        if (h == 1 && uv.x > 0.5) uv.x = 1.0 - uv.x;
+        if (h == 2 && uv.x < 0.5) uv.x = 1.0 - uv.x;
+        if (v == 1 && uv.y > 0.5) uv.y = 1.0 - uv.y;
+        if (v == 2 && uv.y < 0.5) uv.y = 1.0 - uv.y;
+        return tex.sample(s, uv);
+    }
+    float2 cellPx = px;
+    if (u.kind == 3 && u.a.z > 1.5) {
+        // ドット：大きな四角ごとに同じ色にする
+        float d = u.a.z;
+        cellPx = floor(px / d);
+        uv = (cellPx * d + d * 0.5) / u.size;
+    }
+    float4 c = tex.sample(s, uv);
+    float alpha = c.a;
+    float3 rgb = alpha > 1e-4 ? c.rgb / alpha : float3(0.0);
+    if (u.kind == 1) {
+        float L = dot(rgb, float3(0.2126, 0.7152, 0.0722));
+        float3 tint;
+        if (int(u.a.x + 0.5) == 1) {
+            // パレット：暗い所は左の色、明るい所は右の色。あいだはなめらかにつなぐ
+            int n = max(u.palCount, 1);
+            float x = saturate(L) * float(n - 1);
+            int i = min(int(floor(x)), n - 2);
+            tint = n == 1 ? u.pal[0].rgb : mix(u.pal[max(i, 0)].rgb, u.pal[max(i, 0) + 1].rgb, x - float(max(i, 0)));
+        } else if (u.a.y > 0.5) {
+            // カラー・明るさを保つ：色相と彩度だけその色にして、明るさは元のまま
+            float cmax = max(u.color.r, max(u.color.g, u.color.b));
+            float cmin = min(u.color.r, min(u.color.g, u.color.b));
+            float cl = (cmax + cmin) * 0.5;
+            float sat = cmax - cmin < 1e-4 ? 0.0 : (cmax - cmin) / (1.0 - abs(2.0 * cl - 1.0));
+            float3 hue = cmax - cmin < 1e-4 ? float3(0.5) : (u.color.rgb - cmin) / (cmax - cmin);
+            float C = (1.0 - abs(2.0 * L - 1.0)) * saturate(sat);
+            tint = saturate(L + C * (hue - 0.5));
+        } else {
+            // カラー・明るさを保たない：黒は黒、灰色はその色を暗くしたもの、白はその色そのもの
+            tint = u.color.rgb * L;
+        }
+        // 色相をずらす（動かすと色が回る）
+        if (u.a.w > 0.001) tint = hueShift(tint, u.a.w / 360.0);
+        rgb = mix(rgb, tint, u.a.z);
+    } else if (u.kind == 2) {
+        float3 v = saturate((rgb - u.a.x) / max(u.a.y - u.a.x, 1e-4));
+        v = pow(v, float3(1.0 / max(u.a.z, 0.01)));
+        rgb = mix(float3(u.a.w), float3(u.b.x), v);
+    } else if (u.kind == 3) {
+        float n = max(u.a.x, 2.0) - 1.0;
+        int2 q = int2(cellPx) & 3;
+        float t = bayer4[q.x + q.y * 4] / 16.0 - 0.5 + 1.0 / 32.0;
+        rgb = saturate(floor(rgb * n + 0.5 + u.a.y * t) / n);
+    }
+    return float4(rgb * alpha, alpha);
 }
 """
 
@@ -86,6 +192,18 @@ struct LayerUniforms {
     var inv: simd_float3x3
     var opacity: Float
     var blend: Int32
+    var premul: Int32 = 0
+}
+
+struct EffectUniforms {
+    var kind: Int32
+    var a: SIMD4<Float>
+    var b: SIMD4<Float>
+    var size: SIMD2<Float>
+    var color = SIMD4<Float>(1, 1, 1, 1)
+    var pal: (SIMD4<Float>, SIMD4<Float>, SIMD4<Float>, SIMD4<Float>,
+              SIMD4<Float>, SIMD4<Float>, SIMD4<Float>, SIMD4<Float>) = (.zero, .zero, .zero, .zero, .zero, .zero, .zero, .zero)
+    var palCount: Int32 = 0
 }
 
 extension ClipTransform {
@@ -115,6 +233,21 @@ struct LayerDraw {
     var compTransform = ClipTransform()
     /// GPU が使い終わるまで保持しておく映像フレーム
     let holder: FrameHolder?
+    /// クリップのエフェクト（トランスフォームの前にかける）
+    var effects = EffectStack()
+    /// エフェクト用の作業テクスチャを使い分ける番号
+    var effectKey = 0
+}
+
+/// 1 レイヤーぶんの描画（クロスフェード中はクリップ 2 つ）
+struct LayerGroup {
+    /// 奥 → 手前。opacity はクロスフェードの割合だけ（レイヤーの不透明度は下の opacity）
+    var draws: [LayerDraw]
+    var opacity: Float
+    var blend: BlendMode
+    var effects = EffectStack()
+    /// 作業テクスチャ・コマ間引きの使い回しに使う番号（レイヤー）
+    var key = 0
 }
 
 final class MetalContext {
@@ -124,6 +257,9 @@ final class MetalContext {
     let queue: MTLCommandQueue
     let pipeline: MTLRenderPipelineState
     let layerPipelines: [BlendMode: MTLRenderPipelineState]
+    /// レイヤーのエフェクト用に、クリップを透明な下地に重ねる（不透明度も書く）
+    let accumPipeline: MTLRenderPipelineState
+    let effectPipeline: MTLRenderPipelineState
     let sampler: MTLSamplerState
     let textureCache: CVMetalTextureCache
     let dummyTexture: MTLTexture
@@ -174,6 +310,26 @@ final class MetalContext {
         }
         layerPipelines = lp
 
+        let ad = MTLRenderPipelineDescriptor()
+        ad.vertexFunction = library.makeFunction(name: "vmain")
+        ad.fragmentFunction = library.makeFunction(name: "flayer")
+        let ac = ad.colorAttachments[0]!
+        ac.pixelFormat = .bgra8Unorm
+        ac.isBlendingEnabled = true
+        ac.rgbBlendOperation = .add
+        ac.alphaBlendOperation = .add
+        ac.sourceRGBBlendFactor = .one
+        ac.destinationRGBBlendFactor = .oneMinusSourceAlpha
+        ac.sourceAlphaBlendFactor = .one
+        ac.destinationAlphaBlendFactor = .oneMinusSourceAlpha
+        accumPipeline = try! device.makeRenderPipelineState(descriptor: ad)
+
+        let ed = MTLRenderPipelineDescriptor()
+        ed.vertexFunction = library.makeFunction(name: "vmain")
+        ed.fragmentFunction = library.makeFunction(name: "feffect")
+        ed.colorAttachments[0].pixelFormat = .bgra8Unorm
+        effectPipeline = try! device.makeRenderPipelineState(descriptor: ed)
+
         let sd = MTLSamplerDescriptor()
         sd.minFilter = .linear
         sd.magFilter = .linear
@@ -190,24 +346,172 @@ final class MetalContext {
     }
 }
 
-/// レイヤーを重ねて1枚の画像にする（コーナーピンをかける前の画）
+/// エフェクトを順にかける。作業テクスチャは「番号」ごとに 2 枚持って使い回す（描画スレッドだけが使う）
+final class EffectProcessor {
+    private let ctx = MetalContext.shared
+    private var pools: [String: [MTLTexture]] = [:]
+    var storageMode: MTLStorageMode = .private
+
+    private func textures(_ key: String, width w: Int, height h: Int) -> [MTLTexture] {
+        if let p = pools[key], p[0].width == w, p[0].height == h { return p }
+        let p = (0..<2).compactMap { _ -> MTLTexture? in
+            let td = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: w, height: h, mipmapped: false)
+            td.usage = [.renderTarget, .shaderRead]
+            td.storageMode = storageMode
+            return ctx.device.makeTexture(descriptor: td)
+        }
+        pools[key] = p
+        return p
+    }
+
+    /// input にエフェクトを上から順にかけた結果（エフェクトが無ければ input のまま）
+    func apply(_ stack: EffectStack, to input: MTLTexture, key: String, cb: MTLCommandBuffer,
+               now: Double = CACurrentMediaTime()) -> MTLTexture {
+        let effects = stack.spatial
+        guard !effects.isEmpty else { return input }
+        let pool = textures(key, width: input.width, height: input.height)
+        guard pool.count == 2 else { return input }
+        var src = input
+        for (i, e) in effects.enumerated() {
+            let dst = pool[i % 2]
+            let rpd = MTLRenderPassDescriptor()
+            rpd.colorAttachments[0].texture = dst
+            rpd.colorAttachments[0].loadAction = .dontCare
+            rpd.colorAttachments[0].storeAction = .store
+            guard let enc = cb.makeRenderCommandEncoder(descriptor: rpd) else { return src }
+            let (va, vb) = e.shaderValues(at: now, beat: stack.beat, origin: stack.origin)
+            var u = EffectUniforms(kind: e.kind.shaderIndex, a: va, b: vb,
+                                   size: SIMD2(Float(input.width), Float(input.height)))
+            u.color = e.color.simd
+            let p = (e.palette.isEmpty ? [RGB.black, RGB.white] : Array(e.palette.prefix(Effect.maxPalette))).map(\.simd)
+            func at(_ i: Int) -> SIMD4<Float> { i < p.count ? p[i] : p[p.count - 1] }
+            u.pal = (at(0), at(1), at(2), at(3), at(4), at(5), at(6), at(7))
+            u.palCount = Int32(p.count)
+            enc.setRenderPipelineState(ctx.effectPipeline)
+            enc.setFragmentBytes(&u, length: MemoryLayout<EffectUniforms>.stride, index: 0)
+            enc.setFragmentTexture(src, index: 0)
+            enc.setFragmentSamplerState(ctx.sampler, index: 0)
+            enc.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
+            enc.endEncoding()
+            src = dst
+        }
+        return src
+    }
+}
+
+/// レイヤーを重ねて1枚の画像にする（コーナーピンをかける前の画）。
+/// クリップ → レイヤー → コンポジションの順にエフェクトをかける
 final class Compositor {
     private let ctx = MetalContext.shared
     private(set) var target: MTLTexture?
     /// セルフテストで中身を読むときは .shared にする
-    var storageMode: MTLStorageMode = .private
+    var storageMode: MTLStorageMode = .private {
+        didSet { fx.storageMode = storageMode }
+    }
+    private let fx = EffectProcessor()
+    /// レイヤーのエフェクト用：クリップを重ねる下地（レイヤーごと）
+    private var groupTargets: [Int: MTLTexture] = [:]
+    /// ポスタライズ時間：前のコマの絵（レイヤーごと・コンポジション）
+    private var groupCache: [Int: (tick: Int64, texture: MTLTexture, comp: ClipTransform)] = [:]
+    private var compCache: (tick: Int64, texture: MTLTexture)?
 
-    /// layers は奥 → 手前の順
+    /// 1 枚ずつ重ねる（エフェクトなし。テスト用）。layers は奥 → 手前の順
     func composite(_ layers: [LayerDraw], width: Int, height: Int, cb: MTLCommandBuffer) -> MTLTexture? {
+        composite(layers.map { LayerGroup(draws: [$0], opacity: 1, blend: $0.blend, key: -1) },
+                  effects: EffectStack(), width: width, height: height, cb: cb)
+    }
+
+    /// groups は奥 → 手前の順。effects はコンポジションのエフェクト
+    func composite(_ groups: [LayerGroup], effects: EffectStack, width: Int, height: Int,
+                   cb: MTLCommandBuffer, now: Double = CACurrentMediaTime()) -> MTLTexture? {
         let w = max(width, 1), h = max(height, 1)
+        // ポスタライズ時間（コンポジション）：同じコマの間は前の絵をそのまま使う
+        let compTick = effects.tick(at: now)
+        if let compTick, let c = compCache, c.tick == compTick, c.texture.width == w, c.texture.height == h {
+            return c.texture
+        }
         if target?.width != w || target?.height != h {
-            let td = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: w, height: h, mipmapped: false)
-            td.usage = [.renderTarget, .shaderRead]
-            td.storageMode = storageMode
-            target = ctx.device.makeTexture(descriptor: td)
+            target = makeTexture(w, h)
         }
         guard let target else { return nil }
+        let fw = Float(w), fh = Float(h)
+        let uvToPx = simd_float3x3(diagonal: SIMD3(fw, fh, 1))
 
+        // 1. クリップ・レイヤーのエフェクト（下ごしらえ）。最後に重ねるものを並べる
+        struct Final { var texture: MTLTexture; var matrix: simd_float3x3; var opacity: Float; var blend: BlendMode; var premul: Bool }
+        var finals: [Final] = []
+        for g in groups {
+            // クリップのエフェクト
+            var draws = g.draws
+            for i in draws.indices where !draws[i].effects.spatial.isEmpty {
+                let d = draws[i]
+                let out = fx.apply(d.effects, to: d.texture, key: "c\(d.effectKey)", cb: cb, now: now)
+                draws[i] = LayerDraw(texture: out, opacity: d.opacity, blend: d.blend, transform: d.transform,
+                                     layerTransform: d.layerTransform, compTransform: d.compTransform,
+                                     holder: d.holder, effects: d.effects, effectKey: d.effectKey)
+            }
+            if g.effects.isEmpty {
+                for d in draws {
+                    let m = d.compTransform.matrix(width: fw, height: fh)
+                        * d.layerTransform.matrix(width: fw, height: fh)
+                        * d.transform.matrix(width: fw, height: fh) * uvToPx
+                    finals.append(Final(texture: d.texture, matrix: m, opacity: g.opacity * d.opacity * d.transform.opacity,
+                                        blend: g.blend, premul: false))
+                }
+                continue
+            }
+            // レイヤーのエフェクト：このレイヤーのクリップを透明な下地に重ねてから、エフェクトをかける
+            let comp = draws.first?.compTransform ?? groupCache[g.key]?.comp ?? ClipTransform()
+            let tick = g.effects.tick(at: now)
+            var layerTex: MTLTexture?
+            if let tick, let c = groupCache[g.key], c.tick == tick, c.texture.width == w, c.texture.height == h {
+                layerTex = c.texture
+            } else if !draws.isEmpty {
+                let gt: MTLTexture
+                if let t = groupTargets[g.key], t.width == w, t.height == h { gt = t } else {
+                    guard let t = makeTexture(w, h) else { continue }
+                    groupTargets[g.key] = t
+                    gt = t
+                }
+                let rpd = MTLRenderPassDescriptor()
+                rpd.colorAttachments[0].texture = gt
+                rpd.colorAttachments[0].loadAction = .clear
+                rpd.colorAttachments[0].storeAction = .store
+                rpd.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
+                guard let enc = cb.makeRenderCommandEncoder(descriptor: rpd) else { continue }
+                enc.setFragmentSamplerState(ctx.sampler, index: 0)
+                enc.setRenderPipelineState(ctx.accumPipeline)
+                for d in draws {
+                    let m = d.layerTransform.matrix(width: fw, height: fh) * d.transform.matrix(width: fw, height: fh) * uvToPx
+                    var u = LayerUniforms(inv: m.inverse, opacity: d.opacity * d.transform.opacity, blend: 0)
+                    enc.setFragmentBytes(&u, length: MemoryLayout<LayerUniforms>.stride, index: 0)
+                    enc.setFragmentTexture(d.texture, index: 0)
+                    enc.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
+                }
+                enc.endEncoding()
+                let out = fx.apply(g.effects, to: gt, key: "l\(g.key)", cb: cb, now: now)
+                layerTex = out
+                if let tick {
+                    // 次のコマまで同じ絵を使うので、作業テクスチャとは別に取っておく
+                    let keep = groupCache[g.key]?.texture
+                    let dst = (keep?.width == w && keep?.height == h && keep !== out) ? keep! : makeTexture(w, h)
+                    if let dst, let blit = cb.makeBlitCommandEncoder() {
+                        blit.copy(from: out, to: dst)
+                        blit.endEncoding()
+                        groupCache[g.key] = (tick, dst, comp)
+                        layerTex = dst
+                    }
+                } else {
+                    groupCache[g.key] = nil
+                }
+            }
+            if let layerTex {
+                finals.append(Final(texture: layerTex, matrix: comp.matrix(width: fw, height: fh) * uvToPx,
+                                    opacity: g.opacity, blend: g.blend, premul: true))
+            }
+        }
+
+        // 2. 重ねる
         let rpd = MTLRenderPassDescriptor()
         rpd.colorAttachments[0].texture = target
         rpd.colorAttachments[0].loadAction = .clear
@@ -215,24 +519,39 @@ final class Compositor {
         rpd.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
         guard let enc = cb.makeRenderCommandEncoder(descriptor: rpd) else { return nil }
         enc.setFragmentSamplerState(ctx.sampler, index: 0)
-        for l in layers {
-            guard let p = ctx.layerPipelines[l.blend] else { continue }
-            let fw = Float(w), fh = Float(h)
-            // UV → ピクセル（出力いっぱい）→ クリップ → レイヤー → コンポジション
-            let uvToPx = simd_float3x3(diagonal: SIMD3(fw, fh, 1))
-            let m = l.compTransform.matrix(width: fw, height: fh)
-                * l.layerTransform.matrix(width: fw, height: fh)
-                * l.transform.matrix(width: fw, height: fh)
-                * uvToPx
-            var u = LayerUniforms(inv: m.inverse, opacity: l.opacity * l.transform.opacity,
-                                  blend: Int32(l.blend.rawValue))
+        for f in finals {
+            guard let p = ctx.layerPipelines[f.blend] else { continue }
+            var u = LayerUniforms(inv: f.matrix.inverse, opacity: f.opacity, blend: Int32(f.blend.rawValue),
+                                  premul: f.premul ? 1 : 0)
             enc.setRenderPipelineState(p)
             enc.setFragmentBytes(&u, length: MemoryLayout<LayerUniforms>.stride, index: 0)
-            enc.setFragmentTexture(l.texture, index: 0)
+            enc.setFragmentTexture(f.texture, index: 0)
             enc.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
         }
         enc.endEncoding()
-        return target
+
+        // 3. コンポジションのエフェクト
+        let result = fx.apply(effects, to: target, key: "comp", cb: cb, now: now)
+        if let compTick {
+            let keep = compCache?.texture
+            if let dst = (keep?.width == w && keep?.height == h) ? keep : makeTexture(w, h),
+               let blit = cb.makeBlitCommandEncoder() {
+                blit.copy(from: result, to: dst)
+                blit.endEncoding()
+                compCache = (compTick, dst)
+                return dst
+            }
+        } else {
+            compCache = nil
+        }
+        return result
+    }
+
+    private func makeTexture(_ w: Int, _ h: Int) -> MTLTexture? {
+        let td = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: w, height: h, mipmapped: false)
+        td.usage = [.renderTarget, .shaderRead]
+        td.storageMode = storageMode
+        return ctx.device.makeTexture(descriptor: td)
     }
 }
 
@@ -345,34 +664,37 @@ final class RenderLoop {
         compositors = compositors.filter { id, _ in current.contains { $0.0 == id } }
 
         let params = engine.renderParams()
-        let draws = params.testPattern ? [] : engine.layerDraws()
+        let groups = engine.layerGroups()
+        let compFX = engine.compEffects()
         let kinds = Set(current.map { $0.2 })
-        let clipDraws = kinds.contains(.clipPreview) ? engine.previewDraws() : []
-        let layerDraws = kinds.contains(.layer) ? engine.layerPreviewDraws() : []
+        let clipGroups = kinds.contains(.clipPreview)
+            ? engine.previewDraws().map { LayerGroup(draws: [$0], opacity: 1, blend: .normal, key: 1000) } : []
+        let layerGroups = kinds.contains(.layer) ? engine.layerPreviewGroups() : []
         let plain = RenderParams(homographyInverse: matrix_identity_float3x3, testPattern: false, master: 1)
         for (id, layer, kind) in current {
             let comp = compositors[id] ?? Compositor()
             compositors[id] = comp
             switch kind {
             case .output:
-                render(layer, compositor: comp, draws: draws, params: params)
+                render(layer, compositor: comp, groups: params.testPattern ? [] : groups, effects: compFX, params: params)
             case .composition:
                 var p = plain
-                p.master = params.master
-                render(layer, compositor: comp, draws: params.testPattern ? engine.layerDraws() : draws, params: p)
+                p.master = params.compMaster
+                render(layer, compositor: comp, groups: groups, effects: compFX, params: p)
             case .layer:
-                render(layer, compositor: comp, draws: layerDraws, params: plain)
+                render(layer, compositor: comp, groups: layerGroups, effects: EffectStack(), params: plain)
             case .clipPreview:
-                render(layer, compositor: comp, draws: clipDraws, params: plain)
+                render(layer, compositor: comp, groups: clipGroups, effects: EffectStack(), params: plain)
             }
         }
     }
 
-    private func render(_ layer: CAMetalLayer, compositor: Compositor, draws: [LayerDraw],
+    private func render(_ layer: CAMetalLayer, compositor: Compositor, groups: [LayerGroup], effects: EffectStack,
                         params: RenderParams) {
         guard let drawable = layer.nextDrawable(), let cb = ctx.queue.makeCommandBuffer() else { return }
         let w = drawable.texture.width, h = drawable.texture.height
-        let composite = draws.isEmpty ? nil : compositor.composite(draws, width: w, height: h, cb: cb)
+        let composite = groups.isEmpty ? nil
+            : compositor.composite(groups, effects: effects, width: w, height: h, cb: cb)
 
         let rpd = MTLRenderPassDescriptor()
         rpd.colorAttachments[0].texture = drawable.texture
@@ -392,7 +714,7 @@ final class RenderLoop {
         enc.endEncoding()
 
         // GPU が使い終わるまで映像バッファを保持する
-        cb.addCompletedHandler { _ in _ = draws }
+        cb.addCompletedHandler { _ in _ = groups }
         cb.present(drawable)
         cb.commit()
     }
