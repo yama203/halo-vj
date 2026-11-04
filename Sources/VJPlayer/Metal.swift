@@ -179,6 +179,114 @@ fragment float4 feffect(VOut in [[stage_in]],
     }
     return float4(rgb * alpha, alpha);
 }
+
+// ---- 特殊合成：オーバードライブ加算 ----
+// 下の絵 + このレイヤー で 100% を超えた分（あふれ）を、にじみ・色相ずれ・歪みに変える
+struct ODUniforms {
+    float3x3 inv;      // 出力のピクセル → このレイヤーの絵の UV
+    float opacity;
+    float4 a;          // にじみ, にじみの広がり(px), 色相ずれ(度), 波紋の強さ
+    float4 b;          // 波紋の細かさ, 白飛びの抑え, 時刻, 縮小率（あふれの絵は 1/scale の大きさ）
+    float4 c;          // 波紋の速さ, 波紋の広がり(px), 波紋の山の縮小率, 大きさの倍率（出力の高さ / 1080）
+    float2 size;       // 出力の大きさ
+};
+
+static float4 odLayer(constant ODUniforms& u, texture2d<float> tex, sampler s, float2 px) {
+    float2 uv = (u.inv * float3(px, 1.0)).xy;
+    if (any(uv < 0.0) || any(uv > 1.0)) return float4(0.0);
+    return tex.sample(s, uv) * u.opacity;   // 色に不透明度が掛かった絵
+}
+
+// あふれた分（縮小した絵に書く）
+fragment float4 fodOver(VOut in [[stage_in]], constant ODUniforms& u [[buffer(0)]],
+                        texture2d<float> below [[texture(0)]], texture2d<float> layer [[texture(1)]],
+                        sampler s [[sampler(0)]]) {
+    // 縮めた 1 ピクセルが受け持つ範囲（scale x scale）を平均する（小さく光る所を取りこぼさない）
+    int n = max(int(u.b.w + 0.5), 1);
+    float2 base = (in.pos.xy - 0.5) * u.b.w;
+    float3 acc = float3(0.0);
+    for (int y = 0; y < n; y++) {
+        for (int x = 0; x < n; x++) {
+            float2 px = base + float2(x, y) + 0.5;
+            float3 sum = below.sample(s, px / u.size).rgb + odLayer(u, layer, s, px).rgb;
+            acc += max(sum - 1.0, 0.0);
+        }
+    }
+    return float4(acc / float(n * n), 1.0);
+}
+
+// ぼかし（縦か横の 1 方向。13 点）
+struct BlurUniforms { float2 dir; float radius; };
+fragment float4 fblur(VOut in [[stage_in]], constant BlurUniforms& u [[buffer(0)]],
+                      texture2d<float> tex [[texture(0)]], sampler s [[sampler(0)]]) {
+    float2 size = float2(tex.get_width(), tex.get_height());
+    float2 uv = in.pos.xy / size;
+    float3 acc = float3(0.0); float wsum = 0.0;
+    for (int i = -6; i <= 6; i++) {
+        float t = float(i) / 6.0;
+        float w = exp(-t * t * 2.0);
+        acc += tex.sample(s, uv + u.dir * t * u.radius / size).rgb * w;
+        wsum += w;
+    }
+    return float4(acc / wsum, 1.0);
+}
+
+static float hash21(float2 p) { return fract(sin(dot(p, float2(127.1, 311.7))) * 43758.5453); }
+static float vnoise(float2 p) {
+    float2 i = floor(p), f = fract(p);
+    float2 w = f * f * (3.0 - 2.0 * f);
+    return mix(mix(hash21(i), hash21(i + float2(1, 0)), w.x), mix(hash21(i + float2(0, 1)), hash21(i + float2(1, 1)), w.x), w.y);
+}
+
+fragment float4 fodFinal(VOut in [[stage_in]], constant ODUniforms& u [[buffer(0)]],
+                         texture2d<float> below [[texture(0)]], texture2d<float> layer [[texture(1)]],
+                         texture2d<float> glow [[texture(2)]], texture2d<float> ripple [[texture(3)]],
+                         sampler s [[sampler(0)]]) {
+    float2 px = in.pos.xy;
+    float2 uv = px / u.size;
+    float3 g = glow.sample(s, uv).rgb;                      // ぼかしたあふれ
+    float gl = max(g.r, max(g.g, g.b));
+    // 波紋：あふれた所を山にして（大きくぼかした別の絵）、そこから外へ同心円の波が広がっていく。
+    // 山の高さが同じ所を同じ位相にするので、明るい所を囲む輪になる。輪に沿って絵を押し出し、波の頂を光らせる
+    float2 rsize = float2(ripple.get_width(), ripple.get_height());
+    float2 tx = float2(1.0 / rsize.x, 0.0), ty = float2(0.0, 1.0 / rsize.y);
+    float3 lw = float3(0.3333);
+    float h = dot(ripple.sample(s, uv).rgb, lw);
+    float2 grad = float2(dot(ripple.sample(s, uv + tx).rgb, lw) - dot(ripple.sample(s, uv - tx).rgb, lw),
+                         dot(ripple.sample(s, uv + ty).rgb, lw) - dot(ripple.sample(s, uv - ty).rgb, lw));
+    float gm = length(grad);
+    float2 dir = gm > 1e-9 ? -grad / gm : float2(0.0);       // 明るい所から外向き
+    // 山は光った所をぼかした形（ガウス）。その傾き÷高さ×σ² が、光った所からの距離になる（明るさに関係なく求まる）
+    float spread = max(u.c.y, 1.0);
+    float sigma = 0.5 * spread;
+    float gradPx = gm / (2.0 * max(u.c.z, 1.0));             // 1 ピクセルあたりの傾き
+    float dist = h > 1e-7 ? sigma * sigma * gradPx / h : 1e9;
+    float wavelength = max(1600.0 / max(u.b.x, 1.0), 6.0) * u.c.w;   // 細かさ 24 で約 67px ごと（1080p）
+    float phase = 6.2831853 * (dist / wavelength - u.b.z * u.c.x);   // 時間とともに外へ広がる
+    float wave = sin(phase);
+    float env = (1.0 - smoothstep(0.55 * spread, spread, dist)) * smoothstep(1e-7, 1e-5, h);
+    float2 off = dir * wave * u.a.w * 14.0 * u.c.w * env;
+    float3 sum = below.sample(s, (px + off) / u.size).rgb + odLayer(u, layer, s, px + off).rgb;
+    float crest = pow(max(wave, 0.0), 10.0) * env * u.a.w;  // 波の頂の光（細い輪）
+    // 色相ずれ：あふれた量だけ色を回す
+    float over = max(max(sum.r, max(sum.g, sum.b)) - 1.0, 0.0);
+    if (u.a.z > 0.001 && over > 0.0) {
+        float v = max(sum.r, max(sum.g, sum.b));
+        sum = hueShift(sum / v, over * u.a.z / 360.0) * v;
+    }
+    // 白飛びの抑え：1 の手前から寝かせる（0 なら切り捨て）
+    float k = 1.0 - 0.35 * u.b.y;
+    float3 soft = select(sum, k + (1.0 - k) * (1.0 - exp(-(sum - k) / max(1.0 - k, 1e-3))), sum > k);
+    float3 col = soft;
+    // にじみ（ハレーション）：あふれをぼかして足す。色相ずれと同じだけ色を回す
+    float3 halo = g;
+    if (u.a.z > 0.001 && gl > 0.0) halo = hueShift(g / gl, gl * u.a.z / 360.0) * gl;
+    col += halo * u.a.x;
+    float3 rc = dot(ripple.sample(s, uv).rgb, lw) > 0.0 ? ripple.sample(s, uv).rgb / max(h * 3.0, 1e-4) : float3(1.0);
+    if (u.a.z > 0.001) rc = hueShift(saturate(rc), 0.5 * u.a.z / 360.0);
+    col += crest * 0.8 * saturate(rc);
+    return float4(saturate(col), 1.0);
+}
 """
 
 struct Uniforms {
@@ -193,6 +301,20 @@ struct LayerUniforms {
     var opacity: Float
     var blend: Int32
     var premul: Int32 = 0
+}
+
+struct ODUniforms {
+    var inv: simd_float3x3
+    var opacity: Float
+    var a: SIMD4<Float>
+    var b: SIMD4<Float>
+    var c: SIMD4<Float>
+    var size: SIMD2<Float>
+}
+
+struct BlurUniforms {
+    var dir: SIMD2<Float>
+    var radius: Float
 }
 
 struct EffectUniforms {
@@ -250,6 +372,8 @@ struct LayerGroup {
     var key = 0
     /// 調整レイヤー：draws は空で、ここまでに重ねた絵全体に effects をかけ、opacity の割合で混ぜる
     var isAdjustment = false
+    /// 特殊合成（オーバードライブ加算など）の値。blend が特殊合成のときに使う
+    var blendFX = EffectStack()
 }
 
 final class MetalContext {
@@ -262,6 +386,10 @@ final class MetalContext {
     /// レイヤーのエフェクト用に、クリップを透明な下地に重ねる（不透明度も書く）
     let accumPipeline: MTLRenderPipelineState
     let effectPipeline: MTLRenderPipelineState
+    /// オーバードライブ加算：あふれ・ぼかし・仕上げ
+    let odOverPipeline: MTLRenderPipelineState
+    let blurPipeline: MTLRenderPipelineState
+    let odFinalPipeline: MTLRenderPipelineState
     let sampler: MTLSamplerState
     let textureCache: CVMetalTextureCache
     let dummyTexture: MTLTexture
@@ -298,7 +426,7 @@ final class MetalContext {
             case .normal:   // 下 × (1 - a) + 上
                 ca.sourceRGBBlendFactor = .one
                 ca.destinationRGBBlendFactor = .oneMinusSourceAlpha
-            case .add:      // 下 + 上
+            case .add, .overdrive:      // 下 + 上（オーバードライブは別のシェーダーで混ぜる。これは使わない）
                 ca.sourceRGBBlendFactor = .one
                 ca.destinationRGBBlendFactor = .one
             case .screen:   // 下 + 上 × (1 - 下)
@@ -331,6 +459,18 @@ final class MetalContext {
         ed.fragmentFunction = library.makeFunction(name: "feffect")
         ed.colorAttachments[0].pixelFormat = .bgra8Unorm
         effectPipeline = try! device.makeRenderPipelineState(descriptor: ed)
+
+        func plain(_ f: String, _ fmt: MTLPixelFormat = .bgra8Unorm) -> MTLRenderPipelineState {
+            let d = MTLRenderPipelineDescriptor()
+            d.vertexFunction = library.makeFunction(name: "vmain")
+            d.fragmentFunction = library.makeFunction(name: f)
+            d.colorAttachments[0].pixelFormat = fmt
+            return try! device.makeRenderPipelineState(descriptor: d)
+        }
+        // あふれ・ぼかしは細かい値の差（波紋の山の傾き）を使うので 16bit の小数で持つ
+        odOverPipeline = plain("fodOver", .rgba16Float)
+        blurPipeline = plain("fblur", .rgba16Float)
+        odFinalPipeline = plain("fodFinal")
 
         let sd = MTLSamplerDescriptor()
         sd.minFilter = .linear
@@ -381,7 +521,9 @@ final class EffectProcessor {
             rpd.colorAttachments[0].loadAction = .dontCare
             rpd.colorAttachments[0].storeAction = .store
             guard let enc = cb.makeRenderCommandEncoder(descriptor: rpd) else { return src }
-            let (va, vb) = e.shaderValues(at: now, beat: stack.beat, origin: stack.origin)
+            var (va, vb) = e.shaderValues(at: now, beat: stack.beat, origin: stack.origin)
+            // ドットの大きさ（px）は 1080p での大きさ。絵の大きさに比例させて、プレビューと出力で同じ見え方に
+            if e.kind == .posterize { va.z = max(va.z * Float(input.height) / 1080, 1) }
             var u = EffectUniforms(kind: e.kind.shaderIndex, a: va, b: vb,
                                    size: SIMD2(Float(input.width), Float(input.height)))
             u.color = e.color.simd
@@ -444,6 +586,8 @@ final class Compositor {
             var texture: MTLTexture?; var matrix: simd_float3x3; var opacity: Float; var blend: BlendMode; var premul: Bool
             /// 調整レイヤー：ここまでの絵にかけるエフェクト
             var adjust: LayerGroup? = nil
+            /// 特殊合成：下の絵を読んで混ぜる
+            var special: LayerGroup? = nil
         }
         var finals: [Final] = []
         for g in groups {
@@ -460,7 +604,7 @@ final class Compositor {
                                      layerTransform: d.layerTransform, compTransform: d.compTransform,
                                      holder: d.holder, effects: d.effects, effectKey: d.effectKey)
             }
-            if g.effects.isEmpty {
+            if g.effects.isEmpty && !g.blend.isSpecial {
                 for d in draws {
                     let m = d.compTransform.matrix(width: fw, height: fh)
                         * d.layerTransform.matrix(width: fw, height: fh)
@@ -517,7 +661,8 @@ final class Compositor {
             }
             if let layerTex {
                 finals.append(Final(texture: layerTex, matrix: comp.matrix(width: fw, height: fh) * uvToPx,
-                                    opacity: g.opacity, blend: g.blend, premul: true))
+                                    opacity: g.opacity, blend: g.blend, premul: true,
+                                    special: g.blend.isSpecial ? g : nil))
             }
         }
 
@@ -558,6 +703,15 @@ final class Compositor {
                 guard let e = beginPass(clear: false) else { return nil }
                 enc = e
             }
+            if let sp = f.special, let texture {
+                // 特殊合成：下の絵を写し取ってから、シェーダーで混ぜて書き戻す
+                enc.endEncoding()
+                overdrive(sp, layer: texture, matrix: f.matrix, opacity: f.opacity, target: target,
+                          width: w, height: h, cb: cb, now: now)
+                guard let e = beginPass(clear: false) else { return nil }
+                enc = e
+                continue
+            }
             guard let texture, let p = ctx.layerPipelines[f.blend] else { continue }
             var u = LayerUniforms(inv: f.matrix.inverse, opacity: f.opacity, blend: Int32(f.blend.rawValue),
                                   premul: f.premul ? 1 : 0)
@@ -585,8 +739,97 @@ final class Compositor {
         return result
     }
 
-    private func makeTexture(_ w: Int, _ h: Int) -> MTLTexture? {
-        let td = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: w, height: h, mipmapped: false)
+    /// オーバードライブ加算（下の絵 + このレイヤーで 100% を超えた分を、にじみ・色相ずれ・歪みに）
+    private var odBelow: MTLTexture?
+    private var odLow: [MTLTexture] = []
+    /// 波紋の山（もっと小さく縮めて大きくぼかす）
+    private var odRipple: [MTLTexture] = []
+    private func overdrive(_ g: LayerGroup, layer: MTLTexture, matrix: simd_float3x3, opacity: Float,
+                           target: MTLTexture, width w: Int, height h: Int, cb: MTLCommandBuffer, now: Double) {
+        let scale = 4
+        let lw = max(w / scale, 1), lh = max(h / scale, 1)
+        if odBelow?.width != w || odBelow?.height != h { odBelow = makeTexture(w, h) }
+        if odLow.count != 2 || odLow[0].width != lw || odLow[0].height != lh {
+            odLow = (0..<2).compactMap { _ in makeTexture(lw, lh, .rgba16Float) }
+        }
+        let rscale = 32
+        let rw = max(w / rscale, 1), rh = max(h / rscale, 1)
+        if odRipple.count != 2 || odRipple[0].width != rw || odRipple[0].height != rh {
+            odRipple = (0..<2).compactMap { _ in makeTexture(rw, rh, .rgba16Float) }
+        }
+        guard let below = odBelow, odLow.count == 2, odRipple.count == 2, let blit = cb.makeBlitCommandEncoder() else { return }
+        blit.copy(from: target, to: below)
+        blit.endEncoding()
+
+        let fx = g.blendFX.effects.first ?? Effect(kind: .overdrive)
+        func v(_ i: Int) -> Float { Float(fx.value(i, at: now, beat: g.blendFX.beat, origin: g.blendFX.origin)) }
+        // px の値は 1080p の出力での大きさ。プレビューでも本番の出力でも、画面に対して同じ見え方になるように比例させる
+        let k = Float(h) / 1080
+        var u = ODUniforms(inv: matrix.inverse, opacity: opacity,
+                           a: SIMD4(v(0), v(1), v(2), v(3)),
+                           b: SIMD4(v(4), v(5), Float(now.truncatingRemainder(dividingBy: 1000)), Float(scale)),
+                           c: SIMD4(v(6), v(7) * k, Float(rscale), k),
+                           size: SIMD2(Float(w), Float(h)))
+        func pass(_ dst: MTLTexture, _ pipe: MTLRenderPipelineState, _ setup: (MTLRenderCommandEncoder) -> Void) {
+            let rpd = MTLRenderPassDescriptor()
+            rpd.colorAttachments[0].texture = dst
+            rpd.colorAttachments[0].loadAction = .dontCare
+            rpd.colorAttachments[0].storeAction = .store
+            guard let e = cb.makeRenderCommandEncoder(descriptor: rpd) else { return }
+            e.setRenderPipelineState(pipe)
+            e.setFragmentSamplerState(ctx.sampler, index: 0)
+            setup(e)
+            e.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
+            e.endEncoding()
+        }
+        // 1. あふれ（1/4 の大きさ）
+        pass(odLow[0], ctx.odOverPipeline) { e in
+            e.setFragmentBytes(&u, length: MemoryLayout<ODUniforms>.stride, index: 0)
+            e.setFragmentTexture(below, index: 0)
+            e.setFragmentTexture(layer, index: 1)
+        }
+        // 2. ぼかす（横 → 縦）
+        let radius = v(1) * k / Float(scale)
+        for (src, dst, dir) in [(odLow[0], odLow[1], SIMD2<Float>(1, 0)), (odLow[1], odLow[0], SIMD2<Float>(0, 1))] {
+            var bu = BlurUniforms(dir: dir, radius: radius)
+            pass(dst, ctx.blurPipeline) { e in
+                e.setFragmentBytes(&bu, length: MemoryLayout<BlurUniforms>.stride, index: 0)
+                e.setFragmentTexture(src, index: 0)
+            }
+        }
+        // 2b. 波紋の山：1/16 の大きさで、波紋の広がりだけ大きくぼかす
+        if v(3) > 0.001 {
+            var ru = u
+            ru.b.w = Float(rscale)
+            pass(odRipple[0], ctx.odOverPipeline) { e in
+                e.setFragmentBytes(&ru, length: MemoryLayout<ODUniforms>.stride, index: 0)
+                e.setFragmentTexture(below, index: 0)
+                e.setFragmentTexture(layer, index: 1)
+            }
+            // 3 回ぼかして、全体で σ = 広がり/2 になるように（1 回あたりの半径は 13 点で無理なく届く大きさ）
+            let rr = v(7) * k / (Float(rscale) * 1.732)
+            for _ in 0..<3 {
+                for (src, dst, dir) in [(odRipple[0], odRipple[1], SIMD2<Float>(1, 0)), (odRipple[1], odRipple[0], SIMD2<Float>(0, 1))] {
+                    var bu = BlurUniforms(dir: dir, radius: rr)
+                    pass(dst, ctx.blurPipeline) { e in
+                        e.setFragmentBytes(&bu, length: MemoryLayout<BlurUniforms>.stride, index: 0)
+                        e.setFragmentTexture(src, index: 0)
+                    }
+                }
+            }
+        }
+        // 3. 仕上げて、合成先に書き戻す
+        pass(target, ctx.odFinalPipeline) { e in
+            e.setFragmentBytes(&u, length: MemoryLayout<ODUniforms>.stride, index: 0)
+            e.setFragmentTexture(below, index: 0)
+            e.setFragmentTexture(layer, index: 1)
+            e.setFragmentTexture(odLow[0], index: 2)
+            e.setFragmentTexture(odRipple[0], index: 3)
+        }
+    }
+
+    private func makeTexture(_ w: Int, _ h: Int, _ fmt: MTLPixelFormat = .bgra8Unorm) -> MTLTexture? {
+        let td = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: fmt, width: w, height: h, mipmapped: false)
         td.usage = [.renderTarget, .shaderRead]
         td.storageMode = storageMode
         return ctx.device.makeTexture(descriptor: td)

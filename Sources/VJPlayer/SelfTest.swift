@@ -298,7 +298,7 @@ enum SelfTest {
         let op: Float = 0.5
         let one = SIMD3<Float>(repeating: 1)
         let bottom = solid(d), top = solid(s)
-        for mode in BlendMode.allCases {
+        for mode in BlendMode.allCases where !mode.isSpecial {
             let comp = Compositor()
             comp.storageMode = .shared
             let cb = ctx.queue.makeCommandBuffer()!
@@ -317,6 +317,7 @@ enum SelfTest {
             case .add: exp = simd_min(d + s * op, one)
             case .screen: exp = d + s * op * (one - d)
             case .multiply: exp = d * ((1 - op) + s * op)
+            case .overdrive: continue
             }
             let err = simd_reduce_max(simd_abs(got - exp))
             check(err < 3.0 / 255, String(format: "合成モード「%@」不透明度50%%: 誤差 %.1f/255", mode.label, err * 255))
@@ -656,9 +657,25 @@ enum SelfTest {
         for y in 0..<W { for x in 0..<W { sum += r(x, y).x; if r(x, y).x > 0.5 { whites += 1 } } }
         check(whites > 16 && whites < 48 && abs(sum / Float(W * W) - 0.5) < 0.15,
               "ポスタライズ：ディザで白黒が混ざる（白 \(whites)/\(W * W) 点）")
-        // ドット：4px ごとに同じ色
-        r = run([group(clip(ramp, [fx(.posterize, [32, 0, 4])]))])
-        check(near(r(0, 0), r(3, 3)) && !near(r(0, 0), r(4, 0)), "ポスタライズ：ドット 4px（4 マスごとに同じ色）")
+        // ドット：大きさは 1080p での px。高さ 216 の絵なら 1/5 になる（20px → 4px ごとに同じ色）
+        do {
+            let S = 216
+            let td = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: S, height: S, mipmapped: false)
+            td.usage = [.shaderRead]
+            let src = ctx.device.makeTexture(descriptor: td)!
+            var px = [UInt8](repeating: 255, count: S * S * 4)
+            for y in 0..<S { for x in 0..<S { let v = UInt8(x * 255 / (S - 1)); let i = (y * S + x) * 4; px[i] = v; px[i + 1] = v; px[i + 2] = v } }
+            src.replace(region: MTLRegionMake2D(0, 0, S, S), mipmapLevel: 0, withBytes: px, bytesPerRow: S * 4)
+            let fxp = EffectProcessor(); fxp.storageMode = .shared
+            let cb = ctx.queue.makeCommandBuffer()!
+            let out = fxp.apply(EffectStack(effects: [fx(.posterize, [32, 0, 20])]), to: src, key: "t", cb: cb)
+            cb.commit(); cb.waitUntilCompleted()
+            var o = [UInt8](repeating: 0, count: S * S * 4)
+            out.getBytes(&o, bytesPerRow: S * 4, from: MTLRegionMake2D(0, 0, S, S), mipmapLevel: 0)
+            func at(_ x: Int, _ y: Int) -> UInt8 { o[(y * S + x) * 4] }
+            check(at(40, 0) == at(43, 3) && at(40, 0) != at(44, 0),
+                  "ポスタライズ：ドットは 1080p での大きさ（高さ 216 の絵で 20px → 4px ごと）")
+        }
         // オフにしたエフェクトはかからない
         var off = fx(.mirror, [1, 0]); off.enabled = false
         r = run([group(clip(halves, [off]))])
@@ -700,6 +717,125 @@ enum SelfTest {
         let a2c = run([group(clip(tex { _, _ in blue })), adjust(pa)], compositor: ca, now: 30.3)(3, 3)
         let a3c = run([group(clip(tex { _, _ in blue })), adjust(pa)], compositor: ca, now: 30.6)(3, 3)
         check(near(a1c, red) && near(a2c, red) && near(a3c, blue), "調整レイヤーのポスタライズ時間：下のレイヤー全体のコマを間引く")
+
+        // オーバードライブ加算：100% を超えた分を、にじみ・色相ずれに変える
+        func od(_ halo: Double, _ hue: Double, _ soft: Double, _ d: LayerDraw, opacity: Float = 1) -> LayerGroup {
+            var e = Effect(kind: .overdrive); e.values = [halo, 28, hue, 0, 14, soft]
+            var g = LayerGroup(draws: [d], opacity: opacity, blend: .overdrive, key: 3)
+            g.blendFX = EffectStack(effects: [e])
+            return g
+        }
+        let g6 = SIMD3<Float>(repeating: 0.6)
+        r = run([group(clip(tex { _, _ in g6 })), od(0, 0, 0, clip(tex { _, _ in g6 }))])
+        check(near(r(3, 3), SIMD3(repeating: 1)), "オーバードライブ加算（にじみ・色相ずれ・抑えなし）：ふつうの加算と同じく 100% で止まる")
+        r = run([group(clip(tex { _, _ in g6 })), od(0, 0, 0, clip(tex { _, _ in SIMD3(repeating: 0.2) }))])
+        check(near(r(3, 3), SIMD3(repeating: 0.8), 4.0 / 255), "100% を超えない所は、ふつうの加算と同じ")
+        r = run([group(clip(tex { _, _ in g6 })), od(0, 0, 0, clip(tex { _, _ in g6 }), opacity: 0.5)])
+        check(near(r(3, 3), SIMD3(repeating: 0.9), 4.0 / 255), "レイヤーの不透明度も効く（0.6 + 0.6×50% = 0.9）")
+        let r8 = SIMD3<Float>(0.8, 0.1, 0.1)
+        r = run([group(clip(tex { _, _ in r8 })), od(0, 120, 0, clip(tex { _, _ in r8 }))])
+        let hc = r(3, 3)
+        check(hc.y > 0.3 || hc.z > 0.3, String(format: "色相ずれ：あふれた分だけ色が回る（赤 → %.2f, %.2f, %.2f）", hc.x, hc.y, hc.z))
+        r = run([group(clip(tex { _, _ in g6 })), od(0, 0, 1, clip(tex { _, _ in g6 }))])
+        check(r(3, 3).x < 0.99 && r(3, 3).x > 0.85, String(format: "白飛びの抑え：1.2 が白に張り付かず %.2f に", r(3, 3).x))
+        var sq = clip(tex { _, _ in SIMD3(repeating: 1) })
+        sq.transform = ClipTransform(x: 0, y: 0, scale: 0.25, rotation: 0, opacity: 1)
+        let g4 = SIMD3<Float>(repeating: 0.4)
+        let noHalo = run([group(clip(tex { _, _ in g4 })), od(0, 0, 0, sq)])(0, 0)
+        let halo = run([group(clip(tex { _, _ in g4 })), od(2, 0, 0, sq)])(0, 0)
+        check(near(noHalo, g4, 4.0 / 255) && halo.x > noHalo.x + 0.03,
+              String(format: "にじみ：あふれた所のまわりまで明るくなる（端 %.2f → %.2f）", noHalo.x, halo.x))
+
+        // 波紋：あふれた所のまわりの絵が揺れる（大きめの絵で確かめる）
+        do {
+            let N = 320
+            func big(_ f: (Int, Int) -> SIMD3<Float>) -> MTLTexture {
+                let td = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: N, height: N, mipmapped: false)
+                td.usage = [.shaderRead]
+                let t = ctx.device.makeTexture(descriptor: td)!
+                var px = [UInt8](repeating: 255, count: N * N * 4)
+                for y in 0..<N { for x in 0..<N {
+                    let c = (f(x, y) * 255).rounded(.toNearestOrEven); let i = (y * N + x) * 4
+                    px[i] = UInt8(c.z); px[i + 1] = UInt8(c.y); px[i + 2] = UInt8(c.x)
+                } }
+                t.replace(region: MTLRegionMake2D(0, 0, N, N), mipmapLevel: 0, withBytes: px, bytesPerRow: N * 4)
+                return t
+            }
+            // 下は縦じま（揺れると模様がずれて分かる）、上は真ん中の白い四角
+            let stripes = big { x, _ in SIMD3(repeating: (x / 6) % 2 == 0 ? 0.25 : 0.55) }
+            let white = big { _, _ in SIMD3(repeating: 1) }
+            func render(_ ripple: Double, at t: Double) -> [UInt8] {
+                var sq = LayerDraw(texture: white, opacity: 1, blend: .normal, holder: nil)
+                sq.transform = ClipTransform(x: 0, y: 0, scale: 0.2, rotation: 0, opacity: 1)
+                var e = Effect(kind: .overdrive); e.values = [0, 60, 0, ripple, 24, 0, 1.5, 120]
+                var g = LayerGroup(draws: [sq], opacity: 1, blend: .overdrive, key: 3)
+                g.blendFX = EffectStack(effects: [e])
+                let c = Compositor(); c.storageMode = .shared
+                let cb = ctx.queue.makeCommandBuffer()!
+                let out = c.composite([LayerGroup(draws: [LayerDraw(texture: stripes, opacity: 1, blend: .normal, holder: nil)],
+                                                  opacity: 1, blend: .normal, key: 0), g],
+                                      effects: EffectStack(), width: N, height: N, cb: cb, now: t)!
+                cb.commit(); cb.waitUntilCompleted()
+                var px = [UInt8](repeating: 0, count: N * N * 4)
+                out.getBytes(&px, bytesPerRow: N * 4, from: MTLRegionMake2D(0, 0, N, N), mipmapLevel: 0)
+                return px
+            }
+            func diff(_ a: [UInt8], _ b: [UInt8]) -> Int {
+                var n = 0
+                for i in stride(from: 0, to: a.count, by: 4) where abs(Int(a[i]) - Int(b[i])) > 12 { n += 1 }
+                return n
+            }
+            let calm = render(0, at: 10), rip = render(1, at: 10), later = render(1, at: 10.25)
+            let changed = diff(calm, rip), moving = diff(rip, later)
+            check(changed > N * N / 50 && moving > N * N / 100,
+                  "波紋：あふれた所のまわりが揺れ（\(changed) 点）、時間とともに動く（\(moving) 点）")
+        }
+
+        // 大きさが違っても同じ見え方（プレビューと本番の出力）：小さく描いたものと、大きく描いて縮めたものを比べる
+        do {
+            func scene(_ Hh: Int) -> [Float] {
+                let Ww = Hh * 16 / 9
+                func t(_ f: (Float, Float) -> SIMD3<Float>) -> MTLTexture {
+                    let td = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: Ww, height: Hh, mipmapped: false)
+                    td.usage = [.shaderRead]
+                    let tx = ctx.device.makeTexture(descriptor: td)!
+                    var px = [UInt8](repeating: 255, count: Ww * Hh * 4)
+                    for y in 0..<Hh { for x in 0..<Ww {
+                        let c = (f(Float(x) / Float(Ww), Float(y) / Float(Hh)) * Float(255)).rounded(.toNearestOrEven); let i = (y * Ww + x) * 4
+                        px[i] = UInt8(c.z); px[i + 1] = UInt8(c.y); px[i + 2] = UInt8(c.x)
+                    } }
+                    tx.replace(region: MTLRegionMake2D(0, 0, Ww, Hh), mipmapLevel: 0, withBytes: px, bytesPerRow: Ww * 4)
+                    return tx
+                }
+                let below = t { x, y in SIMD3(repeating: 0.35 + 0.2 * sin(x * 20) * sin(y * 12)) }
+                let top = t { x, y in
+                    let dx = (x - 0.3) * 16 / 9, dy = y - 0.5
+                    return dx * dx + dy * dy < 0.012 ? SIMD3(repeating: 1) : .zero
+                }
+                var e = Effect(kind: .overdrive); e.values = [1, 40, 60, 0.8, 24, 0.4, 1.5, 300]
+                var g = LayerGroup(draws: [LayerDraw(texture: top, opacity: 1, blend: .overdrive, holder: nil)],
+                                   opacity: 1, blend: .overdrive, key: 3)
+                g.blendFX = EffectStack(effects: [e])
+                let c = Compositor(); c.storageMode = .shared
+                let cb = ctx.queue.makeCommandBuffer()!
+                let out = c.composite([LayerGroup(draws: [LayerDraw(texture: below, opacity: 1, blend: .normal, holder: nil)],
+                                                  opacity: 1, blend: .normal, key: 0), g],
+                                      effects: EffectStack(), width: Ww, height: Hh, cb: cb, now: 10)!
+                cb.commit(); cb.waitUntilCompleted()
+                var px = [UInt8](repeating: 0, count: Ww * Hh * 4)
+                out.getBytes(&px, bytesPerRow: Ww * 4, from: MTLRegionMake2D(0, 0, Ww, Hh), mipmapLevel: 0)
+                // 48 x 27 のマスごとの平均にする
+                var cells = [Float](repeating: 0, count: 48 * 27)
+                for y in 0..<Hh { for x in 0..<Ww {
+                    cells[(y * 27 / Hh) * 48 + x * 48 / Ww] += Float(px[(y * Ww + x) * 4 + 1]) / 255
+                } }
+                let n = Float(Ww * Hh) / Float(48 * 27)
+                return cells.map { $0 / n }
+            }
+            let small = scene(270), large = scene(1080)
+            let mad = zip(small, large).map { abs($0 - $1) }.reduce(0, +) / Float(small.count)
+            check(mad < 0.03, String(format: "オーバードライブ加算：プレビュー（270p）と出力（1080p）で同じ見え方（平均の差 %.3f）", mad))
+        }
 
         // コンポジションのエフェクト
         r = run([group(clip(tex { _, _ in grey }))], EffectStack(effects: [colorize(hue: 240)]))
@@ -897,6 +1033,55 @@ enum SelfTest {
         e.duplicateSlot(0, to: 5)
         check(e.slots[5]?.muted == true, "複製したクリップにもミュートが付いていく")
         e.stopAll()
+    }
+
+    /// 開発用：オーバードライブ加算の見え方を 1 枚の PNG に（下は細かいしま模様、上は白い丸と四角）
+    static func odPreview(path: String, values: [Double], time: Double) {
+        let ctx = MetalContext.shared
+        let W = 960, H = 540
+        func tex(_ w: Int, _ h: Int, _ f: (Int, Int) -> SIMD3<Float>) -> MTLTexture {
+            let td = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: w, height: h, mipmapped: false)
+            td.usage = [.shaderRead]
+            let t = ctx.device.makeTexture(descriptor: td)!
+            var px = [UInt8](repeating: 255, count: w * h * 4)
+            for y in 0..<h { for x in 0..<w {
+                let c = (f(x, y) * 255).rounded(.toNearestOrEven); let i = (y * w + x) * 4
+                px[i] = UInt8(c.z); px[i + 1] = UInt8(c.y); px[i + 2] = UInt8(c.x)
+            } }
+            t.replace(region: MTLRegionMake2D(0, 0, w, h), mipmapLevel: 0, withBytes: px, bytesPerRow: w * 4)
+            return t
+        }
+        let below = tex(W, H) { x, y in
+            let v: Float = ((x / 12 + y / 12) % 2 == 0) ? 0.35 : 0.55
+            return SIMD3(v * 0.9, v, v * 1.1)
+        }
+        let top = tex(W, H) { x, y in
+            let dx = Float(x - 300), dy = Float(y - 270)
+            if dx * dx + dy * dy < 60 * 60 { return SIMD3(repeating: 1) }
+            if x > 600 && x < 760 && y > 200 && y < 340 { return SIMD3(0.9, 0.8, 0.6) }
+            return .zero
+        }
+        var e = Effect(kind: .overdrive)
+        for (i, v) in values.enumerated() where i < e.values.count { e.values[i] = v }
+        while e.values.count < values.count { e.values.append(values[e.values.count]) }
+        var g = LayerGroup(draws: [LayerDraw(texture: top, opacity: 1, blend: .overdrive, holder: nil)],
+                           opacity: 1, blend: .overdrive, key: 3)
+        g.blendFX = EffectStack(effects: [e])
+        let c = Compositor(); c.storageMode = .shared
+        let cb = ctx.queue.makeCommandBuffer()!
+        let out = c.composite([LayerGroup(draws: [LayerDraw(texture: below, opacity: 1, blend: .normal, holder: nil)],
+                                          opacity: 1, blend: .normal, key: 0), g],
+                              effects: EffectStack(), width: W, height: H, cb: cb, now: time)!
+        cb.commit(); cb.waitUntilCompleted()
+        var px = [UInt8](repeating: 0, count: W * H * 4)
+        out.getBytes(&px, bytesPerRow: W * 4, from: MTLRegionMake2D(0, 0, W, H), mipmapLevel: 0)
+        // BGRA → RGBA
+        for i in stride(from: 0, to: px.count, by: 4) { px.swapAt(i, i + 2) }
+        let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: W, pixelsHigh: H, bitsPerSample: 8, samplesPerPixel: 4,
+                                   hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: W * 4, bitsPerPixel: 32)!
+        px.withUnsafeBufferPointer { memcpy(rep.bitmapData!, $0.baseAddress!, px.count) }
+        try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
+        print("書き出しました: \(path)")
     }
 
     static func testAnimation(paths: [String], check: (Bool, String) -> Void, wait: (Double) -> Void) {

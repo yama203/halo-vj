@@ -226,10 +226,13 @@ struct EffectCard: View {
     let isLast: Bool
     let move: (Int) -> Void
     let remove: () -> Void
+    /// 重ね方（特殊合成）の設定として出す：オン/オフ・並べ替え・削除は出さない
+    var isBlendSettings = false
 
     var body: some View {
         let params = effect.kind.params
         VStack(alignment: .leading, spacing: 8) {
+            if !isBlendSettings {
             HStack(spacing: 8) {
                 Toggle("", isOn: $effect.enabled)
                     .toggleStyle(.switch)
@@ -249,6 +252,10 @@ struct EffectCard: View {
                     .help("このエフェクトを外す")
             }
             .controlSize(.regular)
+            } else {
+                Text(effect.kind.help).font(.system(size: 11)).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             LazyVGrid(columns: [GridItem(.fixed(UI.paramColumnWidth), spacing: 16),
                                 GridItem(.fixed(UI.paramColumnWidth), alignment: .top)], alignment: .leading, spacing: 8) {
                 ForEach(params.indices.filter { shows($0) }, id: \.self) { i in

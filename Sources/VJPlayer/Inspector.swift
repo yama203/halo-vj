@@ -424,6 +424,16 @@ struct LayerParams: View {
                 .frame(height: UI.rowHeight)
             }
         }
+        if layer.blend.isSpecial {
+            VStack(alignment: .leading, spacing: 8) {
+                SectionTitle("重ね方：" + layer.blend.label)
+                EffectCard(effect: $layer.blendFX, isFirst: true, isLast: true, move: { _ in }, remove: {
+                    layer.blend = .add
+                }, isBlendSettings: true)
+            }
+            .frame(width: UI.paramsWidth, alignment: .leading)
+            .padding(.top, 14)
+        }
         EffectsSection(holder: layer)
             .padding(.top, 14)
         }

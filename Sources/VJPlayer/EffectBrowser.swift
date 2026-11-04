@@ -33,7 +33,7 @@ struct EffectBrowser: View {
             ScrollView(.vertical) {
                 VStack(alignment: .leading, spacing: 10) {
                     ForEach(EffectCategory.allCases) { cat in
-                        let items = EffectKind.allCases.filter { $0.category == cat && matches($0) }
+                        let items = EffectKind.allCases.filter { $0.category == cat && !$0.isBlend && matches($0) }
                         if !items.isEmpty {
                             SectionTitle(cat.label)
                             LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible())], spacing: 8) {

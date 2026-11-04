@@ -5,6 +5,13 @@ import SwiftUI
 enum Main {
     static func main() {
         let args = CommandLine.arguments
+        if let i = args.firstIndex(of: "--od-preview"), args.count > i + 1 {
+            // 開発用：オーバードライブ加算の見え方を、決まった絵で 1 枚書き出す
+            //   VJPlayer --od-preview out.png [にじみ 広がり 色相 波紋 細かさ 抑え 速さ 波紋の広がり] [時刻]
+            let vals = args.dropFirst(i + 2).compactMap(Double.init)
+            SelfTest.odPreview(path: args[i + 1], values: Array(vals.prefix(8)), time: vals.count > 8 ? vals[8] : 10)
+            exit(0)
+        }
         if let i = args.firstIndex(of: "--selftest") {
             // 画面を出さずにエンジンだけ検証する
             let app = NSApplication.shared
@@ -76,6 +83,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             options: [.userInitiated, .idleDisplaySleepDisabled, .latencyCritical],
             reason: "VJ 出力中")
 
+        // 画面確認用：VJ_TRIGGER=番号,番号 で起動時にそのクリップを再生する
+        if let v = ProcessInfo.processInfo.environment["VJ_TRIGGER"] {
+            let list = v.split(separator: ",").compactMap { Int($0) }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { list.forEach { Engine.shared.trigger($0) } }
+        }
         // 画面確認用：VJ_SELECT_CLIP=番号 で起動時にそのクリップを選んでおく
         if let v = ProcessInfo.processInfo.environment["VJ_SELECT_CLIP"], let i = Int(v) {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1) { Engine.shared.selectClip(i) }

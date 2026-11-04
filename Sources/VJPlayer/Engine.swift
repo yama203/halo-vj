@@ -235,6 +235,7 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
             var opacityAnim: ParamAnim?
             var muted = false
             var isAdjustment = false
+            var blendFX = Effect(kind: .overdrive)
             var clipMuted = false
             var outgoingMuted = false
             var clipEffects = EffectStack()
@@ -718,6 +719,7 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
                                               opacityAnim: l.anims[.opacity].flatMap { $0.isOn ? $0 : nil },
                                               muted: l.muted,
                                               isAdjustment: l.isAdjustment,
+                                              blendFX: l.blendFX,
                                               clipMuted: slot?.muted ?? false,
                                               outgoingMuted: out?.muted ?? false,
                                               clipEffects: EffectStack(effects: slot?.effects ?? [], beat: beatClock,
@@ -916,7 +918,8 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
                                    effects: l.clipEffects, effectKey: r * 2))
         }
         guard !draws.isEmpty else { return nil }
-        return LayerGroup(draws: draws, opacity: opacity, blend: blend, effects: l.layerEffects, key: r)
+        return LayerGroup(draws: draws, opacity: opacity, blend: blend, effects: l.layerEffects, key: r,
+                          blendFX: EffectStack(effects: [l.blendFX], beat: beat))
     }
 
     /// コーナーピン・テストパターン・マスター不透明度・ブラックアウト（描画スレッド用）
@@ -1038,6 +1041,7 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
         var muted: Bool?
         var audioMuted: Bool?
         var isAdjustment: Bool?
+        var blendFX: Effect?
     }
 
     struct SavedState: Codable {
@@ -1125,7 +1129,8 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
                            transform: SavedTransform($0.transform), fadeTime: $0.fadeTime,
                            anims: Self.encodeAnims($0.anims), effects: $0.effects.isEmpty ? nil : $0.effects,
                            muted: $0.muted ? true : nil, audioMuted: $0.audioMuted ? true : nil,
-                           isAdjustment: $0.isAdjustment ? true : nil)
+                           isAdjustment: $0.isAdjustment ? true : nil,
+                           blendFX: $0.blend.isSpecial ? $0.blendFX : nil)
             },
             corners: corners.map { [$0.x, $0.y] },
             audioDeviceUID: nil,
@@ -1187,6 +1192,7 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
             layer.muted = saved.muted ?? false
             layer.audioMuted = saved.audioMuted ?? false
             layer.isAdjustment = saved.isAdjustment ?? false
+            layer.blendFX = saved.blendFX ?? Effect(kind: .overdrive)
         }
         for (i, saved) in state.slots.enumerated() {
             let r = i / savedColumns, c = i % savedColumns

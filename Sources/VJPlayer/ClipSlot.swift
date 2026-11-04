@@ -148,6 +148,8 @@ final class ClipSlot: ObservableObject, Identifiable, Animatable, EffectHolder {
     private var _pendingJump: PendingJump?
     /// 取り消した回数（音声キューから確かめる。lock の中で触る）。予定の音声はこれが変わっていなければ鳴らす
     private var _jumpGeneration = 0
+    /// 映像がもう切り替わった予定の時刻（lock の中で触る）。映像が先に飛んだら、取り消されても音声は必ず追いかける
+    private var _appliedJumpHost = -1.0
     /// 予定を出し直したら増やす（古い予定の音声処理を無効にする）
     private var jumpToken = 0
 
@@ -184,7 +186,9 @@ final class ClipSlot: ObservableObject, Identifiable, Animatable, EffectHolder {
                 guard let self else { return }
                 // 取り消されていなければ鳴らす（映像の切り替えが先に済んでいても鳴らす）
                 let (valid, r) = self.lock.withLock {
-                    (self._jumpGeneration == generation, self._pendingJump?.host == host ? self._pendingJump!.rate : self._clock.rate)
+                    // 止めた・スクラブした後は鳴らさない
+                    (self._playing && (self._jumpGeneration == generation || self._appliedJumpHost == host),
+                     self._pendingJump?.host == host ? self._pendingJump!.rate : self._clock.rate)
                 }
                 guard valid else { return }
                 // 音声キューが遅れて拍の頭を過ぎていたら、その分先の位置から鳴らして映像に合わせる
@@ -224,6 +228,7 @@ final class ClipSlot: ObservableObject, Identifiable, Animatable, EffectHolder {
             _dir = 1
             _playing = true
             _lastShownPTS = -1
+            _appliedJumpHost = pj.host
             _pendingJump = nil
             return o
         }

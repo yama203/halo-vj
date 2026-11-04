@@ -4,6 +4,8 @@ import QuartzCore
 /// レイヤーの重ね方
 enum BlendMode: Int, CaseIterable, Codable, Identifiable {
     case normal, add, screen, multiply
+    /// 特殊合成：下の絵を読んで、シェーダーで混ぜる（設定はレイヤーの blendFX）
+    case overdrive
 
     var id: Int { rawValue }
 
@@ -13,8 +15,14 @@ enum BlendMode: Int, CaseIterable, Codable, Identifiable {
         case .add: "加算"
         case .screen: "スクリーン"
         case .multiply: "乗算"
+        case .overdrive: "オーバードライブ加算"
         }
     }
+
+    /// 特殊合成か（下の絵を読む。値は blendFX）
+    var isSpecial: Bool { self == .overdrive }
+    /// 特殊合成の値の種類
+    var effectKind: EffectKind? { self == .overdrive ? .overdrive : nil }
 }
 
 /// 時間で 0〜1 の値をなめらかに動かす（フェード用）。描画スレッドからも読む値型。
@@ -118,6 +126,8 @@ final class Layer: ObservableObject, Identifiable, Animatable, EffectHolder {
     @Published var fadeTime: Double = 0 { didSet { onChanged?() } }
 
     let transform = TransformParams()
+    /// 特殊合成（オーバードライブ加算など）の値。重ね方が特殊合成のときに使う
+    @Published var blendFX = Effect(kind: .overdrive) { didSet { onChanged?() } }
     /// レイヤーのエフェクト（このレイヤーのクリップを重ねた絵にかかる）
     @Published var effects: [Effect] = [] { didSet { onChanged?() } }
     /// 不透明度のアニメーション

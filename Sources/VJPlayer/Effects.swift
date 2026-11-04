@@ -8,7 +8,12 @@ import QuartzCore
 
 enum EffectKind: String, Codable, CaseIterable, Identifiable {
     case mirror, colorize, levels, posterize, posterizeTime
+    /// 特殊合成（レイヤーの重ね方）の値。エフェクト一覧には出さない
+    case overdrive
     var id: String { rawValue }
+
+    /// 重ね方の値か（エフェクトとしては並べない）
+    var isBlend: Bool { self == .overdrive }
 
     var label: String {
         switch self {
@@ -17,6 +22,7 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
         case .levels: "レベル"
         case .posterize: "ポスタライズ"
         case .posterizeTime: "ポスタライズ時間"
+        case .overdrive: "オーバードライブ加算"
         }
     }
 
@@ -26,6 +32,7 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
         case .mirror: .shape
         case .colorize, .levels, .posterize: .color
         case .posterizeTime: .time
+        case .overdrive: .blend
         }
     }
 
@@ -36,6 +43,7 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
         case .levels: "slider.horizontal.3"
         case .posterize: "square.grid.3x3.square"
         case .posterizeTime: "timer"
+        case .overdrive: "sun.max"
         }
     }
 
@@ -53,7 +61,7 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
         case .colorize: 1
         case .levels: 2
         case .posterize: 3
-        case .posterizeTime: -1
+        case .posterizeTime, .overdrive: -1
         }
     }
 
@@ -87,7 +95,24 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
                             format: { String(format: "%.0f 段", $0) }),
                 EffectParam(label: "ディザ", range: 0...1, defaultValue: 0, format: EffectParam.percent),
                 EffectParam(label: "ドット", range: 1...32, defaultValue: 1, perPoint: 0.05, step: 1,
-                            format: { $0 < 1.5 ? "なし" : String(format: "%.0f px", $0) }),
+                            format: { $0 < 1.5 ? "なし" : String(format: "%.0f px（1080p）", $0) }),
+            ]
+        case .overdrive:
+            // 加算して 100% を超えた分（あふれ）をどう見せるか
+            return [
+                EffectParam(label: "にじみ", range: 0...3, defaultValue: 1, perPoint: 0.005, format: EffectParam.percent),
+                EffectParam(label: "にじみの広がり", range: 2...120, defaultValue: 28, perPoint: 0.2,
+                            format: { String(format: "%.0f px（1080p）", $0) }),
+                EffectParam(label: "色相ずれ", range: 0...360, defaultValue: 60, perPoint: 1,
+                            format: { String(format: "%.0f°", $0) }, animRange: 0...360),
+                EffectParam(label: "波紋", range: 0...1, defaultValue: 0.4, format: EffectParam.percent),
+                EffectParam(label: "波紋の細かさ", range: 1...80, defaultValue: 24, perPoint: 0.1,
+                            format: { String(format: "%.0f", $0) }),
+                EffectParam(label: "白飛びの抑え", range: 0...1, defaultValue: 0.4, format: EffectParam.percent),
+                EffectParam(label: "波紋の速さ", range: 0...8, defaultValue: 1.5, perPoint: 0.01,
+                            format: { String(format: "%.2f /秒", $0) }),
+                EffectParam(label: "波紋の広がり", range: 40...800, defaultValue: 300, perPoint: 1,
+                            format: { String(format: "%.0f px（1080p）", $0) }),
             ]
         case .posterizeTime:
             return [
@@ -104,19 +129,21 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
         case .levels: "黒と白の位置・ガンマで明るさとコントラストを整える"
         case .posterize: "色の段数を減らす。ディザとドットを足すと GIF アニメのような見た目に"
         case .posterizeTime: "コマを間引いて、指定したフレームレートでしか動かないようにする（この段全体にかかる）"
+        case .overdrive: "下のレイヤーに加算して 100% を超えた分を、にじみ（ハレーション）・色相ずれ・波紋に変える"
         }
     }
 }
 
 /// エフェクト一覧の分類
 enum EffectCategory: Int, CaseIterable, Identifiable {
-    case color, shape, time
+    case color, shape, time, blend
     var id: Int { rawValue }
     var label: String {
         switch self {
         case .color: "色"
         case .shape: "形"
         case .time: "時間"
+        case .blend: "合成"
         }
     }
 }
@@ -276,7 +303,7 @@ struct EffectStack {
     var origin = 0.0
 
     /// シェーダーで処理するもの（有効なものだけ、上から順）
-    var spatial: [Effect] { effects.filter { $0.enabled && $0.kind != .posterizeTime } }
+    var spatial: [Effect] { effects.filter { $0.enabled && $0.kind != .posterizeTime && !$0.kind.isBlend } }
     /// ポスタライズ時間のフレームレート（無ければ nil。複数あれば一番低いもの）
     var posterizeFPS: Double? { posterizeFPS(at: CACurrentMediaTime()) }
     func posterizeFPS(at t: Double) -> Double? {
