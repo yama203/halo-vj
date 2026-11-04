@@ -83,7 +83,7 @@ fragment float4 flayer(VOut in [[stage_in]],
 
 // エフェクト（1 つずつ）。入出力は「色に不透明度が掛かった」絵
 struct EffectUniforms {
-    int kind;          // 0: ミラー, 1: カラーライズ, 2: レベル, 3: ポスタライズ, 4: ストロボ
+    int kind;          // 0: ミラー, 1: カラーライズ, 2: レベル, 3: ポスタライズ, 4: ストロボ（エコーは fecho）
     float4 a;
     float4 b;
     float2 size;
@@ -190,6 +190,42 @@ fragment float4 feffect(VOut in [[stage_in]],
         rgb = saturate(floor(rgb * n + 0.5 + u.a.y * t) / n);
     }
     return float4(rgb * alpha, alpha);
+}
+
+// ---- エコー（残像）：前の絵（hist）を薄めて、今の絵と重ねる ----
+struct EchoUniforms {
+    int mode;          // 0: 明るい方, 1: 加算, 2: 混ぜる
+    float keep;        // 前の絵をどれだけ残すか（このコマの分。時間から計算済み）
+    float zoom;        // 前の絵の拡大率（このコマの分）
+    float hue;         // 前の絵の色相ずれ（このコマの分、0〜1）
+    float amount;      // 残像の濃さ
+};
+
+struct EchoOut {
+    float4 hist [[color(0)]];   // 次のコマの「前の絵」（16bit）
+    float4 out [[color(1)]];    // このコマの絵（次のエフェクトへ）
+};
+
+static float4 echoMix(constant EchoUniforms& u, float4 c, float4 h) {
+    float4 t = h * u.keep * u.amount;
+    if (u.mode == 1) return min(c + t, 1.0);
+    if (u.mode == 2) return mix(c, h * u.amount, u.keep);
+    return max(c, t);
+}
+
+fragment EchoOut fecho(VOut in [[stage_in]], constant EchoUniforms& u [[buffer(0)]],
+                      texture2d<float> cur [[texture(0)]], texture2d<float> hist [[texture(1)]],
+                      sampler s [[sampler(0)]]) {
+    float2 uv = in.pos.xy / float2(cur.get_width(), cur.get_height());
+    float4 c = cur.sample(s, uv);
+    float2 huv = (uv - 0.5) / u.zoom + 0.5;
+    float4 h = (any(huv < 0.0) || any(huv > 1.0)) ? float4(0.0) : hist.sample(s, huv);
+    if (u.hue > 0.0001 && h.a > 1e-4) h = float4(hueShift(h.rgb / h.a, u.hue) * h.a, h.a);
+    float4 r = echoMix(u, c, h);
+    EchoOut o;
+    o.hist = r;
+    o.out = r;
+    return o;
 }
 
 // ---- 特殊合成：オーバードライブ加算 ----
@@ -340,6 +376,14 @@ struct EffectUniforms {
     var palCount: Int32 = 0
 }
 
+struct EchoUniforms {
+    var mode: Int32
+    var keep: Float
+    var zoom: Float
+    var hue: Float
+    var amount: Float
+}
+
 extension ClipTransform {
     /// 出力（w x h ピクセル）の中心を基準に、移動・回転・拡大する行列（ピクセル → ピクセル）
     func matrix(width w: Float, height h: Float) -> simd_float3x3 {
@@ -402,6 +446,7 @@ final class MetalContext {
     let odOverPipeline: MTLRenderPipelineState
     let blurPipeline: MTLRenderPipelineState
     let odFinalPipeline: MTLRenderPipelineState
+    let echoPipeline: MTLRenderPipelineState
     let sampler: MTLSamplerState
     let textureCache: CVMetalTextureCache
     let dummyTexture: MTLTexture
@@ -483,6 +528,13 @@ final class MetalContext {
         odOverPipeline = plain("fodOver", .rgba16Float)
         blurPipeline = plain("fblur", .rgba16Float)
         odFinalPipeline = plain("fodFinal")
+        // エコーの前の絵は少しずつ薄めるので、8bit だと暗い所が消え残る。16bit の小数で持つ
+        let ecd = MTLRenderPipelineDescriptor()
+        ecd.vertexFunction = library.makeFunction(name: "vmain")
+        ecd.fragmentFunction = library.makeFunction(name: "fecho")
+        ecd.colorAttachments[0].pixelFormat = .rgba16Float
+        ecd.colorAttachments[1].pixelFormat = .bgra8Unorm
+        echoPipeline = try! device.makeRenderPipelineState(descriptor: ecd)
 
         let sd = MTLSamplerDescriptor()
         sd.minFilter = .linear
@@ -518,6 +570,31 @@ final class EffectProcessor {
         return p
     }
 
+    /// エコーの前の絵（エフェクトごとに 2 枚を交互に使う）と、最後に描いた時刻
+    private var echoes: [String: (tex: [MTLTexture], next: Int, last: Double)] = [:]
+
+    private func echoTextures(_ key: String, width w: Int, height h: Int, now: Double) -> (prev: MTLTexture, out: MTLTexture, dt: Double)? {
+        var e = echoes[key]
+        if e == nil || e!.tex[0].width != w || e!.tex[0].height != h {
+            let t = (0..<2).compactMap { _ -> MTLTexture? in
+                let td = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba16Float, width: w, height: h, mipmapped: false)
+                td.usage = [.renderTarget, .shaderRead]
+                td.storageMode = storageMode
+                return ctx.device.makeTexture(descriptor: td)
+            }
+            guard t.count == 2 else { return nil }
+            e = (t, 0, -1)
+        }
+        guard var e else { return nil }
+        // しばらく描いていなかった（クリップを止めていた等）なら、前の絵は捨てる
+        let dt = e.last < 0 || now - e.last > 0.5 || now < e.last ? -1 : now - e.last
+        let prev = e.tex[1 - e.next], out = e.tex[e.next]
+        e.next = 1 - e.next
+        e.last = now
+        echoes[key] = e
+        return (prev, out, dt)
+    }
+
     /// input にエフェクトを上から順にかけた結果（エフェクトが無ければ input のまま）
     func apply(_ stack: EffectStack, to input: MTLTexture, key: String, cb: MTLCommandBuffer,
                now: Double = CACurrentMediaTime()) -> MTLTexture {
@@ -527,6 +604,35 @@ final class EffectProcessor {
         guard pool.count == 2 else { return input }
         var src = input
         for (i, e) in effects.enumerated() {
+            if e.kind == .echo {
+                guard let (prev, out, dt) = echoTextures(key + "/" + e.id.uuidString, width: input.width,
+                                                         height: input.height, now: now) else { continue }
+                let dst = pool[i % 2]
+                let rpd = MTLRenderPassDescriptor()
+                for (k, t) in [out, dst].enumerated() {
+                    rpd.colorAttachments[k].texture = t
+                    rpd.colorAttachments[k].loadAction = .dontCare
+                    rpd.colorAttachments[k].storeAction = .store
+                }
+                guard let enc = cb.makeRenderCommandEncoder(descriptor: rpd) else { return src }
+                func v(_ j: Int) -> Double { e.value(j, at: now, beat: stack.beat, origin: stack.origin) }
+                // 時間で決める（プレビューと出力でコマ数が違っても、同じ速さで消える・広がる）
+                let step = max(dt, 0)
+                // 「残る長さ」で 1/100（ほぼ見えない）まで薄まる
+                let keep = dt < 0 ? 0 : pow(0.01, step / max(v(1), 0.01))
+                var u = EchoUniforms(mode: Int32(v(0).rounded()), keep: Float(keep),
+                                     zoom: Float(pow(1 + v(2), step)), hue: Float(v(3) / 360 * step),
+                                     amount: Float(v(4)))
+                enc.setRenderPipelineState(ctx.echoPipeline)
+                enc.setFragmentBytes(&u, length: MemoryLayout<EchoUniforms>.stride, index: 0)
+                enc.setFragmentTexture(src, index: 0)
+                enc.setFragmentTexture(prev, index: 1)
+                enc.setFragmentSamplerState(ctx.sampler, index: 0)
+                enc.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
+                enc.endEncoding()
+                src = dst
+                continue
+            }
             let dst = pool[i % 2]
             let rpd = MTLRenderPassDescriptor()
             rpd.colorAttachments[0].texture = dst

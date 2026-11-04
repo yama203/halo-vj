@@ -88,6 +88,7 @@ struct OutputMonitor: View {
                     .font(.system(size: 11))
                     .foregroundStyle(output.target == .none ? Color.secondary : Color.primary)
                     .lineLimit(1)
+                EffectIcons(effects: engine.effects, size: 11)
                 Spacer(minLength: 0)
                 AudioMuteButton(muted: $engine.masterAudioMuted)
                 if editCorners {
@@ -455,6 +456,7 @@ struct LayerHeader: View {
                         .padding(.horizontal, 5).padding(.vertical, 2)
                         .background(Color.purple.opacity(0.45), in: RoundedRectangle(cornerRadius: 3))
                 }
+                if !layer.isAdjustment { EffectIcons(effects: layer.effects, max: 3) }
                 Text(playing?.name ?? "—")
                     .font(.system(size: 11))
                     .foregroundStyle(playing != nil ? Color.primary.opacity(0.8) : Color.secondary)
@@ -737,6 +739,9 @@ struct SlotContent: View {
                 }
                 .clipped()
                 .opacity(slot.isReady ? (slot.muted ? 0.35 : 1) : 0.4)
+                .overlay(alignment: .topLeading) {
+                    EffectIcons(effects: slot.effects).padding(4)
+                }
                 .overlay(alignment: .topTrailing) {
                     if slot.muted {
                         Image(systemName: "eye.slash.fill")

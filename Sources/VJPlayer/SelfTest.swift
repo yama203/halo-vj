@@ -651,6 +651,45 @@ enum SelfTest {
         let ramp = tex { x, _ in SIMD3(repeating: Float(x) / Float(W - 1)) }
         r = run([group(clip(ramp, [fx(.posterize, [2, 0, 1])]))])
         check(near(r(2, 0), .zero) && near(r(5, 0), SIMD3(repeating: 1)), "ポスタライズ：2 段（暗い方は黒、明るい方は白）")
+        // 並べ替え：ドラッグしたエフェクトを、落とした所のエフェクトの位置へ。一覧からなら、その位置に入れる
+        final class TestHolder: EffectHolder { var effects: [Effect] = [] }
+        let th = TestHolder()
+        [EffectKind.mirror, .colorize, .levels].forEach { th.addEffect($0) }
+        th.moveEffect(th.effects[0].id, to: 2)
+        let o1 = th.effects.map(\.kind)
+        th.moveEffect(th.effects[2].id, to: 0)
+        let o2 = th.effects.map(\.kind)
+        th.insertEffect(.strobe, at: 1)
+        check(o1 == [.colorize, .levels, .mirror] && o2 == [.mirror, .colorize, .levels]
+              && th.effects.map(\.kind) == [.mirror, .strobe, .colorize, .levels], "エフェクトの並べ替え（ドラッグ）と、位置を決めた追加")
+        // エコー：前の絵が「残る長さ」（1 秒）で 1/100 まで薄まる。0.1 秒後は 0.01^0.1 = 0.63 倍
+        let echo = Effect(kind: .echo)
+        let black = tex { _, _ in .zero }
+        let ec = Compositor(); ec.storageMode = .shared
+        _ = run([group(clip(tex { _, _ in red }))], EffectStack(effects: [echo]), compositor: ec, now: 100)
+        let e1 = run([group(clip(black))], EffectStack(effects: [echo]), compositor: ec, now: 100.1)(3, 3)
+        let e2 = run([group(clip(black))], EffectStack(effects: [echo]), compositor: ec, now: 100.2)(3, 3)
+        check(abs(e1.x - 0.631) < 0.02 && abs(e2.x - 0.398) < 0.02 && e1.z < 0.01,
+              String(format: "エコー：消えた絵が残像になって時間で薄まる（%.3f → %.3f）", e1.x, e2.x))
+        let e3 = run([group(clip(black))], EffectStack(effects: [echo]), compositor: ec, now: 101.5)(3, 3)
+        check(e3.x < 0.01, "エコー：しばらく描かなかったら残像は残さない")
+        // コマの間隔が違っても（プレビュー 30fps と出力 60fps）、同じ時刻には同じ濃さ
+        let ec2 = Compositor(); ec2.storageMode = .shared
+        _ = run([group(clip(tex { _, _ in red }))], EffectStack(effects: [echo]), compositor: ec2, now: 200)
+        _ = run([group(clip(black))], EffectStack(effects: [echo]), compositor: ec2, now: 200.05)
+        let e4 = run([group(clip(black))], EffectStack(effects: [echo]), compositor: ec2, now: 200.1)(3, 3)
+        check(abs(e4.x - e1.x) < 0.02, "エコー：コマ数が違っても同じ速さで薄まる")
+        // 混ぜる：今の絵（青）に前の絵（赤）が 63% 混ざる
+        let mixE = fx(.echo, [2, 1, 0, 0, 1])
+        let ec3 = Compositor(); ec3.storageMode = .shared
+        _ = run([group(clip(tex { _, _ in red }))], EffectStack(effects: [mixE]), compositor: ec3, now: 300)
+        let e5 = run([group(clip(tex { _, _ in blue }))], EffectStack(effects: [mixE]), compositor: ec3, now: 300.1)(3, 3)
+        check(abs(e5.x - 0.631) < 0.03 && abs(e5.z - 0.369) < 0.03, "エコー（混ぜる）：今の絵と前の絵が混ざる")
+        // クリップにかけたエコーは、そのクリップの絵の中で残る
+        let ec4 = Compositor(); ec4.storageMode = .shared
+        _ = run([group(clip(tex { _, _ in red }, [echo]))], compositor: ec4, now: 400)
+        let e6 = run([group(clip(black, [echo]))], compositor: ec4, now: 400.1)(3, 3)
+        check(abs(e6.x - 0.631) < 0.02, "エコー：クリップにかけても効く")
         // ストロボ：BPM 120・間隔 1/2 拍（0.25 秒）・光る長さ 50% → 0〜0.125 秒は光る、0.125〜0.25 秒は元の絵
         let stb = Effect(kind: .strobe)
         let clock = BeatClock()

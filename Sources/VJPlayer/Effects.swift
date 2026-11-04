@@ -7,7 +7,7 @@ import QuartzCore
 // 出力を、指定したフレームレートでしか更新しない（並び順には関係なく、その段全体にかかる）。
 
 enum EffectKind: String, Codable, CaseIterable, Identifiable {
-    case mirror, colorize, levels, posterize, posterizeTime, strobe
+    case mirror, colorize, levels, posterize, posterizeTime, strobe, echo
     /// 特殊合成（レイヤーの重ね方）の値。エフェクト一覧には出さない
     case overdrive
     var id: String { rawValue }
@@ -23,6 +23,7 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
         case .posterize: "ポスタライズ"
         case .posterizeTime: "ポスタライズ時間"
         case .strobe: "ストロボ"
+        case .echo: "エコー（残像）"
         case .overdrive: "オーバードライブ加算"
         }
     }
@@ -32,7 +33,7 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
         switch self {
         case .mirror: .shape
         case .colorize, .levels, .posterize: .color
-        case .posterizeTime, .strobe: .time
+        case .posterizeTime, .strobe, .echo: .time
         case .overdrive: .blend
         }
     }
@@ -45,6 +46,7 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
         case .posterize: "square.grid.3x3.square"
         case .posterizeTime: "timer"
         case .strobe: "bolt.fill"
+        case .echo: "square.stack.3d.forward.dottedline"
         case .overdrive: "sun.max"
         }
     }
@@ -67,6 +69,7 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
         case .levels: 2
         case .posterize: 3
         case .strobe: 4
+        case .echo: 5
         case .posterizeTime, .overdrive: -1
         }
     }
@@ -120,6 +123,18 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
                 EffectParam(label: "波紋の広がり", range: 40...800, defaultValue: 300, perPoint: 1,
                             format: { String(format: "%.0f px（1080p）", $0) }),
             ]
+        case .echo:
+            // 前の絵を少しずつ薄めながら残して、今の絵と重ねる（フィードバック）
+            return [
+                EffectParam(label: "重ね方", range: 0...2, defaultValue: 0, choices: ["明るい方", "加算", "混ぜる"]),
+                EffectParam(label: "残る長さ", range: 0.05...10, defaultValue: 1, perPoint: 0.01,
+                            format: { String(format: "%.2f 秒", $0) }, animRange: 0.2...3),
+                EffectParam(label: "広がり", range: -1...1, defaultValue: 0, perPoint: 0.002,
+                            format: { $0 == 0 ? "なし" : String(format: "%+.0f%%", $0 * 100) }, animRange: -0.3...0.3),
+                EffectParam(label: "色相ずれ", range: 0...360, defaultValue: 0, perPoint: 1,
+                            format: { String(format: "%.0f°/秒", $0) }, animRange: 0...360),
+                EffectParam(label: "残像の濃さ", range: 0...1, defaultValue: 1, format: EffectParam.percent),
+            ]
         case .strobe:
             // 光る／消える を BPM（拍）か 1 秒あたりの回数で繰り返す。光る色は下の「色」で選ぶ
             return [
@@ -147,6 +162,7 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
         case .colorize: "明るさをもとに、1 色で染める（カラー）か、パレットの色に置き換える（パレット）"
         case .levels: "黒と白の位置・ガンマで明るさとコントラストを整える"
         case .posterize: "色の段数を減らす。ディザとドットを足すと GIF アニメのような見た目に"
+        case .echo: "動いた跡が残像になって残る。レイヤーかコンポジションにかけると、位置や回転の動きも跡になる"
         case .strobe: "BPM か秒に合わせて点滅させる（色で光る・消える・反転）。残光を上げると光ったあとすっと消える"
         case .posterizeTime: "コマを間引いて、指定したフレームレートでしか動かないようにする（この段全体にかかる）"
         case .overdrive: "下のレイヤーに加算して 100% を超えた分を、にじみ（ハレーション）・色相ずれ・波紋に変える"
@@ -365,6 +381,23 @@ protocol EffectHolder: AnyObject {
 extension EffectHolder {
     func addEffect(_ kind: EffectKind) { effects.append(Effect(kind: kind)) }
     func removeEffect(_ id: UUID) { effects.removeAll { $0.id == id } }
+    /// 並べ替え：id のエフェクトを、今 index 番目にあるものの位置へ動かす
+    func moveEffect(_ id: UUID, to index: Int) {
+        guard let i = effects.firstIndex(where: { $0.id == id }) else { return }
+        let j = min(max(index, 0), effects.count - 1)
+        guard i != j else { return }
+        let e = effects.remove(at: i)
+        effects.insert(e, at: j)
+    }
+
+    /// index 番目に新しいエフェクトを入れる（作ったものを返す）
+    @discardableResult
+    func insertEffect(_ kind: EffectKind, at index: Int) -> Effect {
+        let e = Effect(kind: kind)
+        effects.insert(e, at: min(max(index, 0), effects.count))
+        return e
+    }
+
     func moveEffect(_ id: UUID, by d: Int) {
         guard let i = effects.firstIndex(where: { $0.id == id }) else { return }
         let j = i + d

@@ -150,10 +150,13 @@ enum CardPreview {
     struct Host: View {
         @State var effect: Effect
         @State var blend = BlendMode.normal
+        @State var other = Effect(kind: .mirror)
         @State var anim: ParamAnim = { var a = ParamAnim(range: 0...1); a.mode = .beat; return a }()
         var body: some View {
             VStack(alignment: .leading, spacing: 10) {
-                EffectCard(effect: $effect, isFirst: true, isLast: true, move: { _ in }, remove: {})
+                EffectCard(effect: $other, isFirst: true, isLast: false, move: { _ in }, remove: {})
+                EffectCard(effect: $effect, isFirst: false, isLast: true, move: { _ in }, remove: {})
+                    .onAppear { EffectUIState.shared.expanded.insert(effect.id) }
                 HStack(alignment: .top, spacing: 16) {
                     BlendChoice(blend: $blend)
                         .frame(width: UI.paramColumnWidth)

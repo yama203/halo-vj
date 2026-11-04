@@ -111,6 +111,33 @@ struct ChoiceButtons<T: Hashable>: View {
     }
 }
 
+/// かかっているエフェクトの小さなアイコン（グリッド・出力モニターに出す）。オフのものは薄く
+struct EffectIcons: View {
+    let effects: [Effect]
+    var size: CGFloat = 10
+    var max = 4
+
+    var body: some View {
+        let list = effects.filter { !$0.kind.isBlend }
+        if !list.isEmpty {
+            HStack(spacing: 2) {
+                ForEach(list.prefix(max)) { e in
+                    Image(systemName: e.kind.icon)
+                        .font(.system(size: size, weight: .semibold))
+                        .opacity(e.enabled ? 1 : 0.35)
+                }
+                if list.count > max {
+                    Text("+\(list.count - max)").font(.system(size: size, weight: .bold))
+                }
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 4).padding(.vertical, 2)
+            .background(Color.purple.opacity(0.8), in: RoundedRectangle(cornerRadius: 4))
+            .help(list.map { $0.enabled ? $0.kind.label : "（オフ）" + $0.kind.label }.joined(separator: " → "))
+        }
+    }
+}
+
 /// レイヤーの重ね方のボタン（ふつうの 4 つを 1 段に、特殊合成をその下に）
 struct BlendChoice: View {
     @Binding var blend: BlendMode
@@ -236,8 +263,60 @@ struct BeatLights: View {
 // MARK: - エフェクト
 
 /// エフェクトの並び（追加・オン/オフ・並べ替え・削除・値）。上から順にかかる
+/// エフェクト欄の見た目の状態（開いているカード・ドラッグ中のエフェクト）。保存はしない
+final class EffectUIState: ObservableObject {
+    static let shared = EffectUIState()
+    @Published var expanded: Set<UUID> = []
+    /// 並べ替えでドラッグしているエフェクト
+    var dragging: UUID?
+    static let movePrefix = "vjeffectmove:"
+}
+
+/// カードの上にドロップ：並べ替え（ドラッグしてきたエフェクト）か、一覧からの追加（その位置に入れる）
+struct EffectReorderDrop<H: ObservableObject & EffectHolder>: ViewModifier {
+    let index: Int
+    let id: UUID
+    let holder: H
+    @State private var targeted = false
+
+    /// 下から上へ動かすときはカードの上に、上から下へはカードの下に入る
+    private var below: Bool {
+        guard let d = EffectUIState.shared.dragging, let from = holder.effects.firstIndex(where: { $0.id == d }) else { return false }
+        return from < index
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .overlay(alignment: below ? .bottom : .top) {
+                RoundedRectangle(cornerRadius: 2).fill(Color.purple)
+                    .frame(height: 4)
+                    .offset(y: below ? 6 : -6)
+                    .opacity(targeted && EffectUIState.shared.dragging != id ? 1 : 0)
+                    .allowsHitTesting(false)
+            }
+            .onDrop(of: EffectDrop.types, isTargeted: $targeted) { providers in
+                guard let p = providers.first(where: { $0.canLoadObject(ofClass: NSString.self) }) else { return false }
+                _ = p.loadObject(ofClass: NSString.self) { obj, _ in
+                    guard let s = obj as? String else { return }
+                    DispatchQueue.main.async {
+                        EffectUIState.shared.dragging = nil
+                        if s.hasPrefix(EffectUIState.movePrefix),
+                           let mid = UUID(uuidString: String(s.dropFirst(EffectUIState.movePrefix.count))) {
+                            holder.moveEffect(mid, to: index)
+                        } else if let k = EffectKind.fromDragString(s) {
+                            let e = holder.insertEffect(k, at: index)
+                            EffectUIState.shared.expanded.insert(e.id)
+                        }
+                    }
+                }
+                return true
+            }
+    }
+}
+
 struct EffectsSection<H: ObservableObject & EffectHolder>: View {
     @ObservedObject var holder: H
+    @ObservedObject private var ui = EffectUIState.shared
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -257,11 +336,19 @@ struct EffectsSection<H: ObservableObject & EffectHolder>: View {
             .background(RoundedRectangle(cornerRadius: 6)
                 .strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [5, 4]))
                 .foregroundStyle(Color.purple.opacity(0.5)))
-            .effectDropTarget { holder.addEffect($0) }
-            ForEach(holder.effects) { e in
-                EffectCard(effect: binding(e.id), origin: (holder as? Animatable)?.animOrigin ?? 0, isFirst: holder.effects.first?.id == e.id,
-                           isLast: holder.effects.last?.id == e.id,
+            .effectDropTarget { k in
+                let e = holder.insertEffect(k, at: holder.effects.count)
+                ui.expanded.insert(e.id)
+            }
+            ForEach(Array(holder.effects.enumerated()), id: \.element.id) { i, e in
+                EffectCard(effect: binding(e.id), origin: (holder as? Animatable)?.animOrigin ?? 0, isFirst: i == 0,
+                           isLast: i == holder.effects.count - 1,
                            move: { holder.moveEffect(e.id, by: $0) }, remove: { holder.removeEffect(e.id) })
+                    .modifier(EffectReorderDrop(index: i, id: e.id, holder: holder))
+            }
+            if holder.effects.count > 1 {
+                Text("名前の行をドラッグして並べ替え（上から順にかかる）。▸ で開く／閉じる")
+                    .font(.system(size: 11)).foregroundStyle(.secondary)
             }
         }
         .frame(width: UI.paramsWidth, alignment: .leading)
@@ -292,28 +379,52 @@ struct EffectCard: View {
         VStack(alignment: .leading, spacing: 8) {
             if !isBlendSettings {
             HStack(spacing: 8) {
+                Image(systemName: "line.3.horizontal")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 16)
+                    .help("ドラッグして並べ替え")
                 Toggle("", isOn: $effect.enabled)
                     .toggleStyle(.switch)
                     .labelsHidden()
                     .controlSize(.small)
                     .help("オン／オフ")
-                Text(effect.kind.label)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(effect.enabled ? Color.primary : Color.secondary)
-                    .help(effect.kind.help)
-                Spacer()
-                Button { move(-1) } label: { Image(systemName: "chevron.up").frame(width: 18) }
-                    .disabled(isFirst).help("上へ（先にかける）")
-                Button { move(1) } label: { Image(systemName: "chevron.down").frame(width: 18) }
-                    .disabled(isLast).help("下へ（あとにかける）")
+                HStack(spacing: 8) {
+                    Image(systemName: open ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 12)
+                    Image(systemName: effect.kind.icon)
+                        .font(.system(size: 13))
+                        .foregroundStyle(effect.enabled ? Color.purple : Color.secondary)
+                        .frame(width: 18)
+                    Text(effect.kind.label)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(effect.enabled ? Color.primary : Color.secondary)
+                    if effect.anims.values.contains(where: \.isOn) {
+                        Image(systemName: "waveform.path").font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(.purple)
+                            .help("動かしている値がある")
+                    }
+                    Spacer(minLength: 0)
+                }
+                .contentShape(Rectangle())
+                .onTapGesture { toggleOpen() }
+                .help(effect.kind.help + "（クリックで開く／閉じる）")
                 Button(role: .destructive) { remove() } label: { Image(systemName: "trash").frame(width: 18) }
                     .help("このエフェクトを外す")
             }
             .controlSize(.regular)
+            .frame(height: 26)
+            .onDrag {
+                EffectUIState.shared.dragging = effect.id
+                return NSItemProvider(object: (EffectUIState.movePrefix + effect.id.uuidString) as NSString)
+            }
             } else {
                 Text(effect.kind.help).font(.system(size: 11)).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            if open || isBlendSettings {
             if effect.kind == .strobe { strobeSwitches }
             LazyVGrid(columns: [GridItem(.fixed(UI.paramColumnWidth), spacing: 16),
                                 GridItem(.fixed(UI.paramColumnWidth), alignment: .top)], alignment: .leading, spacing: 8) {
@@ -364,10 +475,17 @@ struct EffectCard: View {
                         .frame(width: 60, height: UI.rowHeight)
                 }
             }
+            }
         }
         .padding(10)
         .background(RoundedRectangle(cornerRadius: 6).fill(Color.white.opacity(0.05)))
         .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.gray.opacity(0.3)))
+    }
+
+    @ObservedObject private var ui = EffectUIState.shared
+    private var open: Bool { ui.expanded.contains(effect.id) }
+    private func toggleOpen() {
+        if open { ui.expanded.remove(effect.id) } else { ui.expanded.insert(effect.id) }
     }
 
     /// その値を出すか（カラーライズのパレットモードでは「明るさを保つ」は使わない）
