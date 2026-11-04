@@ -12,6 +12,8 @@ enum SelfTest {
             print("usage: VJPlayer --selftest a.mov b.mov"); exit(2)
         }
         setvbuf(stdout, nil, _IOLBF, 0)   // ログと順番が混ざらないように 1 行ずつ出す
+        // テストの音はスピーカーに出さない（マスター音量を上げて確かめる項目があるため）
+        AudioOutput.shared.silenceForTests()
         AudioOutput.shared.engine.mainMixerNode.outputVolume = 0
         let a = ClipSlot(url: URL(fileURLWithPath: paths[0]), endAction: .hold)
         let b = ClipSlot(url: URL(fileURLWithPath: paths[1]), endAction: .hold)
@@ -270,6 +272,10 @@ enum SelfTest {
         // 17. プロジェクトファイル
         testProject(paths: paths, check: check, wait: wait)
 
+        let out = AudioOutput.shared.engine.outputNode
+        let feeding = AudioOutput.shared.engine.inputConnectionPoint(for: out, inputBus: 0)?.node as? AVAudioMixerNode
+        check(AudioOutput.shared.silenced && feeding !== AudioOutput.shared.engine.mainMixerNode && feeding?.outputVolume == 0,
+              "テスト中の音はスピーカーに出ていない（出力の手前に音量 0 のミキサー）")
         print(failures == 0 ? "ALL PASS" : "\(failures) FAILED")
         exit(failures == 0 ? 0 : 1)
     }
@@ -672,6 +678,29 @@ enum SelfTest {
         r = run([group(small, [fx(.mirror, [1, 0])])])
         check(near(r(1, 3), red) && near(r(6, 3), red) && near(r(3, 0), .zero),
               "レイヤーのミラー：左に置いたクリップが右にも映り、周りは透明（下が見える）")
+        // 調整レイヤー：下に重ねた絵全体にかかる。上のレイヤーにはかからない
+        func adjust(_ effects: [Effect], opacity: Float = 1, key: Int = 5) -> LayerGroup {
+            LayerGroup(draws: [], opacity: opacity, blend: .normal, effects: EffectStack(effects: effects), key: key,
+                       isAdjustment: true)
+        }
+        r = run([group(clip(halves)), adjust([fx(.mirror, [1, 0])])])
+        check(near(r(1, 3), red) && near(r(6, 3), red), "調整レイヤー：下のレイヤー全体にミラーがかかる")
+        var topSmall = clip(tex { _, _ in SIMD3(0, 1, 0) })
+        topSmall.transform = ClipTransform(x: 0.25, y: 0, scale: 0.5, rotation: 0, opacity: 1)
+        var tg = group(topSmall); tg.key = 1
+        r = run([group(clip(halves)), adjust([fx(.mirror, [1, 0])]), tg])
+        check(near(r(1, 3), red) && near(r(6, 3), SIMD3(0, 1, 0)) && near(r(5, 0), red),
+              "調整レイヤーより上のレイヤーには、エフェクトがかからない")
+        r = run([group(clip(tex { _, _ in grey })), adjust([colorize(hue: 240, weighted: false)], opacity: 0.5)])
+        check(near(r(3, 3), SIMD3(0.25, 0.25, 0.5), 4.0 / 255),
+              String(format: "調整レイヤーの不透明度 50%%：かかり具合が半分（%.2f, %.2f, %.2f）", r(3, 3).x, r(3, 3).y, r(3, 3).z))
+        let ca = Compositor(); ca.storageMode = .shared
+        let pa = [fx(.posterizeTime, [2])]
+        let a1c = run([group(clip(tex { _, _ in red })), adjust(pa)], compositor: ca, now: 30.1)(3, 3)
+        let a2c = run([group(clip(tex { _, _ in blue })), adjust(pa)], compositor: ca, now: 30.3)(3, 3)
+        let a3c = run([group(clip(tex { _, _ in blue })), adjust(pa)], compositor: ca, now: 30.6)(3, 3)
+        check(near(a1c, red) && near(a2c, red) && near(a3c, blue), "調整レイヤーのポスタライズ時間：下のレイヤー全体のコマを間引く")
+
         // コンポジションのエフェクト
         r = run([group(clip(tex { _, _ in grey }))], EffectStack(effects: [colorize(hue: 240)]))
         check(near(r(3, 3), blue, 4.0 / 255), "コンポジションのエフェクト：全体にかかる")
@@ -688,6 +717,17 @@ enum SelfTest {
         let noClip = en.addEffectToCurrentTab(.posterize)
         check(en.effects.map(\.kind) == [.mirror] && en.layers[2].effects.map(\.kind) == [.levels] && !noClip,
               "ダブルクリックで今のタブ（コンポジション・レイヤー）に付く。クリップ未選択なら付かない")
+
+        // 調整レイヤーを足す（エンジン）
+        let ea = Engine(persistent: false)
+        ea.insertAdjustmentLayer()
+        check(ea.layerCount == 5 && ea.layers[0].isAdjustment && !ea.layers[0].audible && ea.selectedLayer == 0
+              && ea.inspectorTab == .layer && ea.layerGroups().isEmpty,
+              "調整レイヤーを一番上に足せる（エフェクトが無いうちは何もしない）")
+        ea.layers[0].addEffect(.levels)
+        let gs = ea.layerGroups()
+        check(gs.count == 1 && gs[0].isAdjustment && gs[0].effects.effects.first?.kind == .levels,
+              "調整レイヤーにエフェクトを付けると、描画に乗る")
 
         // ポスタライズ時間（コンポジション）：2 fps → 同じコマ（0.5 秒）の間は前の絵のまま
         let c = Compositor(); c.storageMode = .shared
@@ -760,6 +800,7 @@ enum SelfTest {
         ready(e, 0); ready(e, e.columns + 1)
         let s0 = e.slots[0]!
         s0.scale = 0.5
+        s0.setInOut(in: 1, out: .some(5))   // 読み込み時に範囲を整えても「未保存」にならないことも確かめる
         s0.addEffect(.mirror)
         var rot = s0.anim(.rotation); rot.mode = .beat; s0.setAnim(.rotation, rot)
         e.layers[1].opacity = 0.3
@@ -776,11 +817,12 @@ enum SelfTest {
         let e2 = Engine(persistent: false)
         do { try e2.openProject(p2.appendingPathComponent("show.halovj")) } catch { check(false, "開けない \(error)") }
         ready(e2, 0); ready(e2, e2.columns + 1)
+        wait(0.3)
         let o0 = e2.slots[0]
         check(e2.columns == 9 && o0?.url.path == p2.appendingPathComponent("media/clipA.mov").path && o0?.isReady == true
               && o0?.scale == 0.5 && o0?.effects.first?.kind == .mirror && o0?.anim(.rotation).mode == .beat
               && abs(e2.layers[1].opacity - 0.3) < 0.001 && abs(e2.bpm - 140) < 0.001
-              && e2.slots[e2.columns + 1]?.isReady == true && !e2.isDirty,
+              && e2.slots[e2.columns + 1]?.isReady == true && !e2.isDirty && o0?.inPoint == 1,
               "フォルダごと動かしても開ける（動画・設定・グリッド・BPM が戻る）")
 
         // 動画が無い場所で開く → 見つからないクリップとして置かれ、フォルダを選ぶと付け直せる

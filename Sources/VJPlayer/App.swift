@@ -25,7 +25,10 @@ struct VJPlayerApp: App {
         WindowGroup(AppInfo.name) {
             ContentView()
                 .environmentObject(engine)
+                // ファイルを開いても新しいウィンドウを作らず、今のウィンドウで開く
+                .handlesExternalEvents(preferring: ["*"], allowing: ["*"])
         }
+        .handlesExternalEvents(matching: ["*"])
         .defaultSize(width: 1440, height: 820)
         .windowResizability(.contentMinSize)
         Settings {
@@ -81,6 +84,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
             Self.handleKey(event) ? nil : event
         }
+    }
+
+    /// Finder でプロジェクトファイルをダブルクリック／アイコンにドロップしたとき
+    func application(_ application: NSApplication, open urls: [URL]) {
+        guard let url = urls.first(where: { ["halovj", "vjproj"].contains($0.pathExtension.lowercased()) }) else { return }
+        // 起動直後でも画面ができてから開く
+        DispatchQueue.main.async { ProjectMenu.open(url) }
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {

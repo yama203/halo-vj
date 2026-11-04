@@ -396,6 +396,12 @@ struct LayerParams: View {
                 TransformFields(t: layer.transform)
             }
             ParamColumn(title: "ミックス") {
+                Toggle(isOn: $layer.isAdjustment) {
+                    Label("調整レイヤー", systemImage: "camera.filters")
+                }
+                .toggleStyle(.switch)
+                .frame(height: UI.rowHeight)
+                .help("オン：このレイヤーのクリップは使わず、付けたエフェクトを下のレイヤー全体にかける。不透明度がかかり具合")
                 Picker("", selection: $layer.blend) {
                     ForEach(BlendMode.allCases) { Text("重ね方：" + $0.label).tag($0) }
                 }

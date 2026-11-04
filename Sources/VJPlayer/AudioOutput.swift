@@ -31,6 +31,23 @@ final class AudioOutput {
         do { try engine.start() } catch { NSLog("VJPlayer: 音声エンジンを開始できません \(error)") }
     }
 
+    /// セルフテスト用：ミキサーの後ろに音量 0 のミキサーをはさんで、スピーカーから一切音を出さない。
+    /// （テストはマスター音量を上げ下げして確かめるので、ミキサーの音量だけでは鳴ってしまう）
+    private(set) var silenced = false
+    func silenceForTests() {
+        guard !silenced else { return }
+        silenced = true
+        engine.stop()
+        let silencer = AVAudioMixerNode()
+        engine.attach(silencer)
+        let fmt = engine.mainMixerNode.outputFormat(forBus: 0)
+        engine.disconnectNodeOutput(engine.mainMixerNode)
+        engine.connect(engine.mainMixerNode, to: silencer, format: fmt)
+        engine.connect(silencer, to: engine.outputNode, format: fmt)
+        silencer.outputVolume = 0
+        startEngine()
+    }
+
     func ensureRunning() {
         if !engine.isRunning { restart() }
     }

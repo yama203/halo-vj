@@ -248,6 +248,8 @@ struct LayerGroup {
     var effects = EffectStack()
     /// 作業テクスチャ・コマ間引きの使い回しに使う番号（レイヤー）
     var key = 0
+    /// 調整レイヤー：draws は空で、ここまでに重ねた絵全体に effects をかけ、opacity の割合で混ぜる
+    var isAdjustment = false
 }
 
 final class MetalContext {
@@ -438,9 +440,17 @@ final class Compositor {
         let uvToPx = simd_float3x3(diagonal: SIMD3(fw, fh, 1))
 
         // 1. クリップ・レイヤーのエフェクト（下ごしらえ）。最後に重ねるものを並べる
-        struct Final { var texture: MTLTexture; var matrix: simd_float3x3; var opacity: Float; var blend: BlendMode; var premul: Bool }
+        struct Final {
+            var texture: MTLTexture?; var matrix: simd_float3x3; var opacity: Float; var blend: BlendMode; var premul: Bool
+            /// 調整レイヤー：ここまでの絵にかけるエフェクト
+            var adjust: LayerGroup? = nil
+        }
         var finals: [Final] = []
         for g in groups {
+            if g.isAdjustment {
+                finals.append(Final(texture: nil, matrix: uvToPx, opacity: g.opacity, blend: .normal, premul: false, adjust: g))
+                continue
+            }
             // クリップのエフェクト
             var draws = g.draws
             for i in draws.indices where !draws[i].effects.spatial.isEmpty {
@@ -511,21 +521,49 @@ final class Compositor {
             }
         }
 
-        // 2. 重ねる
-        let rpd = MTLRenderPassDescriptor()
-        rpd.colorAttachments[0].texture = target
-        rpd.colorAttachments[0].loadAction = .clear
-        rpd.colorAttachments[0].storeAction = .store
-        rpd.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
-        guard let enc = cb.makeRenderCommandEncoder(descriptor: rpd) else { return nil }
-        enc.setFragmentSamplerState(ctx.sampler, index: 0)
+        // 2. 重ねる（調整レイヤーが来たら、そこまでの絵にエフェクトをかけてから続ける）
+        func beginPass(clear: Bool) -> MTLRenderCommandEncoder? {
+            let rpd = MTLRenderPassDescriptor()
+            rpd.colorAttachments[0].texture = target
+            rpd.colorAttachments[0].loadAction = clear ? .clear : .load
+            rpd.colorAttachments[0].storeAction = .store
+            rpd.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
+            let enc = cb.makeRenderCommandEncoder(descriptor: rpd)
+            enc?.setFragmentSamplerState(ctx.sampler, index: 0)
+            return enc
+        }
+        guard var enc = beginPass(clear: true) else { return nil }
         for f in finals {
-            guard let p = ctx.layerPipelines[f.blend] else { continue }
+            var texture = f.texture
+            if let adj = f.adjust {
+                enc.endEncoding()
+                let key = 20000 + adj.key
+                let tick = adj.effects.tick(at: now)
+                if let tick, let c = groupCache[key], c.tick == tick, c.texture.width == w, c.texture.height == h {
+                    texture = c.texture
+                } else {
+                    let out = fx.apply(adj.effects, to: target, key: "a\(adj.key)", cb: cb, now: now)
+                    // ポスタライズ時間だけのときも、前のコマの絵を取っておく（下のレイヤー全体がカクカクになる）
+                    if let tick, let dst = (groupCache[key]?.texture.width == w && groupCache[key]?.texture.height == h)
+                        ? groupCache[key]!.texture : makeTexture(w, h), let blit = cb.makeBlitCommandEncoder() {
+                        blit.copy(from: out, to: dst)
+                        blit.endEncoding()
+                        groupCache[key] = (tick, dst, ClipTransform())
+                        texture = dst
+                    } else {
+                        if tick == nil { groupCache[key] = nil }
+                        texture = out === target ? nil : out
+                    }
+                }
+                guard let e = beginPass(clear: false) else { return nil }
+                enc = e
+            }
+            guard let texture, let p = ctx.layerPipelines[f.blend] else { continue }
             var u = LayerUniforms(inv: f.matrix.inverse, opacity: f.opacity, blend: Int32(f.blend.rawValue),
                                   premul: f.premul ? 1 : 0)
             enc.setRenderPipelineState(p)
             enc.setFragmentBytes(&u, length: MemoryLayout<LayerUniforms>.stride, index: 0)
-            enc.setFragmentTexture(f.texture, index: 0)
+            enc.setFragmentTexture(texture, index: 0)
             enc.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
         }
         enc.endEncoding()

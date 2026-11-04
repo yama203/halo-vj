@@ -275,7 +275,8 @@ final class ClipSlot: ObservableObject, Identifiable, Animatable, EffectHolder {
     static let minRange = 0.1
 
     /// イン点・アウト点を設定する（長さの中に収め、イン < アウトに保つ）
-    func setInOut(in newIn: Double? = nil, out newOut: Double?? = .none) {
+    /// notify: false は読み込み時に保存されていた値を長さに収めるとき（変更として扱わない）
+    func setInOut(in newIn: Double? = nil, out newOut: Double?? = .none, notify: Bool = true) {
         let d = duration
         var i = newIn ?? inPoint
         var o: Double? = outPoint
@@ -295,7 +296,7 @@ final class ClipSlot: ObservableObject, Identifiable, Animatable, EffectHolder {
         rebuildStandby(forward: inChanged)
         if syncMode == .bpm { applyRate() }
         if jumpBeats > 0 && isPlaying { armJump() }
-        onSettingsChanged?()
+        if notify { onSettingsChanged?() }
     }
 
     func resetInOut() { setInOut(in: 0, out: .some(nil)) }
@@ -529,7 +530,7 @@ final class ClipSlot: ObservableObject, Identifiable, Animatable, EffectHolder {
                 // 保存されていたイン点・アウト点を長さに収める
                 let (i0, o0) = (self.inPoint, self.outPoint)
                 self.inPoint = 0; self.outPoint = nil
-                self.setInOut(in: i0, out: .some(o0))
+                self.setInOut(in: i0, out: .some(o0), notify: false)
                 self.standbyWork?.cancel()
                 let iP = self.inPoint
                 self.videoTrack = vt

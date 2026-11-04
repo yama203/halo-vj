@@ -266,21 +266,38 @@ struct ClipGrid: View {
                     HStack(spacing: Self.spacing) {
                         LayerHeader(layer: layer)
                             .frame(width: Self.headerWidth, height: cell.height)
-                        ForEach(0..<engine.columns, id: \.self) { c in
-                            SlotCell(index: r * engine.columns + c, width: cell.width, height: cell.height)
+                        if layer.isAdjustment {
+                            AdjustmentRow(layer: layer,
+                                          width: cell.width * CGFloat(engine.columns) + Self.spacing * CGFloat(engine.columns - 1),
+                                          height: cell.height)
+                        } else {
+                            ForEach(0..<engine.columns, id: \.self) { c in
+                                SlotCell(index: r * engine.columns + c, width: cell.width, height: cell.height)
+                            }
                         }
                     }
                 }
-                Button {
-                    engine.insertLayer(at: engine.layerCount)
-                } label: {
-                    Label("レイヤーを追加", systemImage: "plus")
-                        .font(.system(size: 12))
-                        .frame(width: Self.headerWidth - 16)
+                HStack(spacing: Self.spacing) {
+                    Button {
+                        engine.insertLayer(at: engine.layerCount)
+                    } label: {
+                        Label("レイヤーを追加", systemImage: "plus")
+                            .font(.system(size: 12))
+                            .frame(width: Self.headerWidth - 16)
+                    }
+                    .controlSize(.large)
+                    .disabled(engine.layerCount >= Engine.maxLayers)
+                    .help("一番下（一番奥）にレイヤーを足す。途中に入れるときはレイヤー欄を右クリック")
+                    Button {
+                        engine.insertAdjustmentLayer(at: 0)
+                    } label: {
+                        Label("調整レイヤーを追加", systemImage: "camera.filters")
+                            .font(.system(size: 12))
+                    }
+                    .controlSize(.large)
+                    .disabled(engine.layerCount >= Engine.maxLayers)
+                    .help("一番上に調整レイヤーを足す。そこに付けたエフェクトが、下のレイヤー全体にかかる")
                 }
-                .controlSize(.large)
-                .disabled(engine.layerCount >= Engine.maxLayers)
-                .help("一番下（一番奥）にレイヤーを足す。途中に入れるときはレイヤー欄を右クリック")
             }
             .coordinateSpace(name: SlotDragState.space)
             .onPreferenceChange(SlotFramesKey.self) { drag.frames = $0 }
@@ -404,6 +421,10 @@ struct LayerHeader: View {
                 Text(layer.name)
                     .font(.system(size: 14, weight: .bold, design: .monospaced))
                     .fixedSize()
+                if layer.isAdjustment {
+                    Image(systemName: "camera.filters").font(.system(size: 11)).foregroundStyle(.teal)
+                        .help("調整レイヤー")
+                }
                 if layer.volume == 0 || layer.audioMuted {
                     Image(systemName: "speaker.slash.fill").font(.system(size: 11)).foregroundStyle(.secondary)
                 }
@@ -463,6 +484,10 @@ struct LayerHeader: View {
             Button("下にレイヤーを追加") { engine.insertLayer(at: layer.index + 1) }
                 .disabled(engine.layerCount >= Engine.maxLayers)
             Divider()
+            Button(layer.isAdjustment ? "調整レイヤーをやめる（クリップのレイヤーに戻す）" : "調整レイヤーにする（下のレイヤー全体にエフェクト）") {
+                layer.isAdjustment.toggle()
+            }
+            Divider()
             Button("このレイヤーを削除…", role: .destructive) {
                 let r = layer.index
                 if engine.layerHasClips(r) {
@@ -483,6 +508,47 @@ extension LayerHeader {
         guard a.isOn else { return nil }
         let base = layer.opacity, beat = engine.beatClock
         return { a.value(base: base, at: CACurrentMediaTime(), beat: beat) }
+    }
+}
+
+/// 調整レイヤーの段：クリップの代わりに、エフェクトを置く場所を出す
+struct AdjustmentRow: View {
+    @ObservedObject var layer: Layer
+    @EnvironmentObject var engine: Engine
+    let width: CGFloat
+    let height: CGFloat
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "camera.filters").font(.system(size: 20)).foregroundStyle(.teal)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("調整レイヤー：ここに付けたエフェクトが、下のレイヤー全体にかかる")
+                    .font(.system(size: 13, weight: .semibold))
+                Text(layer.effects.isEmpty
+                     ? "右下の「エフェクト」からここへドラッグ。不透明度でかかり具合を調整"
+                     : layer.effects.map { $0.enabled ? $0.kind.label : "（\($0.kind.label)）" }.joined(separator: " → "))
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 14)
+        .frame(width: width, height: height, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 6).fill(Color.teal.opacity(layer.muted ? 0.04 : 0.10)))
+        .overlay(RoundedRectangle(cornerRadius: 6)
+            .strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [6, 4]))
+            .foregroundStyle(Color.teal.opacity(0.6)))
+        .contentShape(Rectangle())
+        .onTapGesture {
+            engine.selectedLayer = layer.index
+            engine.inspectorTab = .layer
+        }
+        .effectDropTarget { k in
+            layer.addEffect(k)
+            engine.selectedLayer = layer.index
+            engine.inspectorTab = .layer
+        }
     }
 }
 

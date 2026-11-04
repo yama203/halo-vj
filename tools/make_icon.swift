@@ -1,12 +1,13 @@
 // アプリアイコンを描いて書き出す。
 //   swift tools/make_icon.swift [出力フォルダ]
-// → <出力フォルダ>/AppIcon.iconset（各サイズの PNG）と icon_1024.png を作る。
+// → <出力フォルダ>/AppIcon.iconset・ProjectIcon.iconset（各サイズの PNG）と、確認用の 1024px の PNG を作る。
 // .icns にするのは tools/make_app.sh（iconutil）。
 //
 // デザイン：暗い紫の角丸の板に、光る輪 1 本・その上に 1 拍目の光・黄色い再生ボタン（立体）。
 // 数値は 1024 x 1024 の画面での値（macOS のアイコンの決まりで、板は 824 x 824 を真ん中に置く）
 import AppKit
 import CoreGraphics
+import CoreText
 
 let outDir = URL(fileURLWithPath: CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "Resources")
 
@@ -133,23 +134,94 @@ func drawIcon(_ ctx: CGContext, size: CGFloat) {
     ctx.restoreGState()
 }
 
-func png(size px: Int) -> Data {
+/// プロジェクトファイル（.halovj）のアイコン：角を折った紙に、アプリのアイコンと「HALO VJ」
+func drawDocIcon(_ ctx: CGContext, size: CGFloat) {
+    let k = size / 1024
+    ctx.saveGState()
+    ctx.translateBy(x: 0, y: size)
+    ctx.scaleBy(x: k, y: -k)
+    let space = CGColorSpace(name: CGColorSpace.sRGB)!
+    // 紙（右上を折る）
+    let l: CGFloat = 196, r: CGFloat = 828, t: CGFloat = 92, b: CGFloat = 932, fold: CGFloat = 170
+    let page = CGMutablePath()
+    page.move(to: CGPoint(x: l + 24, y: t))
+    page.addLine(to: CGPoint(x: r - fold, y: t))
+    page.addLine(to: CGPoint(x: r, y: t + fold))
+    page.addLine(to: CGPoint(x: r, y: b - 24))
+    page.addQuadCurve(to: CGPoint(x: r - 24, y: b), control: CGPoint(x: r, y: b))
+    page.addLine(to: CGPoint(x: l + 24, y: b))
+    page.addQuadCurve(to: CGPoint(x: l, y: b - 24), control: CGPoint(x: l, y: b))
+    page.addLine(to: CGPoint(x: l, y: t + 24))
+    page.addQuadCurve(to: CGPoint(x: l + 24, y: t), control: CGPoint(x: l, y: t))
+    page.closeSubpath()
+    ctx.saveGState()
+    ctx.setShadow(offset: CGSize(width: 0, height: 10), blur: 22, color: rgb(0x000000, 0.35))
+    ctx.addPath(page)
+    ctx.setFillColor(rgb(0xF4F1FA))
+    ctx.fillPath()
+    ctx.restoreGState()
+    ctx.saveGState()
+    ctx.addPath(page)
+    ctx.clip()
+    let paper = CGGradient(colorsSpace: space, colors: [rgb(0xFFFFFF), rgb(0xECE6F6)] as CFArray, locations: [0, 1])!
+    ctx.drawLinearGradient(paper, start: CGPoint(x: 512, y: t), end: CGPoint(x: 512, y: b), options: [])
+    ctx.restoreGState()
+    // 折り返し
+    let flap = CGMutablePath()
+    flap.move(to: CGPoint(x: r - fold, y: t))
+    flap.addLine(to: CGPoint(x: r - fold, y: t + fold - 18))
+    flap.addQuadCurve(to: CGPoint(x: r - fold + 18, y: t + fold), control: CGPoint(x: r - fold, y: t + fold))
+    flap.addLine(to: CGPoint(x: r, y: t + fold))
+    flap.closeSubpath()
+    ctx.addPath(flap)
+    ctx.setFillColor(rgb(0xD6CCE8))
+    ctx.fillPath()
+    // アプリのアイコン（小さく）
+    ctx.saveGState()
+    let iconSize: CGFloat = 470
+    ctx.translateBy(x: 512 - iconSize / 2, y: 470 + iconSize / 2)
+    ctx.scaleBy(x: 1, y: -1)
+    drawIcon(ctx, size: iconSize)
+    ctx.restoreGState()
+    // 文字
+    let text = NSAttributedString(string: "HALO VJ", attributes: [
+        .font: NSFont.systemFont(ofSize: 74, weight: .heavy),
+        .foregroundColor: NSColor(srgbRed: 0.36, green: 0.22, blue: 0.70, alpha: 1),
+        .kern: 6,
+    ])
+    let line = CTLineCreateWithAttributedString(text)
+    let w = CTLineGetTypographicBounds(line, nil, nil, nil)
+    ctx.saveGState()
+    ctx.textMatrix = .identity
+    ctx.translateBy(x: 512 - CGFloat(w) / 2, y: 840)
+    ctx.scaleBy(x: 1, y: -1)
+    ctx.textPosition = .zero
+    CTLineDraw(line, ctx)
+    ctx.restoreGState()
+    ctx.restoreGState()
+}
+
+func png(size px: Int, doc: Bool = false) -> Data {
     let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: px, pixelsHigh: px, bitsPerSample: 8,
                                samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
                                bytesPerRow: 0, bitsPerPixel: 0)!
     let g = NSGraphicsContext(bitmapImageRep: rep)!
+    NSGraphicsContext.current = g
     g.cgContext.interpolationQuality = .high
-    drawIcon(g.cgContext, size: CGFloat(px))
+    if doc { drawDocIcon(g.cgContext, size: CGFloat(px)) } else { drawIcon(g.cgContext, size: CGFloat(px)) }
     g.flushGraphics()
     return rep.representation(using: .png, properties: [:])!
 }
 
-let iconset = outDir.appendingPathComponent("AppIcon.iconset")
-try? FileManager.default.removeItem(at: iconset)
-try! FileManager.default.createDirectory(at: iconset, withIntermediateDirectories: true)
-for base in [16, 32, 128, 256, 512] {
-    try! png(size: base).write(to: iconset.appendingPathComponent("icon_\(base)x\(base).png"))
-    try! png(size: base * 2).write(to: iconset.appendingPathComponent("icon_\(base)x\(base)@2x.png"))
+for (name, doc) in [("AppIcon", false), ("ProjectIcon", true)] {
+    let iconset = outDir.appendingPathComponent("\(name).iconset")
+    try? FileManager.default.removeItem(at: iconset)
+    try! FileManager.default.createDirectory(at: iconset, withIntermediateDirectories: true)
+    for base in [16, 32, 128, 256, 512] {
+        try! png(size: base, doc: doc).write(to: iconset.appendingPathComponent("icon_\(base)x\(base).png"))
+        try! png(size: base * 2, doc: doc).write(to: iconset.appendingPathComponent("icon_\(base)x\(base)@2x.png"))
+    }
+    print("書き出しました: \(iconset.path)")
 }
 try! png(size: 1024).write(to: outDir.appendingPathComponent("icon_1024.png"))
-print("書き出しました: \(iconset.path)")
+try! png(size: 1024, doc: true).write(to: outDir.appendingPathComponent("project_icon_1024.png"))

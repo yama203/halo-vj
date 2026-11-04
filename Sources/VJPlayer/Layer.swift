@@ -95,8 +95,16 @@ final class Layer: ObservableObject, Identifiable, Animatable, EffectHolder {
             onChanged?()
         }
     }
-    /// 音を出すか（ミュート・音だけのミュートどちらでも出さない）
-    var audible: Bool { !muted && !audioMuted }
+    /// 調整レイヤー：このレイヤーのエフェクトを、下のレイヤーを重ねた絵全体にかける（クリップは使わない）
+    @Published var isAdjustment = false {
+        didSet {
+            guard oldValue != isAdjustment else { return }
+            onVolumeChanged?()
+            onChanged?()
+        }
+    }
+    /// 音を出すか（ミュート・音だけのミュート・調整レイヤーでは出さない）
+    var audible: Bool { !muted && !audioMuted && !isAdjustment }
     /// ミュート：再生は続けたまま、このレイヤーの映像と音を出さない
     @Published var muted = false {
         didSet {

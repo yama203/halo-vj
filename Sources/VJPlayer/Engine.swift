@@ -234,6 +234,7 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
             /// レイヤー不透明度のアニメーション
             var opacityAnim: ParamAnim?
             var muted = false
+            var isAdjustment = false
             var clipMuted = false
             var outgoingMuted = false
             var clipEffects = EffectStack()
@@ -321,6 +322,15 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
     }
 
     // MARK: - レイヤー・列の増減
+
+    /// 一番上に調整レイヤーを足す（エフェクトが下のレイヤー全体にかかる）
+    func insertAdjustmentLayer(at r: Int = 0) {
+        guard layers.count < Self.maxLayers else { return }
+        insertLayer(at: r)
+        layers[r].isAdjustment = true
+        selectedLayer = r
+        inspectorTab = .layer
+    }
 
     /// r 段目の位置に新しいレイヤーを入れる（r = layerCount なら一番下＝一番奥）
     func insertLayer(at r: Int) {
@@ -707,6 +717,7 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
                                               outgoingTransform: out?.animTransform ?? AnimTransform(),
                                               opacityAnim: l.anims[.opacity].flatMap { $0.isOn ? $0 : nil },
                                               muted: l.muted,
+                                              isAdjustment: l.isAdjustment,
                                               clipMuted: slot?.muted ?? false,
                                               outgoingMuted: out?.muted ?? false,
                                               clipEffects: EffectStack(effects: slot?.effects ?? [], beat: beatClock,
@@ -875,6 +886,14 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
         let l = renderState.layers[r]
         guard !l.muted else { return nil }
         let beat = renderState.beat
+        if l.isAdjustment {
+            // 調整レイヤー：クリップは描かず、エフェクトを下の絵全体にかける（不透明度＝かかり具合）
+            guard !l.layerEffects.isEmpty else { return nil }
+            let op = Float(l.opacityAnim.map { min(max($0.value(base: Double(l.opacity), at: now, beat: beat), 0), 1) }
+                           ?? Double(l.opacity))
+            guard op > 0.001 else { return nil }
+            return LayerGroup(draws: [], opacity: op, blend: .normal, effects: l.layerEffects, key: r, isAdjustment: true)
+        }
         let opacity = Float(l.opacityAnim.map { min(max($0.value(base: Double(l.opacity), at: now, beat: beat), 0), 1) }
                             ?? Double(l.opacity))
         guard opacity > 0.001 else { return nil }
@@ -930,7 +949,14 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
         renderLock.withLock {
             let r = renderState.selectedLayer
             guard renderState.layers.indices.contains(r) else { return [] }
-            return layerGroupLocked(r, now: CACurrentMediaTime(), blend: .normal, comp: ClipTransform()).map { [$0] } ?? []
+            let now = CACurrentMediaTime()
+            if renderState.layers[r].isAdjustment {
+                // 調整レイヤーは、下のレイヤーを重ねた絵にかかった結果を見せる
+                return renderState.layers.indices.reversed().filter { $0 >= r }.compactMap { i in
+                    layerGroupLocked(i, now: now, blend: i == r ? .normal : renderState.layers[i].blend, comp: ClipTransform())
+                }
+            }
+            return layerGroupLocked(r, now: now, blend: .normal, comp: ClipTransform()).map { [$0] } ?? []
         }
     }
 
@@ -1011,6 +1037,7 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
         var effects: [Effect]?
         var muted: Bool?
         var audioMuted: Bool?
+        var isAdjustment: Bool?
     }
 
     struct SavedState: Codable {
@@ -1044,7 +1071,12 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
 
     func scheduleSave() {
         guard !isRestoring else { return }
-        if !isDirty { isDirty = true }
+        if !isDirty {
+            isDirty = true
+            if ProcessInfo.processInfo.environment["VJ_DEBUG_DIRTY"] != nil {
+                Thread.callStackSymbols.prefix(12).forEach { NSLog("DIRTY %@", $0) }
+            }
+        }
         guard persistent else { return }
         saveWork?.cancel()
         let work = DispatchWorkItem { [weak self] in self?.saveNow() }
@@ -1092,7 +1124,8 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
                 SavedLayer(opacity: $0.opacity, blend: $0.blend.rawValue, volume: $0.volume,
                            transform: SavedTransform($0.transform), fadeTime: $0.fadeTime,
                            anims: Self.encodeAnims($0.anims), effects: $0.effects.isEmpty ? nil : $0.effects,
-                           muted: $0.muted ? true : nil, audioMuted: $0.audioMuted ? true : nil)
+                           muted: $0.muted ? true : nil, audioMuted: $0.audioMuted ? true : nil,
+                           isAdjustment: $0.isAdjustment ? true : nil)
             },
             corners: corners.map { [$0.x, $0.y] },
             audioDeviceUID: nil,
@@ -1153,6 +1186,7 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
             layer.effects = saved.effects ?? []
             layer.muted = saved.muted ?? false
             layer.audioMuted = saved.audioMuted ?? false
+            layer.isAdjustment = saved.isAdjustment ?? false
         }
         for (i, saved) in state.slots.enumerated() {
             let r = i / savedColumns, c = i % savedColumns

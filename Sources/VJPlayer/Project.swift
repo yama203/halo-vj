@@ -5,7 +5,9 @@ import UniformTypeIdentifiers
 /// プロジェクトファイル（.halovj）のメニュー操作：新規・開く・保存・別名で保存・最近使った・見つからない動画を探す
 enum ProjectMenu {
     static var engine: Engine { .shared }
-    static var fileType: UTType { UTType(filenameExtension: Engine.projectExtension) ?? .json }
+    static var fileType: UTType {
+        UTType("local.yama.halovj.project") ?? UTType(filenameExtension: Engine.projectExtension) ?? .json
+    }
     /// 開けるもの：今の .halovj と、名前を変える前の .vjproj
     static var openTypes: [UTType] {
         [Engine.projectExtension, "vjproj"].compactMap { UTType(filenameExtension: $0) }
