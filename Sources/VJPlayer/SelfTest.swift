@@ -765,7 +765,7 @@ enum SelfTest {
         e.layers[1].opacity = 0.3
         e.bpm = 140
         check(e.isDirty, "変更すると「未保存」になる")
-        let file1 = p1.appendingPathComponent("show.vjproj")
+        let file1 = p1.appendingPathComponent("show.halovj")
         do { try e.saveProject(to: file1) } catch { check(false, "保存できない \(error)") }
         let text = (try? String(contentsOf: file1, encoding: .utf8)) ?? ""
         check(!e.isDirty && e.projectURL == file1 && text.contains("\"relPath\" : \"media\\/clipA.mov\""),
@@ -774,7 +774,7 @@ enum SelfTest {
         // フォルダごと別の場所へ動かしてから開く
         try? fm.moveItem(at: p1, to: p2)
         let e2 = Engine(persistent: false)
-        do { try e2.openProject(p2.appendingPathComponent("show.vjproj")) } catch { check(false, "開けない \(error)") }
+        do { try e2.openProject(p2.appendingPathComponent("show.halovj")) } catch { check(false, "開けない \(error)") }
         ready(e2, 0); ready(e2, e2.columns + 1)
         let o0 = e2.slots[0]
         check(e2.columns == 9 && o0?.url.path == p2.appendingPathComponent("media/clipA.mov").path && o0?.isReady == true
@@ -786,9 +786,9 @@ enum SelfTest {
         // 動画が無い場所で開く → 見つからないクリップとして置かれ、フォルダを選ぶと付け直せる
         let p3 = root.appendingPathComponent("elsewhere")
         try? fm.createDirectory(at: p3, withIntermediateDirectories: true)
-        try? fm.copyItem(at: p2.appendingPathComponent("show.vjproj"), to: p3.appendingPathComponent("show.vjproj"))
+        try? fm.copyItem(at: p2.appendingPathComponent("show.halovj"), to: p3.appendingPathComponent("show.halovj"))
         let e3 = Engine(persistent: false)
-        try? e3.openProject(p3.appendingPathComponent("show.vjproj"))
+        try? e3.openProject(p3.appendingPathComponent("show.halovj"))
         ready(e3, 0)
         check(e3.slots[0]?.isMissing == true && e3.missingCount == 1 && e3.slots[0]?.scale == 0.5,
               "動画が見つからないときは「見つかりません」のクリップとして設定ごと置かれる")

@@ -4,3 +4,4 @@ build/
 *.app
 .DS_Store
 testclips/
+Resources/AppIcon.iconset/

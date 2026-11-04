@@ -63,7 +63,7 @@ struct ContentView: View {
             }
         }
         .background(WindowTitleSync(
-            title: (engine.projectURL?.deletingPathExtension().lastPathComponent ?? "名称未設定") + " — VJPlayer",
+            title: (engine.projectURL?.deletingPathExtension().lastPathComponent ?? "名称未設定") + " — " + AppInfo.name,
             url: engine.projectURL, edited: engine.isDirty))
         .frame(minWidth: 1300, minHeight: 800)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)

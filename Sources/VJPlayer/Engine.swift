@@ -950,7 +950,7 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
         syncRenderState()
     }
 
-    // MARK: - 保存と復元（~/Library/Application Support/VJPlayer/state.json）
+    // MARK: - 保存と復元（~/Library/Application Support/Halo VJ/state.json）
 
     struct SavedSlot: Codable {
         var path: String
@@ -1039,10 +1039,7 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
     private static var stateURL: URL {
         // 画面確認用：VJ_STATE_PATH で別の保存ファイルを使う（ふだんの設定に触れない）
         if let p = ProcessInfo.processInfo.environment["VJ_STATE_PATH"] { return URL(fileURLWithPath: p) }
-        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("VJPlayer", isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir.appendingPathComponent("state.json")
+        return AppInfo.supportDirectory.appendingPathComponent("state.json")
     }
 
     func scheduleSave() {
@@ -1187,14 +1184,14 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
         syncRenderState()
     }
 
-    // MARK: - プロジェクトファイル（.vjproj）
+    // MARK: - プロジェクトファイル（.halovj。名前を変える前の .vjproj も開ける）
 
     /// 開いているプロジェクトファイル（まだ保存していなければ nil）
     @Published private(set) var projectURL: URL?
     /// 最後に開いた／保存したときから変更があるか
     @Published private(set) var isDirty = false
 
-    static let projectExtension = "vjproj"
+    static let projectExtension = "halovj"
 
     /// 何もない状態から始める
     func newProject() {

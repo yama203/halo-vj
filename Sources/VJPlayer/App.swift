@@ -22,7 +22,7 @@ struct VJPlayerApp: App {
     @StateObject private var engine = Engine.shared
 
     var body: some Scene {
-        WindowGroup("VJPlayer") {
+        WindowGroup(AppInfo.name) {
             ContentView()
                 .environmentObject(engine)
         }

@@ -2,10 +2,14 @@ import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// プロジェクトファイル（.vjproj）のメニュー操作：新規・開く・保存・別名で保存・最近使った・見つからない動画を探す
+/// プロジェクトファイル（.halovj）のメニュー操作：新規・開く・保存・別名で保存・最近使った・見つからない動画を探す
 enum ProjectMenu {
     static var engine: Engine { .shared }
     static var fileType: UTType { UTType(filenameExtension: Engine.projectExtension) ?? .json }
+    /// 開けるもの：今の .halovj と、名前を変える前の .vjproj
+    static var openTypes: [UTType] {
+        [Engine.projectExtension, "vjproj"].compactMap { UTType(filenameExtension: $0) }
+    }
 
     /// 未保存の変更があれば「保存しますか？」と聞く。続けてよければ true
     static func confirmDiscard(_ action: String) -> Bool {
@@ -32,9 +36,9 @@ enum ProjectMenu {
     static func open() {
         guard confirmDiscard("開く") else { return }
         let panel = NSOpenPanel()
-        panel.allowedContentTypes = [fileType]
+        panel.allowedContentTypes = openTypes
         panel.allowsMultipleSelection = false
-        panel.message = "VJPlayer のプロジェクト（.\(Engine.projectExtension)）を選んでください"
+        panel.message = "Halo VJ のプロジェクト（.\(Engine.projectExtension)。以前の .vjproj も開けます）を選んでください"
         guard panel.runModal() == .OK, let url = panel.url else { return }
         open(url, confirmed: true)
     }

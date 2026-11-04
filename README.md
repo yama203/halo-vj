@@ -1,6 +1,8 @@
-# VJPlayer
+# Halo VJ
 
-ライブでのポン出し用の、自分で保守できる macOS 用 VJ プレイヤー。Swift + SwiftUI + Metal + AVFoundation（外部ライブラリなし）。
+ライブでのポン出し用の、自分で保守できる macOS 用 VJ ソフト。（ソースコードの中の名前は VJPlayer のまま）
+
+Swift + SwiftUI + Metal + AVFoundation（外部ライブラリなし）。
 
 ## 使い方
 
@@ -39,9 +41,9 @@
 段ごとに1クリップずつ同時に再生でき、上の段ほど手前に重なる。同じ段の別クリップを再生すると、その段のクリップだけが切り替わる。
 レイヤーや列を途中に足したり消したりしても、再生中のクリップは止まらない（消した段・列のクリップだけ止まって外れる）。
 
-設定とスロットの中身は `~/Library/Application Support/VJPlayer/state.json` に自動保存される。
+設定とスロットの中身は `~/Library/Application Support/Halo VJ/state.json`（以前の VJPlayer フォルダは初回起動時に引き継ぐ） に自動保存される。
 
-### プロジェクトファイル（.vjproj）
+### プロジェクトファイル（.halovj。以前の .vjproj も開ける）
 「ファイル」メニューの 新規（⌘N）／開く…（⌘O）／最近使ったプロジェクト／保存（⌘S）／別名で保存…（⇧⌘S）。
 グリッド・クリップ（範囲・速度・エフェクト・動き・ミュート）・レイヤー・コンポジション・BPM・四隅が入る。出力先・音声の出力先・ブラックアウトのフェード時間は Mac ごとの設定なので入らない。
 プロジェクトファイルと同じフォルダ（またはその下）の動画は、そこからの場所でも記録するので、フォルダごと動かしても開ける。
@@ -51,7 +53,7 @@
 ## ビルド
 
 ```bash
-./tools/make_app.sh        # build/VJPlayer.app を作成
+./tools/make_app.sh        # build/Halo VJ.app を作成
 swift run                  # 開発中の起動
 ```
 
@@ -74,7 +76,7 @@ PROFILE=1 tools/convert_to_prores.sh clip1.mov          # ProRes 422 LT（軽量
 
 - `ClipSlot.swift` … 1クリップの再生。自前の再生時計（速度を変えても位置が連続）で映像と音声を同じ時刻から動かす
 - `FrameStream.swift` … 映像の先読みデコード（AVAssetReader）。先頭からデコード済みの待機ストリームを差し替えてポン出しする。逆再生は後ろから数コマずつ読んで逆順に渡す
-- `AudioOutput.swift` … AVAudioEngine。音声はタイムストレッチ（AVAudioUnitTimePitch）で速度変更しても音程維持。PCM を ~/Library/Caches/VJPlayer/audio にキャッシュ（往復モードの逆再生用に、区間を逆順にしたファイルも作る）
+- `AudioOutput.swift` … AVAudioEngine。音声はタイムストレッチ（AVAudioUnitTimePitch）で速度変更しても音程維持。PCM を ~/Library/Caches/Halo VJ/audio にキャッシュ（往復モードの逆再生用に、区間を逆順にしたファイルも作る）
 - `Engine.swift` … スロット・レイヤー管理、フレーム取得、コーナーピン、保存
 - `Inspector.swift` … パラメーターパネル（コンポジション／レイヤー／クリップ）と、数値をドラッグで変えるフィールド
 - `PreviewPlayer.swift` … 出力せずにクリップをプレビュー再生（音なし）
@@ -87,5 +89,6 @@ PROFILE=1 tools/convert_to_prores.sh clip1.mov          # ProRes 422 LT（軽量
 - `Output.swift` … 出力ウィンドウ
 - `SpeedControl.swift` … 速度コントロール
 - `Views.swift` / `App.swift` … 画面・キーボード操作
+- `tools/make_icon.swift` … アプリアイコンを描く（`Resources/AppIcon.icns` を作り直すときは、これを消してから `tools/make_app.sh`）
 - `Project.swift` … プロジェクトファイルのメニュー操作（開く・保存・見つからない動画）
 - `Sources/ObjCSupport` … AVFoundation の例外を Swift からつかまえるための小さな補助（音声の再生開始で落ちないように）

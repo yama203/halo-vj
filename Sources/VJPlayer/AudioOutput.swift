@@ -222,12 +222,11 @@ final class AudioClip {
     }
 }
 
-/// 動画の音声トラックを PCM の .caf に書き出してキャッシュする（~/Library/Caches/VJPlayer/audio）
+/// 動画の音声トラックを PCM の .caf に書き出してキャッシュする（~/Library/Caches/Halo VJ/audio）
 enum AudioCache {
-    /// ~/Library/Caches/VJPlayer/audio
+    /// ~/Library/Caches/Halo VJ/audio
     static var directory: URL {
-        let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("VJPlayer/audio", isDirectory: true)
+        let dir = AppInfo.cacheDirectory.appendingPathComponent("audio", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
     }
@@ -240,8 +239,7 @@ enum AudioCache {
         let mtime = (attrs?[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
         let key = SHA256.hash(data: Data("\(url.path)|\(size)|\(mtime)".utf8))
             .map { String(format: "%02x", $0) }.joined().prefix(24)
-        let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("VJPlayer/audio", isDirectory: true)
+        let dir = AppInfo.cacheDirectory.appendingPathComponent("audio", isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let dest = dir.appendingPathComponent("\(key).caf")
 
