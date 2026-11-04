@@ -83,7 +83,7 @@ fragment float4 flayer(VOut in [[stage_in]],
 
 // エフェクト（1 つずつ）。入出力は「色に不透明度が掛かった」絵
 struct EffectUniforms {
-    int kind;          // 0: ミラー, 1: カラーライズ, 2: レベル, 3: ポスタライズ
+    int kind;          // 0: ミラー, 1: カラーライズ, 2: レベル, 3: ポスタライズ, 4: ストロボ
     float4 a;
     float4 b;
     float2 size;
@@ -124,6 +124,18 @@ fragment float4 feffect(VOut in [[stage_in]],
                         sampler s [[sampler(0)]]) {
     float2 px = in.pos.xy;
     float2 uv = px / u.size;
+    if (u.kind == 4) {
+        // ストロボ：a.x = 光り方（0 色で光る / 1 消える / 2 反転）、a.y = 光り具合
+        float4 c = tex.sample(s, uv);
+        float k = saturate(u.a.y);
+        int m = int(u.a.x + 0.5);
+        if (m == 1) return c * (1.0 - k);
+        if (m == 2) {
+            float3 rgb = c.a > 1e-4 ? c.rgb / c.a : float3(0.0);
+            return float4(mix(rgb, 1.0 - rgb, k) * c.a, c.a);
+        }
+        return mix(c, float4(u.color.rgb, 1.0), k);
+    }
     if (u.kind == 0) {
         int h = int(u.a.x + 0.5), v = int(u.a.y + 0.5);
         if (h == 1 && uv.x > 0.5) uv.x = 1.0 - uv.x;

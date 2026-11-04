@@ -89,7 +89,7 @@ struct OutputMonitor: View {
                     .foregroundStyle(output.target == .none ? Color.secondary : Color.primary)
                     .lineLimit(1)
                 Spacer(minLength: 0)
-                MuteButton(muted: $engine.compMuted, what: "コンポジション（出力全体）")
+                AudioMuteButton(muted: $engine.masterAudioMuted)
                 if editCorners {
                     Text("四隅の黄色い点をドラッグ")
                         .font(.system(size: 11, weight: .semibold))

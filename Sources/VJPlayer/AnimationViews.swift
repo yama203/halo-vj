@@ -72,6 +72,70 @@ struct AnimField<Target: ObservableObject & Animatable>: View {
 }
 
 /// 動かし方の設定（モード・動き方・周期・範囲）
+/// 選択肢を並べたボタン（セレクトボックスの代わり。1 クリックで切り替わる）。
+/// columns を選択肢の数より少なくすると折り返して何段かになる
+struct ChoiceButtons<T: Hashable>: View {
+    @Binding var selection: T
+    let items: [(T, String)]
+    var columns: Int? = nil
+    var height: CGFloat = 28
+    var fontSize: CGFloat = 12
+    /// 1 つずつの説明（マウスを乗せたとき）
+    var help: ((T) -> String)? = nil
+
+    var body: some View {
+        let n = max(columns ?? items.count, 1)
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 3), count: n), spacing: 3) {
+            ForEach(items.indices, id: \.self) { i in
+                let (v, label) = items[i]
+                let on = v == selection
+                Button {
+                    selection = v
+                } label: {
+                    Text(label)
+                        .font(.system(size: fontSize, weight: on ? .bold : .medium))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                        .foregroundStyle(on ? Color.white : Color.primary.opacity(0.85))
+                        .frame(maxWidth: .infinity)
+                        .frame(height: height)
+                        .background(RoundedRectangle(cornerRadius: 5)
+                            .fill(on ? Color.accentColor : Color.white.opacity(0.07)))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(help?(v) ?? "")
+            }
+        }
+        .frame(maxWidth: .infinity)
+    }
+}
+
+/// レイヤーの重ね方のボタン（ふつうの 4 つを 1 段に、特殊合成をその下に）
+struct BlendChoice: View {
+    @Binding var blend: BlendMode
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text("重ね方").font(.system(size: 11)).foregroundStyle(.secondary)
+            ChoiceButtons(selection: $blend, items: BlendMode.allCases.filter { !$0.isSpecial }.map { ($0, $0.label) })
+            ChoiceButtons(selection: $blend, items: BlendMode.allCases.filter(\.isSpecial).map { ($0, $0.label) })
+                .help("特殊合成：下のレイヤーの明るさを読んで、100% を超えた分をにじみ・色相ずれ・波紋に変える")
+        }
+    }
+}
+
+/// 拍数の短い書き方（ボタン用）
+func beatShort(_ b: Double) -> String {
+    switch b {
+    case 0.0625: "1/16"
+    case 0.125: "1/8"
+    case 0.25: "1/4"
+    case 0.5: "1/2"
+    default: b == b.rounded() ? "\(Int(b))" : String(format: "%.2f", b)
+    }
+}
+
 struct AnimEditor: View {
     @Binding var anim: ParamAnim
     let defaultRange: ClosedRange<Double>
@@ -88,25 +152,19 @@ struct AnimEditor: View {
             .labelsHidden()
             .controlSize(.large)
             if anim.isOn {
-                HStack(spacing: 6) {
-                    Picker("", selection: $anim.motion) {
-                        ForEach(AnimMotion.allCases) { Text($0.label).tag($0) }
+                ChoiceButtons(selection: $anim.motion, items: AnimMotion.allCases.map { ($0, $0.label) })
+                if anim.mode == .time {
+                    ValueDrag(label: "周期", value: $anim.seconds, range: 0.1...120, perPoint: 0.02, defaultValue: 4,
+                              format: { String(format: "%.1f秒", $0) })
+                        .frame(height: UI.rowHeight)
+                } else {
+                    HStack(spacing: 4) {
+                        ChoiceButtons(selection: $anim.beats, items: ParamAnim.beatChoices.map { ($0, beatShort($0)) },
+                                      columns: 5, fontSize: 11)
+                        Text("拍").font(.system(size: 11)).foregroundStyle(.secondary)
                     }
-                    .labelsHidden()
-                    .controlSize(.large)
-                    .frame(width: 112)
-                    if anim.mode == .time {
-                        ValueDrag(label: "周期", value: $anim.seconds, range: 0.1...120, perPoint: 0.02, defaultValue: 4,
-                                  format: { String(format: "%.1f秒", $0) })
-                    } else {
-                        Picker("", selection: $anim.beats) {
-                            ForEach(ParamAnim.beatChoices, id: \.self) { Text(ParamAnim.beatsLabel($0)).tag($0) }
-                        }
-                        .labelsHidden()
-                        .controlSize(.large)
-                    }
+                    .help("何拍で 1 周するか")
                 }
-                .frame(height: UI.rowHeight)
                 HStack(spacing: 6) {
                     ValueDrag(label: "から", value: $anim.lo, range: range, perPoint: perPoint,
                               defaultValue: defaultRange.lowerBound, format: format)
@@ -256,6 +314,7 @@ struct EffectCard: View {
                 Text(effect.kind.help).font(.system(size: 11)).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            if effect.kind == .strobe { strobeSwitches }
             LazyVGrid(columns: [GridItem(.fixed(UI.paramColumnWidth), spacing: 16),
                                 GridItem(.fixed(UI.paramColumnWidth), alignment: .top)], alignment: .leading, spacing: 8) {
                 ForEach(params.indices.filter { shows($0) }, id: \.self) { i in
@@ -267,10 +326,12 @@ struct EffectCard: View {
                             .help(effect.kind == .colorize
                                   ? "オン：元の明るさのまま色だけ変える／オフ：黒は黒、白はその色そのものになる" : "")
                     } else if let choices = p.choices {
-                        Picker(p.label, selection: valueBinding(i)) {
-                            ForEach(choices.indices, id: \.self) { c in Text(choices[c]).tag(Double(c)) }
+                        HStack(spacing: 8) {
+                            Text(p.label).font(.system(size: 12)).foregroundStyle(.secondary)
+                                .fixedSize()
+                            ChoiceButtons(selection: valueBinding(i),
+                                          items: choices.indices.map { (Double($0), choices[$0]) })
                         }
-                        .controlSize(.large)
                         .frame(height: UI.rowHeight)
                     } else {
                         AnimValueField(label: p.label, value: valueBinding(i), range: p.range, perPoint: p.perPoint,
@@ -295,6 +356,14 @@ struct EffectCard: View {
                     PaletteEditor(palette: $effect.palette)
                 }
             }
+            if effect.kind == .strobe && effect.value(0) < 0.5 {
+                HStack(spacing: 10) {
+                    Text("光る色").font(.system(size: 12)).foregroundStyle(.secondary)
+                    ColorPicker("", selection: colorBinding(\.color), supportsOpacity: false)
+                        .labelsHidden()
+                        .frame(width: 60, height: UI.rowHeight)
+                }
+            }
         }
         .padding(10)
         .background(RoundedRectangle(cornerRadius: 6).fill(Color.white.opacity(0.05)))
@@ -303,7 +372,37 @@ struct EffectCard: View {
 
     /// その値を出すか（カラーライズのパレットモードでは「明るさを保つ」は使わない）
     private func shows(_ i: Int) -> Bool {
-        !(effect.kind == .colorize && i == 1 && effect.value(0) > 0.5)
+        if effect.kind == .strobe {
+            // 光り方・合わせるもの・間隔は上のスイッチで。秒のときだけ「1 秒の回数」を出す
+            if i <= 2 { return false }
+            if i == 3 { return effect.value(1) >= 0.5 }
+        }
+        return !(effect.kind == .colorize && i == 1 && effect.value(0) > 0.5)
+    }
+
+    /// ストロボの切り替え（1 クリックで切り替わるスイッチ）
+    private var strobeSwitches: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 16) {
+                segmented(0, ["色で光る", "消える", "反転"], width: UI.paramColumnWidth)
+                segmented(1, ["BPM", "秒"], width: 120)
+            }
+            if effect.value(1) < 0.5 {
+                HStack(spacing: 8) {
+                    Text("間隔").font(.system(size: 12)).foregroundStyle(.secondary)
+                        .frame(width: 34, alignment: .leading)
+                    segmented(2, ["1/16", "1/8", "1/4", "1/2", "1", "2", "4"], width: UI.paramsWidth - 72)
+                    Text("拍").font(.system(size: 12)).foregroundStyle(.secondary)
+                }
+                .help("何拍ごとに光るか（BPM に合わせる）")
+            }
+        }
+        .opacity(effect.enabled ? 1 : 0.5)
+    }
+
+    private func segmented(_ i: Int, _ labels: [String], width: CGFloat) -> some View {
+        ChoiceButtons(selection: valueBinding(i), items: labels.indices.map { (Double($0), labels[$0]) })
+            .frame(width: width)
     }
 
     private func colorBinding(_ key: WritableKeyPath<Effect, RGB>) -> Binding<Color> {

@@ -12,6 +12,14 @@ enum Main {
             SelfTest.odPreview(path: args[i + 1], values: Array(vals.prefix(8)), time: vals.count > 8 ? vals[8] : 10)
             exit(0)
         }
+        if let i = args.firstIndex(of: "--card-preview"), args.count > i + 2, let k = EffectKind(rawValue: args[i + 1]) {
+            // 開発用：エフェクトの設定パネルを 1 枚の画像に書き出す（画面には出さない）
+            //   VJPlayer --card-preview strobe out.png
+            _ = NSApplication.shared
+            NSApp.setActivationPolicy(.prohibited)
+            CardPreview.write(kind: k, path: args[i + 2])
+            exit(0)
+        }
         if let i = args.firstIndex(of: "--selftest") {
             // 画面を出さずにエンジンだけ検証する
             let app = NSApplication.shared
@@ -134,5 +142,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return true
         }
         return false
+    }
+}
+
+/// 開発用：エフェクトの設定パネルを画像にする
+enum CardPreview {
+    struct Host: View {
+        @State var effect: Effect
+        @State var blend = BlendMode.normal
+        @State var anim: ParamAnim = { var a = ParamAnim(range: 0...1); a.mode = .beat; return a }()
+        var body: some View {
+            VStack(alignment: .leading, spacing: 10) {
+                EffectCard(effect: $effect, isFirst: true, isLast: true, move: { _ in }, remove: {})
+                HStack(alignment: .top, spacing: 16) {
+                    BlendChoice(blend: $blend)
+                        .frame(width: UI.paramColumnWidth)
+                    AnimEditor(anim: $anim, defaultRange: 0...1, format: EffectParam.percent, range: 0...1, perPoint: 0.003)
+                        .frame(width: UI.paramColumnWidth)
+                }
+            }
+                .frame(width: UI.paramsWidth + 20)
+                .padding(12)
+                .background(Color(white: 0.16))
+                .environment(\.colorScheme, .dark)
+                .environmentObject(Engine.shared)
+        }
+    }
+
+    static func write(kind: EffectKind, path: String) {
+        var e = Effect(kind: kind)
+        // 動かす値があれば 1 つ目を BPM で動かしておく（動きの設定の見た目も確かめる）
+        if let i = kind.params.firstIndex(where: { $0.animatable }) {
+            var a = e.anim(i); a.mode = .beat; e.setAnim(i, a)
+        }
+        let view = NSHostingView(rootView: Host(effect: e))
+        let size = view.fittingSize
+        let win = NSWindow(contentRect: NSRect(x: -10000, y: -10000, width: size.width, height: size.height),
+                           styleMask: [.borderless], backing: .buffered, defer: false)
+        win.appearance = NSAppearance(named: .darkAqua)
+        win.contentView = view
+        view.frame = NSRect(origin: .zero, size: size)
+        view.layoutSubtreeIfNeeded()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.3))
+        guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
+        view.cacheDisplay(in: view.bounds, to: rep)
+        try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
     }
 }

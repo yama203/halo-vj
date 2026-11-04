@@ -651,6 +651,26 @@ enum SelfTest {
         let ramp = tex { x, _ in SIMD3(repeating: Float(x) / Float(W - 1)) }
         r = run([group(clip(ramp, [fx(.posterize, [2, 0, 1])]))])
         check(near(r(2, 0), .zero) && near(r(5, 0), SIMD3(repeating: 1)), "ポスタライズ：2 段（暗い方は黒、明るい方は白）")
+        // ストロボ：BPM 120・間隔 1/2 拍（0.25 秒）・光る長さ 50% → 0〜0.125 秒は光る、0.125〜0.25 秒は元の絵
+        let stb = Effect(kind: .strobe)
+        let clock = BeatClock()
+        check(stb.color == RGB.white && stb.strobeLevel(at: 0.05, beat: clock, origin: 0) == 1
+              && stb.strobeLevel(at: 0.15, beat: clock, origin: 0) == 0
+              && stb.strobeLevel(at: 0.30, beat: clock, origin: 0) == 1, "ストロボ（BPM）：拍に合わせて光る・戻るを繰り返す")
+        var fast = clock; fast.bpm = 240
+        check(stb.strobeLevel(at: 0.10, beat: fast, origin: 0) == 0, "ストロボ（BPM）：テンポを上げると間隔も短くなる")
+        let sec = fx(.strobe, [0, 1, 3, 4, 0.5, 1, 0])
+        check(sec.strobeLevel(at: 0.1, beat: clock, origin: 0) == 1 && sec.strobeLevel(at: 0.2, beat: clock, origin: 0) == 0
+              && sec.strobeLevel(at: 10.1, beat: clock, origin: 10) == 1, "ストロボ（秒）：1 秒に 4 回")
+        let sdec = fx(.strobe, [0, 0, 3, 8, 0.5, 0.8, 1])
+        check(abs(sdec.strobeLevel(at: 0.0625, beat: clock, origin: 0) - 0.4) < 1e-6, "ストロボ：強さと残光（光ったあと弱まる）")
+        r = run([group(clip(tex { _, _ in red }))], EffectStack(effects: [stb]), now: 0.05)
+        let r2 = run([group(clip(tex { _, _ in red }))], EffectStack(effects: [stb]), now: 0.15)
+        check(near(r(3, 3), SIMD3(repeating: 1)) && near(r2(3, 3), red), "ストロボ（色で光る）：光る間は白、間は元の絵")
+        r = run([group(clip(tex { _, _ in red }, [fx(.strobe, [1, 0, 3, 8, 0.5, 1, 0])]))], now: 0.05)
+        check(near(r(3, 3), .zero), "ストロボ（消える）：光る間は消える")
+        r = run([group(clip(tex { _, _ in red }), [fx(.strobe, [2, 0, 3, 8, 0.5, 1, 0])])], now: 0.05)
+        check(near(r(3, 3), SIMD3(0, 1, 1)), "ストロボ（反転）：レイヤーにかけても効く（赤 → シアン）")
         // ディザ：灰色 50% を 2 段 → 白と黒が混ざって、平均はほぼ 50%
         r = run([group(clip(tex { _, _ in grey }, [fx(.posterize, [2, 1, 1])]))])
         var sum: Float = 0, whites = 0

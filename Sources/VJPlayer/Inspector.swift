@@ -402,12 +402,7 @@ struct LayerParams: View {
                 .toggleStyle(.switch)
                 .frame(height: UI.rowHeight)
                 .help("オン：このレイヤーのクリップは使わず、付けたエフェクトを下のレイヤー全体にかける。不透明度がかかり具合")
-                Picker("", selection: $layer.blend) {
-                    ForEach(BlendMode.allCases) { Text("重ね方：" + $0.label).tag($0) }
-                }
-                .labelsHidden()
-                .controlSize(.large)
-                .frame(height: UI.rowHeight)
+                BlendChoice(blend: $layer.blend)
                 AnimField(label: "不透明度", value: $layer.opacity, range: 0...1, perPoint: 0.003,
                           defaultValue: 1, showsBar: true, format: percent, key: .opacity, target: layer)
                 Group {
@@ -507,11 +502,10 @@ struct ClipSpeedFields: View {
                 .frame(height: UI.rowHeight)
         } else {
             HStack(spacing: 6) {
-                Picker("", selection: $slot.syncBeats) {
-                    ForEach(ClipSlot.syncBeatChoices, id: \.self) { Text(ParamAnim.beatsLabel($0) + "で1周").tag($0) }
-                }
-                .labelsHidden()
-                .controlSize(.large)
+                ChoiceButtons(selection: $slot.syncBeats, items: ClipSlot.syncBeatChoices.map { ($0, beatShort($0)) },
+                              fontSize: 11)
+                    .help("再生範囲を何拍で 1 周するか")
+                Text("拍で1周").font(.system(size: 11)).foregroundStyle(.secondary).fixedSize()
                 let raw = slot.bpmRate
                 let clipped = !ClipSlot.syncRateRange.contains(raw)
                 Text(String(format: "= %.3fx", slot.effectiveSpeed) + (clipped ? "（上限）" : ""))
@@ -561,15 +555,9 @@ struct PlayRangeSection: View {
             .help("アウト点まで来たとき：ループ＝イン点から繰り返す／最後で停止＝最後のコマで止める／ブラックアウト＝このレイヤーを消す")
             HStack(spacing: 8) {
                 Text("ジャンプ").font(.system(size: 12)).foregroundStyle(.secondary)
-                Picker("", selection: $slot.jumpBeats) {
-                    ForEach(ClipSlot.jumpChoices, id: \.self) { b in
-                        Text(b == 0 ? "しない" : ParamAnim.beatsLabel(b) + "ごとにランダムな位置へ").tag(b)
-                    }
-                }
-                .labelsHidden()
-                .controlSize(.large)
-                .frame(width: 260)
-                Spacer(minLength: 0)
+                ChoiceButtons(selection: $slot.jumpBeats,
+                              items: ClipSlot.jumpChoices.map { ($0, $0 == 0 ? "しない" : beatShort($0)) })
+                Text("拍ごと").font(.system(size: 12)).foregroundStyle(.secondary).fixedSize()
             }
             .help("BPM の拍の頭で、再生範囲の中のランダムな位置へ飛ぶ（音も一緒に飛ぶ）。テンポは右下の BPM / TAP で")
         }
@@ -702,6 +690,31 @@ struct MuteButton: View {
 
 
 /// 音だけのミュート（映像は出る）。音量の欄の横に置く
+/// 出力の上の「音をミュート」（マスターの音だけ消す。映像はブラックアウトやコンポジションのミュートで）
+struct AudioMuteButton: View {
+    @Binding var muted: Bool
+
+    var body: some View {
+        Group {
+            if muted {
+                button.buttonStyle(.borderedProminent).tint(.red)
+            } else {
+                button.buttonStyle(.bordered)
+            }
+        }
+        .controlSize(.regular)
+        .help(muted ? "音のミュートを解除" : "出力の音だけを消す（映像はそのまま）")
+    }
+
+    private var button: some View {
+        Button {
+            muted.toggle()
+        } label: {
+            Label(muted ? "音ミュート中" : "音ミュート", systemImage: muted ? "speaker.slash.fill" : "speaker.wave.2.fill")
+        }
+    }
+}
+
 struct SoundMuteButton: View {
     @Binding var muted: Bool
     let what: String

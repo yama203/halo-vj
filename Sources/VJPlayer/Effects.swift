@@ -7,7 +7,7 @@ import QuartzCore
 // 出力を、指定したフレームレートでしか更新しない（並び順には関係なく、その段全体にかかる）。
 
 enum EffectKind: String, Codable, CaseIterable, Identifiable {
-    case mirror, colorize, levels, posterize, posterizeTime
+    case mirror, colorize, levels, posterize, posterizeTime, strobe
     /// 特殊合成（レイヤーの重ね方）の値。エフェクト一覧には出さない
     case overdrive
     var id: String { rawValue }
@@ -22,6 +22,7 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
         case .levels: "レベル"
         case .posterize: "ポスタライズ"
         case .posterizeTime: "ポスタライズ時間"
+        case .strobe: "ストロボ"
         case .overdrive: "オーバードライブ加算"
         }
     }
@@ -31,7 +32,7 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
         switch self {
         case .mirror: .shape
         case .colorize, .levels, .posterize: .color
-        case .posterizeTime: .time
+        case .posterizeTime, .strobe: .time
         case .overdrive: .blend
         }
     }
@@ -43,9 +44,13 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
         case .levels: "slider.horizontal.3"
         case .posterize: "square.grid.3x3.square"
         case .posterizeTime: "timer"
+        case .strobe: "bolt.fill"
         case .overdrive: "sun.max"
         }
     }
+
+    /// ストロボの「間隔」の選択肢（拍）
+    static let strobeBeats: [Double] = [0.0625, 0.125, 0.25, 0.5, 1, 2, 4]
 
     /// ドラッグで運ぶときの文字列
     var dragString: String { "vjeffect:" + rawValue }
@@ -61,6 +66,7 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
         case .colorize: 1
         case .levels: 2
         case .posterize: 3
+        case .strobe: 4
         case .posterizeTime, .overdrive: -1
         }
     }
@@ -114,6 +120,19 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
                 EffectParam(label: "波紋の広がり", range: 40...800, defaultValue: 300, perPoint: 1,
                             format: { String(format: "%.0f px（1080p）", $0) }),
             ]
+        case .strobe:
+            // 光る／消える を BPM（拍）か 1 秒あたりの回数で繰り返す。光る色は下の「色」で選ぶ
+            return [
+                EffectParam(label: "光り方", range: 0...2, defaultValue: 0, choices: ["色で光る", "消える", "反転"]),
+                EffectParam(label: "合わせるもの", range: 0...1, defaultValue: 0, choices: ["BPM", "秒"]),
+                EffectParam(label: "間隔", range: 0...6, defaultValue: 3,
+                            choices: Self.strobeBeats.map { ParamAnim.beatsLabel($0) }),
+                EffectParam(label: "1 秒の回数", range: 0.5...30, defaultValue: 8, perPoint: 0.05,
+                            format: { String(format: "%.1f 回", $0) }, animRange: 2...16),
+                EffectParam(label: "光る長さ", range: 0.05...0.95, defaultValue: 0.5, format: EffectParam.percent),
+                EffectParam(label: "強さ", range: 0...1, defaultValue: 1, format: EffectParam.percent),
+                EffectParam(label: "残光（すっと消える）", range: 0...1, defaultValue: 0, format: EffectParam.percent),
+            ]
         case .posterizeTime:
             return [
                 EffectParam(label: "フレームレート", range: 1...60, defaultValue: 8, perPoint: 0.05, step: 1,
@@ -128,6 +147,7 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
         case .colorize: "明るさをもとに、1 色で染める（カラー）か、パレットの色に置き換える（パレット）"
         case .levels: "黒と白の位置・ガンマで明るさとコントラストを整える"
         case .posterize: "色の段数を減らす。ディザとドットを足すと GIF アニメのような見た目に"
+        case .strobe: "BPM か秒に合わせて点滅させる（色で光る・消える・反転）。残光を上げると光ったあとすっと消える"
         case .posterizeTime: "コマを間引いて、指定したフレームレートでしか動かないようにする（この段全体にかかる）"
         case .overdrive: "下のレイヤーに加算して 100% を超えた分を、にじみ（ハレーション）・色相ずれ・波紋に変える"
         }
@@ -255,6 +275,23 @@ struct Effect: Codable, Identifiable, Equatable {
     init(kind: EffectKind) {
         self.kind = kind
         values = kind.params.map(\.defaultValue)
+        if kind == .strobe { color = .white }
+    }
+
+    /// ストロボの t の時点の光り具合（0 = 元の絵、1 = いっぱいに光る／消える）
+    func strobeLevel(at t: Double, beat: BeatClock, origin: Double) -> Double {
+        let phase: Double
+        if value(1) < 0.5 {
+            let i = min(max(Int(value(2)), 0), EffectKind.strobeBeats.count - 1)
+            phase = beat.beat(at: t) / EffectKind.strobeBeats[i]
+        } else {
+            phase = (t - origin) * value(3, at: t, beat: beat, origin: origin)
+        }
+        let f = phase - floor(phase)
+        let duty = value(4, at: t, beat: beat, origin: origin)
+        guard f < duty else { return 0 }
+        let decay = value(6, at: t, beat: beat, origin: origin)
+        return value(5, at: t, beat: beat, origin: origin) * (1 - decay * f / duty)
     }
 
     enum CodingKeys: String, CodingKey { case id, kind, enabled, values, color, palette, anims }
@@ -291,6 +328,8 @@ struct Effect: Codable, Identifiable, Equatable {
     func shaderValues(at t: Double, beat: BeatClock, origin: Double) -> (SIMD4<Float>, SIMD4<Float>) {
         var v = [Float](repeating: 0, count: 8)
         for i in kind.params.indices where i < 8 { v[i] = Float(value(i, at: t, beat: beat, origin: origin)) }
+        // ストロボは光り具合を CPU で決めて渡す（a.x = 光り方、a.y = 光り具合）
+        if kind == .strobe { v[1] = Float(strobeLevel(at: t, beat: beat, origin: origin)) }
         return (SIMD4(v[0], v[1], v[2], v[3]), SIMD4(v[4], v[5], v[6], v[7]))
     }
 }
