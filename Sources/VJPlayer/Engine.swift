@@ -423,8 +423,50 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
         wire(layer)
         var newLayers = layers
         newLayers.insert(layer, at: r)
+        let old = layers.count
         restructure(layers: newLayers, columns: columns,
                     layerMap: { $0 >= r ? $0 + 1 : $0 })
+        remapSceneLayers(oldCount: old, newCount: layers.count) { $0 >= r ? $0 + 1 : $0 }
+    }
+
+    /// r 段目のレイヤーを to 段目へ動かす（クリップ・再生中のもの・設定ごと。シーンも付いてくる）
+    func moveLayer(_ r: Int, to t: Int) {
+        guard layers.indices.contains(r) else { return }
+        let t = min(max(t, 0), layers.count - 1)
+        guard r != t else { return }
+        var newLayers = layers
+        let l = newLayers.remove(at: r)
+        newLayers.insert(l, at: t)
+        let old = layers
+        func map(_ i: Int) -> Int? { newLayers.firstIndex { $0 === old[i] } }
+        restructure(layers: newLayers, columns: columns, layerMap: map)
+        remapSceneLayers(oldCount: old.count, newCount: layers.count, map)
+    }
+
+    /// レイヤーを足す・消す・動かしたときに、シーンのレイヤーごとの中身も同じように並べ直す
+    private func remapSceneLayers(oldCount: Int, newCount: Int, _ map: (Int) -> Int?) {
+        guard !scenes.isEmpty else { return }
+        var out = scenes
+        for k in out.indices {
+            var s = out[k]
+            // 全レイヤーぶん持っているシーンだけ数を合わせる（少ないものは、持っている所だけ並べ直す）
+            let n = s.playing.count == oldCount ? newCount : s.playing.count
+            var p = [Int?](repeating: nil, count: n)
+            var ls = (0..<n).map { _ in SavedLayer(opacity: 1, blend: 0, volume: 1) }
+            var ld = [UUID?](repeating: nil, count: n)
+            for i in s.playing.indices {
+                guard let j = map(i), j < n else { continue }
+                p[j] = s.playing[i]
+                if i < s.layers.count { ls[j] = s.layers[i] }
+                if let o = s.layerDecks, i < o.count { ld[j] = o[i] }
+            }
+            s.playing = p
+            s.layers = ls
+            s.layerDecks = ld.contains { $0 != nil } ? ld : nil
+            out[k] = s
+        }
+        scenes = out
+        if sceneDraft != nil { reloadSceneDraft() }
     }
 
     /// r 段目のレイヤーを消す（中のクリップも外れる）。最後の 1 段は消せない
@@ -432,8 +474,10 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
         guard layers.count > 1, layers.indices.contains(r) else { return }
         var newLayers = layers
         newLayers.remove(at: r)
+        let old = layers.count
         restructure(layers: newLayers, columns: columns,
                     layerMap: { $0 == r ? nil : ($0 > r ? $0 - 1 : $0) })
+        remapSceneLayers(oldCount: old, newCount: layers.count) { $0 == r ? nil : ($0 > r ? $0 - 1 : $0) }
     }
 
     /// c 列目の位置に空の列を入れる（c = columns なら右端）

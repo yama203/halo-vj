@@ -240,6 +240,10 @@ struct ClipGrid: View {
     @EnvironmentObject var engine: Engine
     static let spacing: CGFloat = 6
     static let headerWidth: CGFloat = 156
+    /// レイヤー欄の右の、縦の音量フェーダーの幅
+    static let volumeWidth: CGFloat = 26
+    /// 左端（レイヤー欄 ＋ 音量）の幅
+    static var leftWidth: CGFloat { headerWidth + 4 + volumeWidth }
     /// 上の列番号の帯と、下の「レイヤーを追加」の高さ
     static let columnBarHeight: CGFloat = 26
     /// 上のデッキのタブの高さ
@@ -255,7 +259,7 @@ struct ClipGrid: View {
     /// 1 マスの大きさ。横幅から決め、高さは横幅の 3/4（縦長にならないように）
     static func cellSize(forWidth w: CGFloat, columns: Int) -> CGSize {
         let n = CGFloat(max(columns, 1))
-        let cw = max((w - headerWidth - addColumnWidth - spacing * (n + 1)) / n, minCellWidth)
+        let cw = max((w - leftWidth - addColumnWidth - spacing * (n + 1)) / n, minCellWidth)
         // レイヤー欄（名前・停止・不透明度）が収まる高さは確保する
         return CGSize(width: cw, height: min(max(cw * 0.75, 96), 150))
     }
@@ -280,8 +284,17 @@ struct ClipGrid: View {
                     // シーンの編集中は、そのシーンのレイヤー
                     let layer = engine.viewLayer(r)
                     HStack(spacing: Self.spacing) {
-                        LayerHeader(layer: layer)
-                            .frame(width: Self.headerWidth, height: cell.height)
+                        HStack(spacing: 4) {
+                            LayerHeader(layer: layer)
+                                .frame(width: Self.headerWidth, height: cell.height)
+                            // 音量（縦のフェーダー）と音のミュート。調整レイヤーは音が無いので空ける
+                            if layer.isAdjustment {
+                                Color.clear.frame(width: Self.volumeWidth, height: cell.height)
+                            } else {
+                                LayerVolumeStrip(layer: layer)
+                                    .frame(width: Self.volumeWidth, height: cell.height)
+                            }
+                        }
                         if layer.isAdjustment {
                             AdjustmentRow(layer: layer,
                                           width: cell.width * CGFloat(engine.columns) + Self.spacing * CGFloat(engine.columns - 1),
@@ -318,6 +331,19 @@ struct ClipGrid: View {
             }
             .coordinateSpace(name: SlotDragState.space)
             .onPreferenceChange(SlotFramesKey.self) { drag.frames = $0 }
+            .onPreferenceChange(LayerFramesKey.self) { drag.layerFrames = $0 }
+            .overlay(alignment: .topLeading) {
+                // レイヤーを動かしているときの印
+                if let s = drag.layerSource, let t = drag.layerTarget, t != s {
+                    Label("L\(s + 1) → \(t + 1) 段目へ", systemImage: "arrow.up.arrow.down")
+                        .font(.system(size: 11, weight: .semibold))
+                        .padding(.horizontal, 8).padding(.vertical, 4)
+                        .background(Color.accentColor.opacity(0.85), in: Capsule())
+                        .fixedSize()
+                        .position(x: drag.location.x + 60, y: drag.location.y - 14)
+                        .allowsHitTesting(false)
+                }
+            }
             .overlay(alignment: .topLeading) {
                 // ⌘ドラッグ中のクリップ名
                 if let s = drag.source, engine.slots.indices.contains(s), let slot = engine.slots[s],
@@ -350,7 +376,7 @@ struct ColumnBar: View {
 
     var body: some View {
         HStack(spacing: ClipGrid.spacing) {
-            Color.clear.frame(width: ClipGrid.headerWidth)
+            Color.clear.frame(width: ClipGrid.leftWidth)
             ForEach(0..<engine.columns, id: \.self) { c in
                 Text("\(c + 1)")
                     .font(.system(size: 12, weight: .semibold).monospacedDigit())
@@ -410,11 +436,30 @@ final class SlotDragState: ObservableObject {
     @Published var copying = false
     /// 複数選択したクリップをまとめて動かしている
     @Published var group = false
+    /// レイヤー欄をドラッグしてレイヤーを動かしているときの、元の段と行き先の段
+    @Published var layerSource: Int?
+    @Published var layerTarget: Int?
+    var layerFrames: [Int: CGRect] = [:]
+
+    func layer(atY y: CGFloat) -> Int? {
+        if let hit = layerFrames.first(where: { y >= $0.value.minY && y <= $0.value.maxY })?.key { return hit }
+        // 上下にはみ出したら端の段
+        guard let top = layerFrames.min(by: { $0.value.minY < $1.value.minY }),
+              let bottom = layerFrames.max(by: { $0.value.minY < $1.value.minY }) else { return nil }
+        return y < top.value.minY ? top.key : (y > bottom.value.maxY ? bottom.key : nil)
+    }
     @Published var location: CGPoint = .zero
     var frames: [Int: CGRect] = [:]
 
     func index(at p: CGPoint) -> Int? {
         frames.first { $0.value.contains(p) }?.key
+    }
+}
+
+private struct LayerFramesKey: PreferenceKey {
+    static var defaultValue: [Int: CGRect] = [:]
+    static func reduce(value: inout [Int: CGRect], nextValue: () -> [Int: CGRect]) {
+        value.merge(nextValue()) { $1 }
     }
 }
 
@@ -430,6 +475,7 @@ private struct SlotFramesKey: PreferenceKey {
 struct LayerHeader: View {
     @ObservedObject var layer: Layer
     @EnvironmentObject var engine: Engine
+    @EnvironmentObject var drag: SlotDragState
 
     var body: some View {
         let selected = engine.selectedLayer == layer.index
@@ -496,11 +542,31 @@ struct LayerHeader: View {
                   : selected ? Color.accentColor.opacity(0.22) : Color.white.opacity(0.04)))
         .overlay(RoundedRectangle(cornerRadius: 6)
             .stroke(selected ? Color.accentColor : Color.gray.opacity(0.3), lineWidth: selected ? 1.5 : 1))
+        // レイヤーを動かすときの行き先
+        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.accentColor, lineWidth: 3)
+            .opacity(drag.layerSource != nil && drag.layerSource != layer.index && drag.layerTarget == layer.index ? 1 : 0)
+            .allowsHitTesting(false))
+        .opacity(drag.layerSource == layer.index ? 0.45 : 1)
+        .background(GeometryReader { g in
+            Color.clear.preference(key: LayerFramesKey.self, value: [layer.index: g.frame(in: .named(SlotDragState.space))])
+        })
         .contentShape(Rectangle())
         .onTapGesture {
             engine.selectedLayer = layer.index
             engine.inspectorTab = .layer
         }
+        // ドラッグで上下に動かす（不透明度の欄・ボタンの上からは動かない）
+        .gesture(DragGesture(minimumDistance: 6, coordinateSpace: .named(SlotDragState.space))
+            .onChanged { v in
+                if drag.layerSource == nil { drag.layerSource = layer.index }
+                drag.location = v.location
+                drag.layerTarget = drag.layer(atY: v.location.y)
+            }
+            .onEnded { _ in
+                if let s = drag.layerSource, let t = drag.layerTarget, s != t { engine.moveLayer(s, to: t) }
+                drag.layerSource = nil
+                drag.layerTarget = nil
+            })
         .effectDropTarget { k in
             layer.addEffect(k)
             engine.selectedLayer = layer.index
@@ -511,6 +577,11 @@ struct LayerHeader: View {
                 .disabled(engine.layerCount >= Engine.maxLayers)
             Button("下にレイヤーを追加") { engine.insertLayer(at: layer.index + 1) }
                 .disabled(engine.layerCount >= Engine.maxLayers)
+            Divider()
+            Button("上へ移動") { engine.moveLayer(layer.index, to: layer.index - 1) }
+                .disabled(layer.index == 0)
+            Button("下へ移動") { engine.moveLayer(layer.index, to: layer.index + 1) }
+                .disabled(layer.index >= engine.layerCount - 1)
             Divider()
             Button(layer.isAdjustment ? "調整レイヤーをやめる（クリップのレイヤーに戻す）" : "調整レイヤーにする（下のレイヤー全体にエフェクト）") {
                 layer.isAdjustment.toggle()
@@ -1120,5 +1191,55 @@ enum SelectionMenu {
         a.messageText = "移動できません"
         a.informativeText = "移動先の場所に、選んでいない別のクリップがあります。"
         a.runModal()
+    }
+}
+
+/// レイヤー欄の右の縦の音量フェーダー（上下ドラッグ・⇧で微調整・ダブルクリックで 100%）と、音のミュート
+struct LayerVolumeStrip: View {
+    @ObservedObject var layer: Layer
+    @State private var dragStart: Double?
+
+    var body: some View {
+        VStack(spacing: 4) {
+            Button {
+                layer.audioMuted.toggle()
+            } label: {
+                Image(systemName: layer.audioMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(layer.audioMuted ? Color.white : Color.secondary)
+                    .frame(width: 24, height: 20)
+                    .background(RoundedRectangle(cornerRadius: 4)
+                        .fill(layer.audioMuted ? Color.red : Color.white.opacity(0.06)))
+            }
+            .buttonStyle(.plain)
+            .help(layer.audioMuted ? "\(layer.name)の音のミュートを解除" : "\(layer.name)の音だけを消す（映像はそのまま）")
+
+            GeometryReader { g in
+                let h = g.size.height
+                ZStack(alignment: .bottom) {
+                    RoundedRectangle(cornerRadius: 4).fill(Color.white.opacity(0.06))
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill((layer.volume < 0.999 ? Color.orange : Color.blue).opacity(0.55))
+                        .frame(height: max(h * layer.volume, 0))
+                    // 今の値（%）
+                    Text("\(Int((layer.volume * 100).rounded()))")
+                        .font(.system(size: 9, weight: .semibold).monospacedDigit())
+                        .foregroundStyle(.white.opacity(0.85))
+                        .padding(.bottom, 3)
+                }
+                .opacity(layer.audioMuted ? 0.4 : 1)
+                .contentShape(Rectangle())
+                .gesture(DragGesture(minimumDistance: 1)
+                    .onChanged { v in
+                        let start = dragStart ?? layer.volume
+                        dragStart = start
+                        let k = NSEvent.modifierFlags.contains(.shift) ? 0.2 : 1.0
+                        layer.volume = min(max(start - Double(v.translation.height / max(h, 1)) * k, 0), 1)
+                    }
+                    .onEnded { _ in dragStart = nil })
+                .onTapGesture(count: 2) { layer.volume = 1 }
+                .help("\(layer.name)の音量 \(Int((layer.volume * 100).rounded()))%（上下ドラッグ・⇧で微調整・ダブルクリックで 100%）")
+            }
+        }
     }
 }

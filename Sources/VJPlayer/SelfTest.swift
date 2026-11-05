@@ -271,6 +271,7 @@ enum SelfTest {
         testDecks(check: check, wait: wait)
         testPads(check: check)
         testMultiSelect(check: check)
+        testMoveLayer(check: check)
 
         // 16. ミュート（クリップ・レイヤー・コンポジション）
         testMute(paths: paths, check: check, wait: wait)
@@ -1041,6 +1042,45 @@ enum SelfTest {
     }
 
     /// シーン：今の状態を保存して、切り替える（すぐ／フェード）
+    /// レイヤーの移動：クリップ・再生中・設定ごと動き、シーンも付いてくる
+    static func testMoveLayer(check: (Bool, String) -> Void) {
+        let e = Engine(persistent: false)
+        let c = e.columns
+        e.placeGenerator(.solid, at: 0)            // L1
+        e.placeGenerator(.noise, at: c + 1)        // L2
+        e.placeGenerator(.stripes, at: 2 * c)      // L3
+        e.trigger(0); e.trigger(c + 1)
+        e.layers[0].opacity = 0.3
+        e.layers[0].blend = .add
+        let l0 = e.layers[0]
+        let sc = e.addScene()
+        e.moveLayer(0, to: 2)
+        check(e.layers[2] === l0 && l0.index == 2 && abs(e.layers[2].opacity - 0.3) < 1e-9
+              && e.slots[2 * c]?.generator?.kind == .solid && e.slots[c + 1 - c]?.generator?.kind == .noise
+              && e.slots[c]?.generator?.kind == .stripes,
+              "レイヤーの移動：クリップと設定ごと動き、ほかの段は詰まる")
+        check(e.activeByLayer[2] == 2 * c && e.activeByLayer[0] == 1 && e.slots[2 * c]?.isPlaying == true,
+              "レイヤーの移動：再生中のクリップは止まらずに付いていく")
+        let s2 = e.scenes.first { $0.id == sc.id }
+        check(s2?.playing[2] == 0 && s2?.playing[0] == 1 && s2?.playing[1] == nil
+              && abs((s2?.layers[2].opacity ?? 0) - 0.3) < 1e-9 && s2?.layers[2].blend == BlendMode.add.rawValue,
+              "レイヤーの移動：シーンの中身も同じように並べ替わる")
+        e.updateScene(sc.id) { $0.fade = 0 }
+        e.stopAll()
+        e.recallScene(sc.id)
+        check(e.activeByLayer[2] == 2 * c && e.activeByLayer[0] == 1 && abs(e.layers[2].opacity - 0.3) < 1e-9,
+              "レイヤーの移動：動かしたあとにシーンを呼んでも、正しいレイヤーに出る")
+        // 足す・消すでもシーンが付いてくる
+        e.insertLayer(at: 0)
+        let s3 = e.scenes.first { $0.id == sc.id }
+        check(s3?.playing.count == e.layers.count && s3?.playing[0] == nil && s3?.playing[3] == 0 && s3?.playing[1] == 1,
+              "レイヤーを足すと、シーンの中身もずれる")
+        e.removeLayer(0)
+        let s4 = e.scenes.first { $0.id == sc.id }
+        check(s4?.playing.count == e.layers.count && s4?.playing[2] == 0 && s4?.playing[0] == 1,
+              "レイヤーを消すと、シーンの中身も詰まる")
+    }
+
     /// グリッドの複数選択：⇧クリックで選んで、まとめて削除・移動
     static func testMultiSelect(check: (Bool, String) -> Void) {
         let e = Engine(persistent: false)
