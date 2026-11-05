@@ -18,6 +18,16 @@ enum Main {
             SelfTest.odBench(width: n.count > 1 ? n[0] : 1920, height: n.count > 1 ? n[1] : 1080)
             exit(0)
         }
+        if let i = args.firstIndex(of: "--panel-preview"), args.count > i + 3,
+           let w = Double(args[i + 1]), let clip = Int(args[i + 2]) {
+            // 開発用：下のパラメーターパネルを、幅 w で画像に書き出す（レイアウトの確認。プレビューの中身は出ない）
+            //   VJPlayer --panel-preview 1500 クリップ番号 out.png
+            _ = NSApplication.shared
+            NSApp.setActivationPolicy(.prohibited)
+            Engine.shared.selectClip(clip)
+            CardPreview.writePanel(width: w, path: args[i + 3])
+            exit(0)
+        }
         if let i = args.firstIndex(of: "--card-preview"), args.count > i + 2, let k = EffectKind(rawValue: args[i + 1]) {
             // 開発用：エフェクトの設定パネルを 1 枚の画像に書き出す（画面には出さない）
             //   VJPlayer --card-preview strobe out.png
@@ -184,6 +194,28 @@ enum CardPreview {
                 .environment(\.colorScheme, .dark)
                 .environmentObject(Engine.shared)
         }
+    }
+
+    static func writePanel(width: Double, path: String) {
+        let root = ParameterPanel(previewHeight: 300)
+            .frame(width: width, height: 420)
+            .background(Color(white: 0.12))
+            .environment(\.colorScheme, .dark)
+            .environmentObject(Engine.shared)
+        snapshot(NSHostingView(rootView: root), size: NSSize(width: width, height: 420), path: path)
+    }
+
+    private static func snapshot(_ view: NSView, size: NSSize, path: String) {
+        let win = NSWindow(contentRect: NSRect(x: -10000, y: -10000, width: size.width, height: size.height),
+                           styleMask: [.borderless], backing: .buffered, defer: false)
+        win.appearance = NSAppearance(named: .darkAqua)
+        win.contentView = view
+        view.frame = NSRect(origin: .zero, size: size)
+        view.layoutSubtreeIfNeeded()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.4))
+        guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
+        view.cacheDisplay(in: view.bounds, to: rep)
+        try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
     }
 
     static func write(kind: EffectKind, path: String) {

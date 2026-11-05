@@ -307,7 +307,7 @@ struct EffectReorderDrop<H: ObservableObject & EffectHolder>: ViewModifier {
                         if s.hasPrefix(EffectUIState.movePrefix),
                            let mid = UUID(uuidString: String(s.dropFirst(EffectUIState.movePrefix.count))) {
                             holder.moveEffect(mid, to: index)
-                        } else if let k = EffectKind.fromDragString(s) {
+                        } else if let k = EffectKind.fromDragString(s), !k.isGenerator {
                             let e = holder.insertEffect(k, at: index)
                             EffectUIState.shared.expanded.insert(e.id)
                         }
@@ -472,6 +472,24 @@ struct EffectCard: View {
                 }
             }
             if effect.kind == .polyMask { PolyMaskControls(effect: $effect) }
+            if effect.kind.usesColor {
+                HStack(spacing: 10) {
+                    Text("色").font(.system(size: 12)).foregroundStyle(.secondary)
+                    ColorPicker("", selection: colorBinding(\.color), supportsOpacity: false)
+                        .labelsHidden()
+                        .frame(width: 60, height: UI.rowHeight)
+                    ForEach([RGB.white, RGB.black, .hsb(0, 0.85, 1), .hsb(0.33, 0.85, 1), .hsb(0.6, 0.85, 1),
+                             .hsb(0.83, 0.85, 1), .hsb(0.13, 0.85, 1)], id: \.self) { c in
+                        Button { var e = effect; e.color = c; effect = e } label: {
+                            RoundedRectangle(cornerRadius: 4).fill(Color(rgb: c))
+                                .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.gray.opacity(0.5)))
+                                .frame(width: 22, height: 22)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            if effect.kind == .gradient { PaletteEditor(palette: $effect.palette) }
             if effect.kind == .strobe && effect.value(0) < 0.5 {
                 HStack(spacing: 10) {
                     Text("光る色").font(.system(size: 12)).foregroundStyle(.secondary)

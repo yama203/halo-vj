@@ -111,6 +111,29 @@ struct EffectUniforms {
     float4 pts[16];
 };
 
+
+// ---- ジェネレーター（動画の代わりに置く絵）。入力の絵は使わず、大きさだけ見る ----
+static float ghash(float2 p) { return fract(sin(dot(p, float2(127.1, 311.7))) * 43758.5453); }
+static float gnoise(float2 p) {
+    float2 i = floor(p), f = fract(p);
+    float2 w = f * f * (3.0 - 2.0 * f);
+    return mix(mix(ghash(i), ghash(i + float2(1, 0)), w.x), mix(ghash(i + float2(0, 1)), ghash(i + float2(1, 1)), w.x), w.y);
+}
+static float2 grot(float2 p, float deg) {
+    float a = deg * 3.14159265 / 180.0;
+    return float2(p.x * cos(a) + p.y * sin(a), -p.x * sin(a) + p.y * cos(a));
+}
+// パレット（n 色を順になめらかにつなぐ）の x（0〜1）の色
+static float3 gpal(constant float4* pal, int count, float x) {
+    int n = max(count, 1);
+    if (n == 1) return pal[0].rgb;
+    float t = saturate(x) * float(n - 1);
+    int i = min(int(floor(t)), n - 2);
+    return mix(pal[i].rgb, pal[i + 1].rgb, t - float(i));
+}
+// ふち（sd：中がマイナス）を aa の幅でなめらかにした不透明度
+static float gcover(float sd, float aa) { return 1.0 - smoothstep(-aa, aa, sd); }
+
 // マスク：m（1 = 見える、0 = 隠す）を、ふちのぼかしの幅 f（px）で、形からの距離 sd（中がマイナス）から決める
 static float maskFrom(float sd, float f) { return saturate(0.5 - sd / max(f, 1.0)); }
 
@@ -146,6 +169,95 @@ fragment float4 feffect(VOut in [[stage_in]],
                         sampler s [[sampler(0)]]) {
     float2 px = in.pos.xy;
     float2 uv = px / u.size;
+    if (u.kind >= 8) {
+        // 縦の長さを 1 とした、中心が 0 の座標（y は下が +）
+        float2 p = (px - 0.5 * u.size) / u.size.y;
+        float aspect = u.size.x / u.size.y;
+        if (u.kind == 8) return float4(u.color.rgb * u.a.x, 1.0);
+        if (u.kind == 9) {
+            // グラデーション：a = 形, 角度, 繰り返し, 動いた量
+            float2 d = grot(p, u.a.y);
+            float t;
+            int shape = int(u.a.x + 0.5);
+            if (shape == 1) t = length(p) / (0.5 * length(float2(aspect, 1.0)));
+            else if (shape == 2) t = atan2(d.y, d.x) / 6.2831853 + 0.5;
+            else t = d.x / aspect + 0.5;
+            t = t * u.a.z - u.a.w;
+            // 端で折り返して、つなぎ目が出ないように
+            float x = 1.0 - abs(fract(t * 0.5) * 2.0 - 1.0);
+            return float4(gpal(u.pal, u.palCount, x), 1.0);
+        }
+        if (u.kind == 10) {
+            // ストライプ：a = 本数, 太さ, 角度, 動いた量 / b.x = ぼかし
+            float sCoord = grot(p, u.a.z).y * u.a.x - u.a.w;
+            float c = abs(fract(sCoord) - 0.5);
+            float aa = fwidth(sCoord) + u.b.x * 0.5;
+            float k = gcover(c - u.a.y * 0.5, aa);
+            return float4(u.color.rgb * k, k);
+        }
+        if (u.kind == 11) {
+            // チェッカー・格子・ドット：a = 模様, マスの数, 太さ, 動いた量（横へ流れる）
+            float2 q = p * u.a.y + float2(u.a.w, 0.0);
+            float2 f = fract(q);
+            float aa = fwidth(q.x);
+            int m = int(u.a.x + 0.5);
+            float k;
+            if (m == 0) {
+                float2 cell = floor(q);
+                k = fmod(abs(cell.x + cell.y), 2.0) < 0.5 ? 1.0 : 0.0;
+            } else if (m == 1) {
+                float d = min(min(f.x, 1.0 - f.x), min(f.y, 1.0 - f.y));
+                k = gcover(d - u.a.z * 0.5, aa);
+            } else {
+                k = gcover(length(f - 0.5) - u.a.z * 0.5, aa);
+            }
+            return float4(u.color.rgb * k, k);
+        }
+        if (u.kind == 12) {
+            // ノイズ：a = 種類, 細かさ, 動いた量（時間）, コントラスト
+            float v;
+            if (u.a.x > 0.5) {
+                // 砂嵐：粒は細かさで決まる。コマ（1/30 秒）ごとに変わる
+                float grain = max(u.size.y / (u.a.y * 40.0), 1.0);
+                v = ghash(floor(px / grain) + floor(u.a.z * 30.0) * float2(17.13, 9.71));
+            } else {
+                // なめらか：2 段重ねて、時間で 2 枚のあいだを行き来する
+                float2 q = p * u.a.y;
+                float t0 = floor(u.a.z), ft = smoothstep(0.0, 1.0, fract(u.a.z));
+                float2 o0 = float2(t0 * 3.7, t0 * 1.9), o1 = o0 + float2(3.7, 1.9);
+                float n0 = gnoise(q + o0) * 0.65 + gnoise(q * 2.1 + o0 * 1.3) * 0.35;
+                float n1 = gnoise(q + o1) * 0.65 + gnoise(q * 2.1 + o1 * 1.3) * 0.35;
+                v = mix(n0, n1, ft);
+            }
+            v = saturate((v - 0.5) * u.a.w + 0.5);
+            return float4(u.color.rgb * v, 1.0);
+        }
+        // 図形：a = 形, 大きさ, 線の太さ, 数 / b = 角度, ぼかし
+        float n = max(u.a.w, 1.0);
+        float2 q = p * n;
+        // 1 つのときは並べない（左右の端に隣の図形が出ないように）
+        float2 f = grot(n < 1.5 ? q : fract(q + 0.5) - 0.5, u.b.x);
+        float r = u.a.y * 0.5, th = u.a.z * 0.5;
+        float sd;
+        int m = int(u.a.x + 0.5);
+        if (m == 0) sd = length(f) - r;
+        else if (m == 1) sd = abs(length(f) - r) - th;
+        else if (m == 2 || m == 3) {
+            float2 qq = abs(f) - r;
+            sd = length(max(qq, 0.0)) + min(max(qq.x, qq.y), 0.0);
+            if (m == 3) sd = abs(sd) - th;
+        } else {
+            // 正三角形（上向き）
+            const float k3 = 1.7320508;
+            float2 t = float2(abs(f.x), -f.y - r * 0.25);
+            t.x -= r; t.y += r / k3;
+            if (t.x + k3 * t.y > 0.0) t = float2(t.x - k3 * t.y, -k3 * t.x - t.y) / 2.0;
+            t.x -= clamp(t.x, -2.0 * r, 0.0);
+            sd = -length(t) * sign(t.y);
+        }
+        float k = gcover(sd, fwidth(q.x) + u.b.y);
+        return float4(u.color.rgb * k, k);
+    }
     if (u.kind == 6) {
         // マスク（形）：a = 形, 反転, 位置X, 位置Y / b = 幅, 高さ, 角度, ぼかし（高さに対する割合）
         float4 c = tex.sample(s, uv);

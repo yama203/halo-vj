@@ -672,7 +672,12 @@ struct SlotCell: View {
                 loadDropped(providers)
                 return true
             }
-            return EffectDrop.handle(providers) { k in
+            return EffectDrop.handle(providers, allowGenerators: true) { k in
+                if k.isGenerator {
+                    // ジェネレーター → このスロットに置く（再生中のクリップは置き換えない）
+                    if engine.placeGenerator(k, at: index) { engine.selectClip(index) } else { NSSound.beep() }
+                    return
+                }
                 guard let slot = engine.slots[index] else { NSSound.beep(); return }
                 slot.addEffect(k)
                 engine.selectClip(index)
@@ -688,7 +693,9 @@ struct SlotCell: View {
                 Button("選択（出力せずに編集）") { engine.selectClip(index) }
                 Button(slot.muted ? "ミュートを解除" : "ミュート（映像と音を出さない）") { slot.muted.toggle() }
                 Button("トランスフォームをリセット") { slot.resetTransform() }
-                Button("動画ファイルを付け直す…（設定はそのまま）") { ProjectMenu.relink(index) }
+                if !slot.isGenerator {
+                    Button("動画ファイルを付け直す…（設定はそのまま）") { ProjectMenu.relink(index) }
+                }
                 Button("別のクリップに差し替え…") { engine.openPanel(for: index) }
                 if active {
                     Button("このレイヤーを停止") { engine.stopLayer(engine.layerOf(index)) }
@@ -697,6 +704,11 @@ struct SlotCell: View {
                 Button("このスロットを空にする", role: .destructive) { engine.clear(index) }
             } else {
                 Button("クリップを読み込む…") { engine.openPanel(for: index) }
+                Menu("ジェネレーターを置く") {
+                    ForEach(EffectKind.generators) { k in
+                        Button(k.label) { if engine.placeGenerator(k, at: index) { engine.selectClip(index) } }
+                    }
+                }
             }
         }
     }
@@ -795,7 +807,7 @@ struct SlotContent: View {
 // MARK: - 右下のパネル（ライブ操作 / エフェクト一覧）
 
 struct SidePanel: View {
-    enum Tab: String { case live, effects }
+    enum Tab: String { case live, effects, generators }
     @AppStorage("sidePanelTab") private var tab = Tab.live
 
     var body: some View {
@@ -803,6 +815,7 @@ struct SidePanel: View {
             Picker("", selection: $tab) {
                 Text("ライブ").tag(Tab.live)
                 Text("エフェクト").tag(Tab.effects)
+                Text("ジェネレーター").tag(Tab.generators)
             }
             .pickerStyle(.segmented)
             .labelsHidden()
@@ -810,6 +823,7 @@ struct SidePanel: View {
             switch tab {
             case .live: LivePanel()
             case .effects: EffectBrowser()
+            case .generators: EffectBrowser(generators: true)
             }
         }
         .padding(12)

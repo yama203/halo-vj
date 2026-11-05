@@ -265,6 +265,7 @@ enum SelfTest {
         // 15. エフェクト
         testEffects(check)
         testClipPosterizeTime(paths: paths, check: check, wait: wait)
+        testGeneratorSlots(check: check)
 
         // 16. ミュート（クリップ・レイヤー・コンポジション）
         testMute(paths: paths, check: check, wait: wait)
@@ -729,6 +730,50 @@ enum SelfTest {
         check(PolyMaskOverlay<Engine>.contains(sqPts, CGPoint(x: 5, y: 5)) && !PolyMaskOverlay<Engine>.contains(sqPts, CGPoint(x: 15, y: 5))
               && PolyMaskOverlay<Engine>.nearestEdge(sqPts, CGPoint(x: 11, y: 5)) == 1,
               "マスクの編集：中かどうか・クリックした所に近い辺（そこに点を足す）")
+        // ジェネレーター：入力の絵は使わず、自分で描く
+        let anyT = tex { _, _ in blue }
+        var solid = Effect(kind: .solid); solid.color = RGB(r: 1, g: 0, b: 0)
+        r = run([group(clip(anyT, [solid]))])
+        check(near(r(3, 3), red) && near(r(0, 7), red), "ジェネレーター（単色）：全体がその色になる")
+        var grad = Effect(kind: .gradient); grad.palette = [.black, .white]; grad.values = [0, 0, 1, 0]
+        r = run([group(clip(anyT, [grad]))])
+        check(r(0, 3).x < 0.2 && r(7, 3).x > 0.8 && r(3, 3).x > r(1, 3).x,
+              String(format: "ジェネレーター（グラデーション）：左が暗く右が明るい（%.2f → %.2f）", r(0, 3).x, r(7, 3).x))
+        var gradMove = grad; gradMove.values[3] = 0.5
+        let gm0 = run([group(clip(anyT, [gradMove]))], now: 0)(4, 3), gm1 = run([group(clip(anyT, [gradMove]))], now: 0.5)(4, 3)
+        check(abs(gm0.x - gm1.x) > 0.1, "ジェネレーター：速さを付けると時間で流れる")
+        var stripes = Effect(kind: .stripes); stripes.values = [2, 0.5, 0, 0, 0]
+        r = run([group(clip(anyT, [stripes]))])
+        let lit = (0..<8).filter { r(3, $0).x > 0.5 }.count
+        check(lit >= 3 && lit <= 5, "ジェネレーター（ストライプ）：しまの所だけ色、あいだは透明（\(lit)/8 行）")
+        var checker = Effect(kind: .grid); checker.values = [0, 2, 0.15, 0]
+        r = run([group(clip(anyT, [checker]))])
+        check(abs(r(1, 1).x - r(5, 1).x) > 0.9 && abs(r(1, 1).x - r(1, 5).x) > 0.9, "ジェネレーター（チェッカー）：互い違い")
+        r = run([group(clip(anyT, [Effect(kind: .noise)]))])
+        var lo: Float = 1, hi: Float = 0
+        for y in 0..<8 { for x in 0..<8 { lo = min(lo, r(x, y).x); hi = max(hi, r(x, y).x) } }
+        check(hi - lo > 0.1, String(format: "ジェネレーター（ノイズ）：場所ごとに明るさが違う（%.2f〜%.2f）", lo, hi))
+        r = run([group(clip(anyT, [Effect(kind: .shapes)]))])
+        check(r(3, 3).x > 0.9 && near(r(0, 0), .zero), "ジェネレーター（図形）：真ん中に円、まわりは透明")
+        // 横長の絵でも、数が 1 なら左右の端に隣の図形が出ない
+        do {
+            let wide = { () -> MTLTexture in
+                let td = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: 32, height: 8, mipmapped: false)
+                td.usage = [.shaderRead]
+                return ctx.device.makeTexture(descriptor: td)!
+            }()
+            let fxp = EffectProcessor(); fxp.storageMode = .shared
+            let cb = ctx.queue.makeCommandBuffer()!
+            let out = fxp.apply(EffectStack(effects: [Effect(kind: .shapes)]), to: wide, key: "w", cb: cb)
+            cb.commit(); cb.waitUntilCompleted()
+            var px = [UInt8](repeating: 0, count: 32 * 8 * 4)
+            out.getBytes(&px, bytesPerRow: 32 * 4, from: MTLRegionMake2D(0, 0, 32, 8), mipmapLevel: 0)
+            let rowStart: Int = 4 * 32 * 4
+            let edge: UInt8 = px[rowStart + 3]
+            let mid: UInt8 = px[rowStart + 16 * 4 + 3]
+            check(edge == 0 && mid > 200, "ジェネレーター（図形）：数 1 なら 1 つだけ（端に出ない）")
+        }
+        check(EffectKind.generators.allSatisfy { GeneratorThumbnail.image(Effect(kind: $0)) != nil }, "ジェネレーター：サムネイルを描ける")
         // ストロボ：BPM 120・間隔 1/2 拍（0.25 秒）・光る長さ 50% → 0〜0.125 秒は光る、0.125〜0.25 秒は元の絵
         let stb = Effect(kind: .strobe)
         let clock = BeatClock()
@@ -976,6 +1021,30 @@ enum SelfTest {
         let g2 = run([group(clip(tex { _, _ in blue }), [fx(.posterizeTime, [4])])], compositor: c2, now: 5.2)(3, 3)
         let g3 = run([group(clip(tex { _, _ in blue }), [fx(.posterizeTime, [4])])], compositor: c2, now: 5.26)(3, 3)
         check(near(g1, red) && near(g2, red) && near(g3, blue), "ポスタライズ時間（レイヤー）：4fps なら 0.25 秒ごと")
+    }
+
+    /// ジェネレーターのクリップ：置く・再生する・複製・保存して読み込む
+    static func testGeneratorSlots(check: (Bool, String) -> Void) {
+        let e = Engine(persistent: false)
+        let placed = e.placeGenerator(.solid, at: 0)
+        e.slots[0]?.generator?.color = RGB(r: 0, g: 1, b: 0)
+        check(placed && e.slots[0]?.isGenerator == true && e.slots[0]?.isReady == true && e.slots[0]?.name == "単色"
+              && !e.placeGenerator(.mirror, at: 1), "ジェネレーターをクリップの枠に置ける（エフェクトは置けない）")
+        e.trigger(0)
+        e.updateFrame()
+        let f = e.frame(layer: 0)
+        check(f != nil && f?.texture.height == 1080 && f?.pixelBuffer == nil, "ジェネレーターを再生すると、描いた絵がレイヤーに出る")
+        check(e.duplicateSlot(0, to: 1) && e.slots[1]?.generator?.kind == .solid && e.slots[1]?.generator?.color.g == 1,
+              "ジェネレーターを複製できる（設定ごと）")
+        let state = e.makeState(relativeTo: nil)
+        let e2 = Engine(persistent: false)
+        e2.apply(state, baseDir: nil)
+        check(e2.slots[0]?.generator?.kind == .solid && e2.slots[0]?.generator?.color.g == 1 && e2.slots[0]?.isMissing == false
+              && e2.missingCount == 0, "ジェネレーターを保存して読み込める（「見つからない動画」にならない）")
+        e.selectedLayer = 1
+        let ok = e.placeGeneratorInSelectedLayer(.noise)
+        check(ok && e.slots[e.columns]?.generator?.kind == .noise && e.inspectedIndex == e.columns,
+              "ダブルクリック：選択中のレイヤーの空いている所に置いて選ぶ")
     }
 
     /// ポスタライズ時間（クリップ）：フレームの更新が指定のフレームレートまで減る

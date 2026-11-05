@@ -214,6 +214,11 @@ struct ParameterPanel: View {
                 }
             }
 
+            GeometryReader { geo in
+            // パラメーター 2 列（左：設定、右：エフェクト）を並べても、プレビューが本来の 55% 以上の大きさで残るなら横に並べる。
+            // そうでなければ 1 列（エフェクトは下）にして、プレビューを大きく
+            let previewW = previewHeight * engine.outputAspect
+            let twoCol = geo.size.width - 16 - SideBySide<EmptyView, EmptyView>.twoColumnWidth >= max(previewW * 0.55, 240)
             HStack(alignment: .top, spacing: 16) {
                 ZStack(alignment: .topLeading) {
                     MetalPreview(kind: previewKind)
@@ -237,8 +242,8 @@ struct ParameterPanel: View {
                 }
                 .aspectRatio(engine.outputAspect, contentMode: .fit)
                 .overlay(Rectangle().stroke(Color.gray.opacity(0.35)))
-                // パラメーター欄の幅を確保した残りに収める
-                .frame(maxWidth: .infinity, maxHeight: previewHeight, alignment: .topLeading)
+                // パラメーター欄の幅を確保した残りに収める（余ったら右に寄せずに左詰め）
+                .frame(maxWidth: previewHeight * engine.outputAspect, maxHeight: previewHeight, alignment: .topLeading)
 
                 ScrollView(.vertical) {
                 VStack(alignment: .leading, spacing: 0) {
@@ -259,10 +264,13 @@ struct ParameterPanel: View {
                     }
                 }
                 }
-                .frame(width: UI.paramsWidth, alignment: .topLeading)
+                .frame(alignment: .topLeading)
                 }
                 .scrollIndicators(.automatic)
-                .frame(width: UI.paramsWidth, alignment: .topLeading)
+                .frame(width: twoCol ? SideBySide<EmptyView, EmptyView>.twoColumnWidth : UI.paramsWidth, alignment: .topLeading)
+                .environment(\.paramsTwoColumn, twoCol)
+                Spacer(minLength: 0)
+            }
             }
         }
         .padding(12)
@@ -352,6 +360,7 @@ struct CompositionParams: View {
     @EnvironmentObject var engine: Engine
 
     var body: some View {
+        SideBySide {
         VStack(alignment: .leading, spacing: 0) {
         HStack(alignment: .top, spacing: 16) {
             ParamColumn(title: "トランスフォーム") {
@@ -373,8 +382,10 @@ struct CompositionParams: View {
                 .frame(height: UI.rowHeight)
             }
         }
-        EffectsSection(holder: engine)
-            .padding(.top, 14)
+        }
+        .frame(width: UI.paramsWidth, alignment: .topLeading)
+        } second: {
+            EffectsSection(holder: engine)
         }
     }
 }
@@ -401,6 +412,7 @@ struct LayerParams: View {
     @ObservedObject var layer: Layer
 
     var body: some View {
+        SideBySide {
         VStack(alignment: .leading, spacing: 0) {
         HStack(alignment: .top, spacing: 16) {
             ParamColumn(title: "トランスフォーム") {
@@ -440,8 +452,10 @@ struct LayerParams: View {
             .frame(width: UI.paramsWidth, alignment: .leading)
             .padding(.top, 14)
         }
-        EffectsSection(holder: layer)
-            .padding(.top, 14)
+        }
+        .frame(width: UI.paramsWidth, alignment: .topLeading)
+        } second: {
+            EffectsSection(holder: layer)
         }
     }
 }
@@ -466,6 +480,7 @@ struct ClipParams: View {
     @ObservedObject var slot: ClipSlot
 
     var body: some View {
+        SideBySide {
         VStack(alignment: .leading, spacing: 0) {
         HStack(alignment: .top, spacing: 16) {
             ParamColumn(title: "トランスフォーム") {
@@ -474,22 +489,36 @@ struct ClipParams: View {
             ParamColumn(title: "ミックス・再生") {
                 AnimField(label: "不透明度", value: $slot.opacity, range: 0...1, perPoint: 0.003, defaultValue: 1,
                           showsBar: true, format: percent, key: .opacity, target: slot)
-                Group {
+                if !slot.isGenerator {
                     HStack(spacing: 4) {
                         ValueDrag(label: "音量", value: $slot.clipVolume, range: 0...1, perPoint: 0.003,
                                   defaultValue: 1, showsBar: true, format: percent)
                             .opacity(slot.audioMuted ? 0.45 : 1)
                         SoundMuteButton(muted: $slot.audioMuted, what: "このクリップ")
                     }
+                    .frame(height: UI.rowHeight)
                 }
-                .frame(height: UI.rowHeight)
-                ClipSpeedFields(slot: slot)
+                if !slot.isGenerator { ClipSpeedFields(slot: slot) }
             }
         }
-        PlayRangeSection(slot: slot)
+        if slot.generator != nil {
+            // ジェネレーター：再生範囲・速度の代わりに、絵の設定
+            VStack(alignment: .leading, spacing: 6) {
+                SectionTitle("ジェネレーター：" + (slot.generator?.kind.label ?? ""))
+                EffectCard(effect: Binding(get: { slot.generator ?? Effect(kind: .solid) }, set: { slot.generator = $0 }),
+                           origin: slot.animOrigin, isFirst: true, isLast: true, move: { _ in }, remove: {},
+                           isBlendSettings: true)
+            }
+            .frame(width: UI.paramsWidth, alignment: .leading)
             .padding(.top, 10)
-        EffectsSection(holder: slot)
-            .padding(.top, 14)
+        } else {
+            PlayRangeSection(slot: slot)
+                .padding(.top, 10)
+        }
+        }
+        .frame(width: UI.paramsWidth, alignment: .topLeading)
+        } second: {
+            EffectsSection(holder: slot)
         }
     }
 }
@@ -742,5 +771,38 @@ struct SoundMuteButton: View {
         }
         .buttonStyle(.plain)
         .help(muted ? "\(what)の音のミュートを解除" : "\(what)の音だけを消す（映像はそのまま）")
+    }
+}
+
+/// パラメーター（左）とエフェクト欄（右）。パネルに幅があれば横に並べ、無ければ縦に積む
+struct SideBySide<A: View, B: View>: View {
+    static var gap: CGFloat { 20 }
+    /// 2 列にしたときの幅（右端のスクロールバーの分も）
+    static var twoColumnWidth: CGFloat { UI.paramsWidth * 2 + gap + 12 }
+    @Environment(\.paramsTwoColumn) private var twoCol
+    @ViewBuilder var first: A
+    @ViewBuilder var second: B
+
+    var body: some View {
+        if twoCol {
+            HStack(alignment: .top, spacing: Self.gap) {
+                first
+                second.frame(width: UI.paramsWidth, alignment: .topLeading)
+            }
+        } else {
+            VStack(alignment: .leading, spacing: 14) {
+                first
+                second
+            }
+        }
+    }
+}
+
+private struct ParamsTwoColumnKey: EnvironmentKey { static let defaultValue = false }
+extension EnvironmentValues {
+    /// パラメーター欄を 2 列（右にエフェクト）にするか
+    var paramsTwoColumn: Bool {
+        get { self[ParamsTwoColumnKey.self] }
+        set { self[ParamsTwoColumnKey.self] = newValue }
     }
 }

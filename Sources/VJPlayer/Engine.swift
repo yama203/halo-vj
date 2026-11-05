@@ -14,12 +14,18 @@ struct RenderParams {
 
 /// 表示中の映像フレーム。GPU が描画し終わるまで参照を持ち続けるための入れ物。
 final class FrameHolder {
-    let pixelBuffer: CVPixelBuffer
-    let cvTexture: CVMetalTexture
+    let pixelBuffer: CVPixelBuffer?
+    let cvTexture: CVMetalTexture?
     let texture: MTLTexture
     init(pixelBuffer: CVPixelBuffer, cvTexture: CVMetalTexture, texture: MTLTexture) {
         self.pixelBuffer = pixelBuffer
         self.cvTexture = cvTexture
+        self.texture = texture
+    }
+    /// ジェネレーターが描いた絵
+    init(texture: MTLTexture) {
+        pixelBuffer = nil
+        cvTexture = nil
         self.texture = texture
     }
 }
@@ -240,6 +246,9 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
             var outgoingMuted = false
             var clipEffects = EffectStack()
             var outgoingEffects = EffectStack()
+            /// ジェネレーターのクリップなら、その設定（動画のフレームの代わりに描く）
+            var generator: Effect?
+            var outgoingGenerator: Effect?
             var layerEffects = EffectStack()
             /// 新しいクリップの見え具合（0→1）。消えていく方は 1 - これ
             var crossfade = Fade()
@@ -250,6 +259,8 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
             case live(layer: Int)
             /// 出力していない → プレビュー専用に再生
             case player(PreviewPlayer)
+            /// 出力していないジェネレーター → プレビュー用に描く
+            case generator(Effect, origin: Double)
         }
         var layers: [LayerState] = []
         var homographyInverse = matrix_identity_float3x3
@@ -264,6 +275,8 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
         var compEffects = EffectStack()
         var previewEffects = EffectStack()
         var compMuted = false
+        /// ジェネレーターを描く大きさ（出力の縦横比で、高さ 1080）
+        var generatorSize = (1920, 1080)
         var selectedLayer = 0
     }
     /// クリッププレビュー用の再生（メインスレッドで管理）
@@ -535,8 +548,14 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
 
     /// 同じ設定のクリップを、url の動画で作る（複製・ファイルの付け直し）
     private static func copy(of src: ClipSlot, url: URL) -> ClipSlot {
-        let copy = ClipSlot(url: url, speed: src.speed, endAction: src.endAction,
+        let copy: ClipSlot
+        if let g = src.generator {
+            var g2 = g; g2.id = UUID()
+            copy = ClipSlot(generator: g2)
+        } else {
+            copy = ClipSlot(url: url, speed: src.speed, endAction: src.endAction,
                             inPoint: src.inPoint, outPoint: src.outPoint)
+        }
         copy.posX = src.posX; copy.posY = src.posY
         copy.scale = src.scale; copy.rotation = src.rotation
         copy.opacity = src.opacity; copy.clipVolume = src.clipVolume
@@ -600,6 +619,25 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
     }
 
     // MARK: - クリップの読み込み
+
+    /// ジェネレーターを index に置く（あれば置き換える。再生中なら何もしない）
+    @discardableResult
+    func placeGenerator(_ kind: EffectKind, at index: Int) -> Bool {
+        guard kind.isGenerator, slots.indices.contains(index), activeByLayer[layerOf(index)] != index else { return false }
+        setSlot(index, ClipSlot(generator: Effect(kind: kind)))
+        scheduleSave()
+        return true
+    }
+
+    /// 選択中のレイヤーの空いているいちばん左にジェネレーターを置いて、選ぶ。空きが無ければ false
+    @discardableResult
+    func placeGeneratorInSelectedLayer(_ kind: EffectKind) -> Bool {
+        let r = selectedLayer
+        guard let i = (0..<columns).map({ r * columns + $0 }).first(where: { slots[$0] == nil }),
+              placeGenerator(kind, at: i) else { return false }
+        selectClip(i)
+        return true
+    }
 
     /// 複数のクリップを index から右へ順番に入れる（その段の右端まで）
     func load(urls: [URL], startingAt index: Int) {
@@ -726,6 +764,8 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
                                                                        origin: slot?.animOrigin ?? 0),
                                               outgoingEffects: EffectStack(effects: out?.effects ?? [], beat: beatClock,
                                                                            origin: out?.animOrigin ?? 0),
+                                              generator: slot?.generator,
+                                              outgoingGenerator: out?.generator,
                                               layerEffects: EffectStack(effects: l.effects, beat: beatClock),
                                               crossfade: crossfades[l.index])
             },
@@ -740,6 +780,7 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
         state.beat = beatClock
         state.compEffects = EffectStack(effects: effects, beat: beatClock)
         state.compMuted = compMuted
+        state.generatorSize = (max(Int((1080 * outputAspect).rounded()), 1), 1080)
         state.previewEffects = EffectStack(effects: inspectedIndex.flatMap { slots[$0]?.effects } ?? [], beat: beatClock,
                                            origin: inspectedIndex.flatMap { slots[$0]?.animOrigin } ?? 0)
         state.selectedLayer = selectedLayer
@@ -758,6 +799,11 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
             previewPlayer?.cancel()
             previewPlayer = nil
             return (.live(layer: r), slot.animTransform)
+        }
+        if let g = slot.generator {
+            previewPlayer?.cancel()
+            previewPlayer = nil
+            return (.generator(g, origin: generatorPreviewOrigin(slot)), slot.animTransform)
         }
         guard slot.isReady else { return (.none, slot.animTransform) }
         if previewPlayer?.slot !== slot {
@@ -782,7 +828,14 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
         var updated = 0
         for (r, l) in layerStates.enumerated() {
             if let out = l.outgoing {
-                if let pb = out.frameForDisplay(at: now), let holder = makeHolder(pb) {
+                if let g = l.outgoingGenerator {
+                    if let holder = renderGenerator(g, origin: l.outgoingEffects.origin, key: "go\(r)", now: now) {
+                        renderLock.withLock {
+                            if renderState.layers.indices.contains(r), outgoingFrames.indices.contains(r),
+                               renderState.layers[r].outgoing === out { outgoingFrames[r] = holder }
+                        }
+                    }
+                } else if let pb = out.frameForDisplay(at: now), let holder = makeHolder(pb) {
                     renderLock.withLock {
                         // 取り込んでいる間にレイヤーが増減していたら捨てる
                         if renderState.layers.indices.contains(r), outgoingFrames.indices.contains(r),
@@ -801,6 +854,15 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
                 let id = ObjectIdentifier(slot)
                 if clipTicks[id] == tick && renderLock.withLock({ frames.indices.contains(r) && frames[r] != nil }) { continue }
                 clipTicks[id] = tick
+            }
+            if let g = l.generator {
+                guard let holder = renderGenerator(g, origin: l.clipEffects.origin, key: "g\(r)", now: now) else { continue }
+                renderLock.withLock {
+                    if renderState.layers.indices.contains(r), frames.indices.contains(r),
+                       renderState.layers[r].slot === slot { frames[r] = holder }
+                }
+                updated += 1
+                continue
             }
             guard let pb = slot.frameForDisplay(at: now) else { continue }
 
@@ -826,10 +888,48 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
                     if case .player(let cur) = renderState.preview, cur === p { previewFrame = holder }
                 }
             }
+        } else if case .generator(let g, let origin) = preview {
+            if let holder = renderGenerator(g, origin: origin, key: "gp", now: now) {
+                renderLock.withLock { previewFrame = holder }
+            }
         } else {
             renderLock.withLock { previewFrame = nil }
         }
         return updated
+    }
+
+    // MARK: ジェネレーター（描画スレッド）
+
+    private let generatorFX = EffectProcessor()
+    private var generatorBlank: MTLTexture?
+    /// 出力していないジェネレーターのプレビューで、秒の動きを数え始める時刻
+    private var generatorPreviewStart: [ObjectIdentifier: Double] = [:]
+
+    private func generatorPreviewOrigin(_ slot: ClipSlot) -> Double {
+        let id = ObjectIdentifier(slot)
+        if let t = generatorPreviewStart[id] { return t }
+        let t = CACurrentMediaTime()
+        generatorPreviewStart = [id: t]
+        return t
+    }
+
+    /// ジェネレーターの今の絵を描く（描画スレッドから）。同じ番号の絵は前のコマの描画が終わってから描き直される
+    private func renderGenerator(_ g: Effect, origin: Double, key: String, now: Double) -> FrameHolder? {
+        let (size, beat) = renderLock.withLock { (renderState.generatorSize, renderState.beat) }
+        let ctx = MetalContext.shared
+        if generatorBlank?.width != size.0 || generatorBlank?.height != size.1 {
+            let td = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: size.0, height: size.1,
+                                                              mipmapped: false)
+            td.usage = [.shaderRead]
+            td.storageMode = .private
+            generatorBlank = ctx.device.makeTexture(descriptor: td)
+        }
+        guard let blank = generatorBlank, let cb = ctx.queue.makeCommandBuffer() else { return nil }
+        var e = g
+        e.enabled = true
+        let out = generatorFX.apply(EffectStack(effects: [e], beat: beat, origin: origin), to: blank, key: key, cb: cb, now: now)
+        cb.commit()
+        return out === blank ? nil : FrameHolder(texture: out)
     }
 
     private func makeHolder(_ pb: CVPixelBuffer) -> FrameHolder? {
@@ -847,7 +947,7 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
             switch renderState.preview {
             case .none: f = nil
             case .live(let r): f = frames[r]
-            case .player: f = previewFrame
+            case .player, .generator: f = previewFrame
             }
             guard let f else { return [] }
             return [LayerDraw(texture: f.texture, opacity: 1, blend: .normal,
@@ -1005,6 +1105,8 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
         var effects: [Effect]?
         var muted: Bool?
         var audioMuted: Bool?
+        /// ジェネレーター（動画ではない）。あれば path は使わない
+        var generator: Effect?
     }
 
     /// [ParamKey: ParamAnim] ⇔ 保存用の [String: ParamAnim]
@@ -1116,13 +1218,14 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
             format: dir == nil ? nil : "vjplayer-project-1",
             columns: columns,
             slots: slots.map { $0.map {
-                SavedSlot(path: $0.url.path, relPath: rel($0.url), speed: $0.speed, loop: $0.loop,
+                SavedSlot(path: $0.generator == nil ? $0.url.path : "", relPath: $0.generator == nil ? rel($0.url) : nil,
+                          speed: $0.speed, loop: $0.loop,
                           endAction: $0.endAction.rawValue, inPoint: $0.inPoint, outPoint: $0.outPoint,
                           x: $0.posX, y: $0.posY, scale: $0.scale, rotation: $0.rotation,
                           opacity: $0.opacity, volume: $0.clipVolume, anims: Self.encodeAnims($0.anims),
                           syncMode: $0.syncMode.rawValue, syncBeats: $0.syncBeats, jumpBeats: $0.jumpBeats,
                           effects: $0.effects.isEmpty ? nil : $0.effects, muted: $0.muted ? true : nil,
-                          audioMuted: $0.audioMuted ? true : nil)
+                          audioMuted: $0.audioMuted ? true : nil, generator: $0.generator)
             } },
             layers: layers.map {
                 SavedLayer(opacity: $0.opacity, blend: $0.blend.rawValue, volume: $0.volume,
@@ -1204,8 +1307,8 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
                 if FileManager.default.fileExists(atPath: u.path) { url = u }
             }
             let end = saved.endAction.flatMap(EndAction.init(rawValue:)) ?? (saved.loop ? .loop : .hold)
-            let slot = ClipSlot(url: url, speed: saved.speed, endAction: end,
-                                inPoint: saved.inPoint ?? 0, outPoint: saved.outPoint)
+            let slot = saved.generator.map { ClipSlot(generator: $0) }
+                ?? ClipSlot(url: url, speed: saved.speed, endAction: end, inPoint: saved.inPoint ?? 0, outPoint: saved.outPoint)
             slot.posX = saved.x ?? 0
             slot.posY = saved.y ?? 0
             slot.scale = saved.scale ?? 1

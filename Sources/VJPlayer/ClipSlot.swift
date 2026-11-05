@@ -454,7 +454,39 @@ final class ClipSlot: ObservableObject, Identifiable, Animatable, EffectHolder {
     @Published private(set) var thumbnail: NSImage?
     @Published private(set) var errorMessage: String?
 
-    var name: String { url.deletingPathExtension().lastPathComponent }
+    var name: String { generator?.kind.label ?? url.deletingPathExtension().lastPathComponent }
+
+    /// ジェネレーター（動画の代わりに描く絵）。nil なら動画のクリップ
+    @Published var generator: Effect? {
+        didSet {
+            guard generator != oldValue else { return }
+            onSettingsChanged?()
+            scheduleGeneratorThumbnail()
+        }
+    }
+    var isGenerator: Bool { generator != nil }
+    private var thumbnailWork: DispatchWorkItem?
+
+    /// ジェネレーターのクリップを作る。読み込みは要らないので、すぐ再生できる
+    init(generator g: Effect) {
+        url = URL(string: "halovj-generator:" + g.kind.rawValue)!
+        speed = 1
+        endAction = .loop
+        inPoint = 0
+        outPoint = nil
+        asset = AVURLAsset(url: url)
+        generator = g
+        isReady = true
+        thumbnail = GeneratorThumbnail.image(g)
+    }
+
+    private func scheduleGeneratorThumbnail() {
+        thumbnailWork?.cancel()
+        guard let g = generator else { return }
+        let w = DispatchWorkItem { [weak self] in self?.thumbnail = GeneratorThumbnail.image(g) }
+        thumbnailWork = w
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: w)
+    }
     var progress: Double { duration > 0 ? min(max(currentTime / duration, 0), 1) : 0 }
     var hasAudio: Bool { audio != nil }
 

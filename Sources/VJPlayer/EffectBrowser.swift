@@ -6,13 +6,15 @@ import UniformTypeIdentifiers
 /// ダブルクリックで、今開いているタブ（コンポジション・レイヤー・クリップ）に付く。
 struct EffectBrowser: View {
     @EnvironmentObject var engine: Engine
+    /// true ならジェネレーターの一覧（クリップの枠に置くもの）
+    var generators = false
     @State private var query = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                TextField("エフェクトを探す", text: $query)
+                TextField(generators ? "ジェネレーターを探す" : "エフェクトを探す", text: $query)
                     .textFieldStyle(.plain)
                     .font(.system(size: 13))
                 if !query.isEmpty {
@@ -25,15 +27,29 @@ struct EffectBrowser: View {
             .frame(height: 32)
             .background(RoundedRectangle(cornerRadius: 6).fill(Color.white.opacity(0.06)))
 
-            Text("付けたい所へドラッグ（クリップ・レイヤー欄・出力モニター・エフェクト欄）。ダブルクリックで今のタブ（\(targetName)）へ")
+            Text(generators
+                 ? "動画の代わりに置く絵。クリップの枠へドラッグ、ダブルクリックで選択中のレイヤー（\(engine.layers[engine.selectedLayer].name)）の空いている所へ。空きの枠の右クリックからも置ける"
+                 : "付けたい所へドラッグ（クリップ・レイヤー欄・出力モニター・エフェクト欄）。ダブルクリックで今のタブ（\(targetName)）へ")
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
             ScrollView(.vertical) {
                 VStack(alignment: .leading, spacing: 10) {
+                    let gens = generators ? EffectKind.generators.filter(matches) : []
+                    if !gens.isEmpty {
+                        LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible())], spacing: 8) {
+                            ForEach(gens) { k in
+                                EffectTile(kind: k, tint: .teal) {
+                                    if !engine.placeGeneratorInSelectedLayer(k) { NSSound.beep() }
+                                }
+                                .help(k.help + "\nクリップの枠へドラッグして置く／ダブルクリックで選択中のレイヤーの空いている所に置く")
+                            }
+                        }
+                    }
+                    if !generators {
                     ForEach(EffectCategory.allCases) { cat in
-                        let items = EffectKind.allCases.filter { $0.category == cat && !$0.isBlend && matches($0) }
+                        let items = EffectKind.allCases.filter { $0.category == cat && !$0.isBlend && !$0.isGenerator && matches($0) }
                         if !items.isEmpty {
                             SectionTitle(cat.label)
                             LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible())], spacing: 8) {
@@ -42,6 +58,7 @@ struct EffectBrowser: View {
                                 }
                             }
                         }
+                    }
                     }
                 }
                 .padding(.bottom, 8)
@@ -74,6 +91,7 @@ struct EffectBrowser: View {
 /// 一覧の 1 つ。ドラッグで運べる
 struct EffectTile: View {
     let kind: EffectKind
+    var tint = Color.purple
     let onDoubleClick: () -> Void
     @State private var hovering = false
 
@@ -81,7 +99,7 @@ struct EffectTile: View {
         HStack(spacing: 8) {
             Image(systemName: kind.icon)
                 .font(.system(size: 16))
-                .foregroundStyle(Color.purple)
+                .foregroundStyle(tint)
                 .frame(width: 24)
             VStack(alignment: .leading, spacing: 2) {
                 Text(kind.label).font(.system(size: 13, weight: .semibold)).lineLimit(1)
@@ -92,7 +110,7 @@ struct EffectTile: View {
         .padding(8)
         .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: 6).fill(Color.white.opacity(hovering ? 0.10 : 0.05)))
-        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.purple.opacity(hovering ? 0.6 : 0.25)))
+        .overlay(RoundedRectangle(cornerRadius: 6).stroke(tint.opacity(hovering ? 0.6 : 0.25)))
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
         .onTapGesture(count: 2, perform: onDoubleClick)
@@ -106,10 +124,13 @@ enum EffectDrop {
     static let types: [UTType] = [.plainText]
 
     /// providers にエフェクトが入っていれば、そのエフェクトで action を呼ぶ（メインスレッド）。入っていなければ false
-    static func handle(_ providers: [NSItemProvider], _ action: @escaping (EffectKind) -> Void) -> Bool {
+    /// ジェネレーターはクリップの枠にだけ置ける（allowGenerators）。ほかの所では受け取らない
+    static func handle(_ providers: [NSItemProvider], allowGenerators: Bool = false,
+                       _ action: @escaping (EffectKind) -> Void) -> Bool {
         guard let p = providers.first(where: { $0.canLoadObject(ofClass: NSString.self) }) else { return false }
         _ = p.loadObject(ofClass: NSString.self) { obj, _ in
             guard let s = obj as? String, let k = EffectKind.fromDragString(s) else { return }
+            if k.isGenerator && !allowGenerators { DispatchQueue.main.async { NSSound.beep() }; return }
             DispatchQueue.main.async { action(k) }
         }
         return true

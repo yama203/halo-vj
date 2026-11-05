@@ -8,12 +8,28 @@ import QuartzCore
 
 enum EffectKind: String, Codable, CaseIterable, Identifiable {
     case mirror, colorize, levels, posterize, posterizeTime, strobe, echo, shapeMask, polyMask
+    /// ジェネレーター（動画の代わりにクリップとして置く絵）。エフェクト一覧には出さない
+    case solid, gradient, stripes, grid, noise, shapes
     /// 特殊合成（レイヤーの重ね方）の値。エフェクト一覧には出さない
     case overdrive
     var id: String { rawValue }
 
     /// 重ね方の値か（エフェクトとしては並べない）
     var isBlend: Bool { self == .overdrive }
+
+    /// ジェネレーターか（クリップとして置く。エフェクトとしては並べない）
+    var isGenerator: Bool { Self.generators.contains(self) }
+    static let generators: [EffectKind] = [.solid, .gradient, .stripes, .grid, .noise, .shapes]
+    /// 色を 1 つ使うジェネレーター（「色」を出す）
+    var usesColor: Bool { [.solid, .stripes, .grid, .noise, .shapes].contains(self) }
+    /// 「速さ」の値の番号。シェーダーには速さ × 経過時間（動いた量）を渡す
+    var speedIndex: Int? {
+        switch self {
+        case .gradient, .stripes, .grid: 3
+        case .noise: 2
+        default: nil
+        }
+    }
 
     var label: String {
         switch self {
@@ -26,6 +42,12 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
         case .echo: "エコー（残像）"
         case .shapeMask: "マスク（形）"
         case .polyMask: "マスク（自由な形）"
+        case .solid: "単色"
+        case .gradient: "グラデーション"
+        case .stripes: "ストライプ"
+        case .grid: "チェッカー・格子"
+        case .noise: "ノイズ"
+        case .shapes: "図形"
         case .overdrive: "オーバードライブ加算"
         }
     }
@@ -37,6 +59,7 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
         case .colorize, .levels, .posterize: .color
         case .posterizeTime, .strobe, .echo: .time
         case .shapeMask, .polyMask: .mask
+        case .solid, .gradient, .stripes, .grid, .noise, .shapes: .generator
         case .overdrive: .blend
         }
     }
@@ -52,6 +75,12 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
         case .echo: "square.stack.3d.forward.dottedline"
         case .shapeMask: "circle.dashed.inset.filled"
         case .polyMask: "skew"
+        case .solid: "square.fill"
+        case .gradient: "square.bottomhalf.filled"
+        case .stripes: "line.3.horizontal"
+        case .grid: "checkerboard.rectangle"
+        case .noise: "aqi.medium"
+        case .shapes: "circle.circle"
         case .overdrive: "sun.max"
         }
     }
@@ -77,6 +106,12 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
         case .echo: 5
         case .shapeMask: 6
         case .polyMask: 7
+        case .solid: 8
+        case .gradient: 9
+        case .stripes: 10
+        case .grid: 11
+        case .noise: 12
+        case .shapes: 13
         case .posterizeTime, .overdrive: -1
         }
     }
@@ -129,6 +164,63 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
                             format: { String(format: "%.2f /秒", $0) }),
                 EffectParam(label: "波紋の広がり", range: 40...800, defaultValue: 300, perPoint: 1,
                             format: { String(format: "%.0f px（1080p）", $0) }),
+            ]
+        case .solid:
+            return [EffectParam(label: "明るさ", range: 0...1, defaultValue: 1, format: EffectParam.percent)]
+        case .gradient:
+            // 色はパレット（左 → 右へ、端で折り返してつながる）
+            return [
+                EffectParam(label: "形", range: 0...2, defaultValue: 0, choices: ["直線", "円", "回転"]),
+                EffectParam(label: "角度", range: 0...360, defaultValue: 0, perPoint: 1,
+                            format: { String(format: "%.0f°", $0) }, animRange: 0...360),
+                EffectParam(label: "繰り返し", range: 0.25...8, defaultValue: 1, perPoint: 0.005,
+                            format: { String(format: "%.2f", $0) }, animRange: 0.5...3),
+                EffectParam(label: "速さ", range: -4...4, defaultValue: 0.2, perPoint: 0.005,
+                            format: { String(format: "%+.2f /秒", $0) }, animRange: -1...1),
+            ]
+        case .stripes:
+            return [
+                EffectParam(label: "本数", range: 1...64, defaultValue: 8, perPoint: 0.05,
+                            format: { String(format: "%.1f", $0) }, animRange: 4...16),
+                EffectParam(label: "太さ", range: 0.02...0.98, defaultValue: 0.5, format: EffectParam.percent, animRange: 0.1...0.9),
+                EffectParam(label: "角度", range: 0...360, defaultValue: 0, perPoint: 1,
+                            format: { String(format: "%.0f°", $0) }, animRange: 0...360),
+                EffectParam(label: "速さ", range: -4...4, defaultValue: 0.5, perPoint: 0.005,
+                            format: { String(format: "%+.2f /秒", $0) }, animRange: -1...1),
+                EffectParam(label: "ぼかし", range: 0...1, defaultValue: 0.03, format: EffectParam.percent),
+            ]
+        case .grid:
+            return [
+                EffectParam(label: "模様", range: 0...2, defaultValue: 0, choices: ["チェッカー", "格子", "ドット"]),
+                EffectParam(label: "マスの数", range: 1...64, defaultValue: 8, perPoint: 0.05,
+                            format: { String(format: "%.1f", $0) }, animRange: 4...16),
+                EffectParam(label: "太さ", range: 0.02...0.98, defaultValue: 0.15, format: EffectParam.percent, animRange: 0.1...0.9),
+                EffectParam(label: "速さ", range: -4...4, defaultValue: 0, perPoint: 0.005,
+                            format: { String(format: "%+.2f /秒", $0) }, animRange: -1...1),
+            ]
+        case .noise:
+            return [
+                EffectParam(label: "種類", range: 0...1, defaultValue: 0, choices: ["なめらか", "砂嵐"]),
+                EffectParam(label: "細かさ", range: 1...64, defaultValue: 6, perPoint: 0.05,
+                            format: { String(format: "%.1f", $0) }, animRange: 2...16),
+                EffectParam(label: "速さ", range: 0...10, defaultValue: 1, perPoint: 0.01,
+                            format: { String(format: "%.2f /秒", $0) }, animRange: 0...4),
+                EffectParam(label: "コントラスト", range: 0...4, defaultValue: 1.2, perPoint: 0.005,
+                            format: { String(format: "%.2f", $0) }),
+            ]
+        case .shapes:
+            return [
+                EffectParam(label: "形", range: 0...4, defaultValue: 0, choices: ["円", "リング", "四角", "枠", "三角"]),
+                EffectParam(label: "大きさ", range: 0...2, defaultValue: 0.6, perPoint: 0.002, format: EffectParam.percent,
+                            animRange: 0.2...1),
+                EffectParam(label: "線の太さ", range: 0.005...0.5, defaultValue: 0.06, perPoint: 0.0005,
+                            format: EffectParam.percent, animRange: 0.02...0.2),
+                EffectParam(label: "数（縦に並ぶ数）", range: 1...12, defaultValue: 1, perPoint: 0.02, step: 1,
+                            format: { String(format: "%.0f", $0) }),
+                EffectParam(label: "角度", range: 0...360, defaultValue: 0, perPoint: 1,
+                            format: { String(format: "%.0f°", $0) }, animRange: 0...360),
+                EffectParam(label: "ぼかし", range: 0...0.3, defaultValue: 0.005, perPoint: 0.0005,
+                            format: EffectParam.percent),
             ]
         case .shapeMask:
             // 四角・丸で切り抜く。位置・大きさは絵の幅・高さに対する割合
@@ -194,6 +286,12 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
         case .colorize: "明るさをもとに、1 色で染める（カラー）か、パレットの色に置き換える（パレット）"
         case .levels: "黒と白の位置・ガンマで明るさとコントラストを整える"
         case .posterize: "色の段数を減らす。ディザとドットを足すと GIF アニメのような見た目に"
+        case .solid: "1 色で塗りつぶす。マスク用の白や、色を重ねるのに"
+        case .gradient: "パレットの色でグラデーション（直線・円・回転）。速さで流れる"
+        case .stripes: "しま模様。角度・太さ・速さで動かせる（すき間は透明）"
+        case .grid: "チェッカー・格子・ドット（すき間は透明）"
+        case .noise: "なめらかに動くノイズか、砂嵐"
+        case .shapes: "円・リング・四角・枠・三角。数を増やすと並ぶ（まわりは透明）"
         case .shapeMask: "四角・丸の形で切り抜く（外は透明）。位置や大きさを動かせる。反転すると中を隠す"
         case .polyMask: "プレビューの上で点を置いて描いた形で切り抜く。建物や物に合わせるのに"
         case .echo: "動いた跡が残像になって残る。レイヤーかコンポジションにかけると、位置や回転の動きも跡になる"
@@ -206,10 +304,11 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
 
 /// エフェクト一覧の分類
 enum EffectCategory: Int, CaseIterable, Identifiable {
-    case color, shape, mask, time, blend
+    case color, shape, mask, time, blend, generator
     var id: Int { rawValue }
     var label: String {
         switch self {
+        case .generator: "ジェネレーター"
         case .color: "色"
         case .shape: "形"
         case .mask: "マスク"
@@ -337,7 +436,8 @@ struct Effect: Codable, Identifiable, Equatable {
     init(kind: EffectKind) {
         self.kind = kind
         values = kind.params.map(\.defaultValue)
-        if kind == .strobe { color = .white }
+        if kind == .strobe || kind.usesColor { color = .white }
+        if kind == .gradient { palette = PalettePreset.all[3].colors }
     }
 
     /// ストロボの t の時点の光り具合（0 = 元の絵、1 = いっぱいに光る／消える）
@@ -391,6 +491,11 @@ struct Effect: Codable, Identifiable, Equatable {
     func shaderValues(at t: Double, beat: BeatClock, origin: Double) -> (SIMD4<Float>, SIMD4<Float>) {
         var v = [Float](repeating: 0, count: 8)
         for i in kind.params.indices where i < 8 { v[i] = Float(value(i, at: t, beat: beat, origin: origin)) }
+        // ジェネレーターの「速さ」は、動いた量（速さ × 経過時間）にして渡す
+        if let si = kind.speedIndex, si < 8 {
+            let moved = value(si, at: t, beat: beat, origin: origin) * max(t - origin, 0)
+            v[si] = Float(moved.truncatingRemainder(dividingBy: 10000))
+        }
         // ストロボは光り具合を CPU で決めて渡す（a.x = 光り方、a.y = 光り具合）
         if kind == .strobe { v[1] = Float(strobeLevel(at: t, beat: beat, origin: origin)) }
         return (SIMD4(v[0], v[1], v[2], v[3]), SIMD4(v[4], v[5], v[6], v[7]))
