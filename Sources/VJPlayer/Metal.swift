@@ -169,7 +169,7 @@ fragment float4 feffect(VOut in [[stage_in]],
                         sampler s [[sampler(0)]]) {
     float2 px = in.pos.xy;
     float2 uv = px / u.size;
-    if (u.kind >= 8) {
+    if (u.kind >= 8 && u.kind <= 13) {
         // 縦の長さを 1 とした、中心が 0 の座標（y は下が +）
         float2 p = (px - 0.5 * u.size) / u.size.y;
         float aspect = u.size.x / u.size.y;
@@ -361,6 +361,12 @@ fragment float4 feffect(VOut in [[stage_in]],
         int2 q = int2(cellPx) & 3;
         float t = bayer4[q.x + q.y * 4] / 16.0 - 0.5 + 1.0 / 32.0;
         rgb = saturate(floor(rgb * n + 0.5 + u.a.y * t) / n);
+    } else if (u.kind == 14) {
+        // 反転：0 = 色と明るさ、1 = 明るさだけ（色合いはそのまま）、2 = 色だけ（明るさはそのまま）
+        float L = dot(rgb, float3(0.2126, 0.7152, 0.0722));
+        int m = int(u.a.x + 0.5);
+        float3 inv = m == 1 ? saturate(rgb + 1.0 - 2.0 * L) : (m == 2 ? saturate(2.0 * L - rgb) : 1.0 - rgb);
+        rgb = mix(rgb, inv, saturate(u.a.y));
     }
     return float4(rgb * alpha, alpha);
 }

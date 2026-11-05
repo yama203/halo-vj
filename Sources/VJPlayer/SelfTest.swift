@@ -798,6 +798,18 @@ enum SelfTest {
         check(near(r(3, 3), .zero), "ストロボ（消える）：光る間は消える")
         r = run([group(clip(tex { _, _ in red }), [fx(.strobe, [2, 0, 3, 8, 0.5, 1, 0])])], now: 0.05)
         check(near(r(3, 3), SIMD3(0, 1, 1)), "ストロボ（反転）：レイヤーにかけても効く（赤 → シアン）")
+        // 反転：赤 → シアン。半分なら灰色。明るさだけ・色だけ
+        r = run([group(clip(tex { _, _ in red }, [fx(.invert, [0, 1])]))])
+        check(near(r(3, 3), SIMD3(0, 1, 1)), "反転：色と明るさ（赤 → シアン）")
+        r = run([group(clip(tex { _, _ in red }, [fx(.invert, [0, 0.5])]))])
+        check(near(r(3, 3), SIMD3(repeating: 0.5)), "反転：かかり具合 50% なら元の絵との間")
+        let lumOnly = run([group(clip(tex { _, _ in red }, [fx(.invert, [1, 1])]))])(3, 3)
+        let colOnly = run([group(clip(tex { _, _ in red }, [fx(.invert, [2, 1])]))])(3, 3)
+        check(lumOnly.x > 0.95 && abs(lumOnly.y - 0.575) < 0.05 && colOnly.x < 0.05 && abs(colOnly.y - 0.425) < 0.05,
+              String(format: "反転：明るさだけ（暗い赤 → 明るい赤 %.2f,%.2f）・色だけ（赤 → 同じ明るさのシアン %.2f,%.2f）",
+                     lumOnly.x, lumOnly.y, colOnly.x, colOnly.y))
+        r = run([group(clip(tex { _, _ in red }), [fx(.invert, [0, 1])])], EffectStack(effects: [fx(.invert, [0, 1])]))
+        check(near(r(3, 3), red), "反転：レイヤーとコンポジションで 2 回かけると元に戻る")
         // ディザ：灰色 50% を 2 段 → 白と黒が混ざって、平均はほぼ 50%
         r = run([group(clip(tex { _, _ in grey }, [fx(.posterize, [2, 1, 1])]))])
         var sum: Float = 0, whites = 0

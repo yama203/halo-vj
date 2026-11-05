@@ -7,7 +7,7 @@ import QuartzCore
 // 出力を、指定したフレームレートでしか更新しない（並び順には関係なく、その段全体にかかる）。
 
 enum EffectKind: String, Codable, CaseIterable, Identifiable {
-    case mirror, colorize, levels, posterize, posterizeTime, strobe, echo, shapeMask, polyMask
+    case mirror, colorize, levels, posterize, invert, posterizeTime, strobe, echo, shapeMask, polyMask
     /// ジェネレーター（動画の代わりにクリップとして置く絵）。エフェクト一覧には出さない
     case solid, gradient, stripes, grid, noise, shapes
     /// 特殊合成（レイヤーの重ね方）の値。エフェクト一覧には出さない
@@ -37,6 +37,7 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
         case .colorize: "カラーライズ"
         case .levels: "レベル"
         case .posterize: "ポスタライズ"
+        case .invert: "反転"
         case .posterizeTime: "ポスタライズ時間"
         case .strobe: "ストロボ"
         case .echo: "エコー（残像）"
@@ -56,7 +57,7 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
     var category: EffectCategory {
         switch self {
         case .mirror: .shape
-        case .colorize, .levels, .posterize: .color
+        case .colorize, .levels, .posterize, .invert: .color
         case .posterizeTime, .strobe, .echo: .time
         case .shapeMask, .polyMask: .mask
         case .solid, .gradient, .stripes, .grid, .noise, .shapes: .generator
@@ -70,6 +71,7 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
         case .colorize: "paintpalette"
         case .levels: "slider.horizontal.3"
         case .posterize: "square.grid.3x3.square"
+        case .invert: "circle.lefthalf.filled"
         case .posterizeTime: "timer"
         case .strobe: "bolt.fill"
         case .echo: "square.stack.3d.forward.dottedline"
@@ -112,6 +114,7 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
         case .grid: 11
         case .noise: 12
         case .shapes: 13
+        case .invert: 14
         case .posterizeTime, .overdrive: -1
         }
     }
@@ -139,6 +142,11 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
                 EffectParam(label: "ガンマ", range: 0.1...5, defaultValue: 1, perPoint: 0.005, format: { String(format: "%.2f", $0) }),
                 EffectParam(label: "出力 黒", range: 0...1, defaultValue: 0, format: EffectParam.percent),
                 EffectParam(label: "出力 白", range: 0...1, defaultValue: 1, format: EffectParam.percent),
+            ]
+        case .invert:
+            return [
+                EffectParam(label: "反転するもの", range: 0...2, defaultValue: 0, choices: ["色と明るさ", "明るさだけ", "色だけ"]),
+                EffectParam(label: "かかり具合", range: 0...1, defaultValue: 1, format: EffectParam.percent),
             ]
         case .posterize:
             return [
@@ -285,6 +293,7 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
         case .mirror: "画面の半分を反対側に折り返す"
         case .colorize: "明るさをもとに、1 色で染める（カラー）か、パレットの色に置き換える（パレット）"
         case .levels: "黒と白の位置・ガンマで明るさとコントラストを整える"
+        case .invert: "ネガのように色を反転する。明るさだけ（色はそのまま）・色だけ（明るさはそのまま）も選べる。かかり具合を動かすと元の絵と行き来する"
         case .posterize: "色の段数を減らす。ディザとドットを足すと GIF アニメのような見た目に"
         case .solid: "1 色で塗りつぶす。マスク用の白や、色を重ねるのに"
         case .gradient: "パレットの色でグラデーション（直線・円・回転）。速さで流れる"
