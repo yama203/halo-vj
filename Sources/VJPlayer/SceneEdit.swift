@@ -265,6 +265,9 @@ struct SceneCompParams: View {
         SideBySide {
             HStack(alignment: .top, spacing: 16) {
                 ParamColumn(title: "トランスフォーム") {
+                    MiniButton(icon: "arrow.counterclockwise", label: "リセット", disabled: draft.compTransform.isDefault,
+                               help: "位置・スケール・角度を初期値に戻す") { draft.compTransform.reset() }
+                } content: {
                     TransformFields(t: draft.compTransform)
                 }
                 ParamColumn(title: "マスター") {

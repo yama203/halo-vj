@@ -241,24 +241,6 @@ struct ParameterPanel: View {
             .frame(minWidth: 0, maxWidth: 560)
             .layoutPriority(1)
             Spacer(minLength: 0)
-            // タブごとの操作（プレビューだけの区画には出さない）
-            if part != .preview {
-                switch engine.inspectorTab {
-                case .composition:
-                    if let draft {
-                        ResetButton { draft.compTransform.reset() }
-                    } else {
-                        HStack(spacing: 8) {
-                            ResetButton { engine.compTransform.reset() }
-                            MuteButton(muted: $engine.compMuted, what: "コンポジション（出力全体）")
-                        }
-                    }
-                case .layer:
-                    LayerActions(layer: layer)
-                case .clip:
-                    if let clip { ClipActions(slot: clip) }
-                }
-            }
         }
     }
 
@@ -387,16 +369,75 @@ struct ParameterPanel: View {
 }
 
 /// 見出し付きの縦並びパラメーター
-struct ParamColumn<Content: View>: View {
+struct ParamColumn<Content: View, Accessory: View>: View {
     let title: String
+    /// 見出しの右に置く小さなボタン（リセット・停止など）
+    @ViewBuilder var accessory: Accessory
     @ViewBuilder var content: Content
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            SectionTitle(title)
+            HStack(spacing: 4) {
+                SectionTitle(title)
+                Spacer(minLength: 0)
+                accessory
+            }
+            .frame(height: 18)
             content
         }
         .frame(width: UI.paramColumnWidth, alignment: .topLeading)
+    }
+}
+
+extension ParamColumn where Accessory == EmptyView {
+    init(title: String, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.accessory = EmptyView()
+        self.content = content()
+    }
+}
+
+/// 見出しの右の小さなボタン（アイコンだけ）
+struct MiniButton: View {
+    let icon: String
+    var label = ""
+    var disabled = false
+    let help: String
+    let action: () -> Void
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 3) {
+                Image(systemName: icon).font(.system(size: 10, weight: .semibold))
+                if !label.isEmpty { Text(label).font(.system(size: 10, weight: .semibold)) }
+            }
+            .padding(.horizontal, 6)
+            .frame(height: 18)
+            .background(RoundedRectangle(cornerRadius: 4).fill(Color.white.opacity(0.08)))
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(disabled ? Color.secondary.opacity(0.5) : Color.secondary)
+        .disabled(disabled)
+        .help(help)
+    }
+}
+
+/// 不透明度の横の「映像を出さない」ボタン（音量の横の音のミュートと同じ形）
+struct VisibilityButton: View {
+    @Binding var muted: Bool
+    let what: String
+
+    var body: some View {
+        Button {
+            muted.toggle()
+        } label: {
+            Image(systemName: muted ? "eye.slash.fill" : "eye")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(muted ? Color.white : Color.secondary)
+                .frame(width: 30, height: UI.rowHeight)
+                .background(RoundedRectangle(cornerRadius: 5).fill(muted ? Color.red : Color.white.opacity(0.06)))
+        }
+        .buttonStyle(.plain)
+        .help(muted ? "\(what)のミュートを解除" : "\(what)をミュート（再生は続けたまま、映像と音を出さない）")
     }
 }
 
@@ -450,11 +491,18 @@ struct CompositionParams: View {
         VStack(alignment: .leading, spacing: 0) {
         HStack(alignment: .top, spacing: 16) {
             ParamColumn(title: "トランスフォーム") {
+                MiniButton(icon: "arrow.counterclockwise", label: "リセット", disabled: engine.compTransform.isDefault,
+                           help: "位置・スケール・角度を初期値に戻す") { engine.compTransform.reset() }
+            } content: {
                 TransformFields(t: engine.compTransform)
             }
             ParamColumn(title: "マスター") {
-                AnimField(label: "不透明度", value: $engine.masterOpacity, range: 0...1, perPoint: 0.003,
-                          defaultValue: 1, showsBar: true, format: percent, key: .opacity, target: engine)
+                HStack(spacing: 4) {
+                    AnimField(label: "不透明度", value: $engine.masterOpacity, range: 0...1, perPoint: 0.003,
+                              defaultValue: 1, showsBar: true, format: percent, key: .opacity, target: engine)
+                    VisibilityButton(muted: $engine.compMuted, what: "コンポジション（出力全体）")
+                }
+                .frame(height: UI.rowHeight)
                 Group {
                     HStack(spacing: 4) {
                         ValueDrag(label: "音量", value: $engine.masterVolume, range: 0...1, perPoint: 0.003,
@@ -476,20 +524,14 @@ struct CompositionParams: View {
     }
 }
 
-struct LayerActions: View {
+/// レイヤーの「ミックス」の見出しの右：このレイヤーを止める（シーンの編集中は、シーンのこのレイヤーを「なし」に）
+struct LayerStopMini: View {
     @ObservedObject var layer: Layer
     @EnvironmentObject var engine: Engine
     var body: some View {
-        HStack(spacing: 8) {
-            ResetButton(disabled: layer.transform.isDefault) { layer.transform.reset() }
-            MuteButton(muted: $layer.muted, what: "このレイヤー")
-            Button {
-                engine.viewStop(layer.index)
-            } label: {
-                Label("停止", systemImage: "stop.fill")
-            }
-            .controlSize(.regular)
-            .disabled(engine.viewPlaying(layer.index) == nil)
+        MiniButton(icon: "stop.fill", label: "停止", disabled: engine.viewPlaying(layer.index) == nil,
+                   help: engine.sceneDraft != nil ? "このシーンではこのレイヤーに何も流さない" : "このレイヤーを停止") {
+            engine.viewStop(layer.index)
         }
     }
 }
@@ -502,9 +544,14 @@ struct LayerParams: View {
         VStack(alignment: .leading, spacing: 0) {
         HStack(alignment: .top, spacing: 16) {
             ParamColumn(title: "トランスフォーム") {
+                MiniButton(icon: "arrow.counterclockwise", label: "リセット", disabled: layer.transform.isDefault,
+                           help: "位置・スケール・角度を初期値に戻す") { layer.transform.reset() }
+            } content: {
                 TransformFields(t: layer.transform)
             }
             ParamColumn(title: "ミックス") {
+                LayerStopMini(layer: layer)
+            } content: {
                 Toggle(isOn: $layer.isAdjustment) {
                     Label("調整レイヤー", systemImage: "camera.filters")
                 }
@@ -512,8 +559,12 @@ struct LayerParams: View {
                 .frame(height: UI.rowHeight)
                 .help("オン：このレイヤーのクリップは使わず、付けたエフェクトを下のレイヤー全体にかける。不透明度がかかり具合")
                 BlendChoice(blend: $layer.blend)
-                AnimField(label: "不透明度", value: $layer.opacity, range: 0...1, perPoint: 0.003,
-                          defaultValue: 1, showsBar: true, format: percent, key: .opacity, target: layer)
+                HStack(spacing: 4) {
+                    AnimField(label: "不透明度", value: $layer.opacity, range: 0...1, perPoint: 0.003,
+                              defaultValue: 1, showsBar: true, format: percent, key: .opacity, target: layer)
+                    VisibilityButton(muted: $layer.muted, what: "このレイヤー")
+                }
+                .frame(height: UI.rowHeight)
                 Group {
                     HStack(spacing: 4) {
                         ValueDrag(label: "音量", value: $layer.volume, range: 0...1, perPoint: 0.003,
@@ -551,17 +602,6 @@ func fadeSeconds(_ v: Double) -> String {
     v < 0.005 ? "カット" : String(format: "%.2f 秒", v)
 }
 
-struct ClipActions: View {
-    @ObservedObject var slot: ClipSlot
-    var body: some View {
-        HStack(spacing: 10) {
-            ResetButton(disabled: !slot.hasCustomTransform) { slot.resetTransform() }
-                .help("位置・スケール・角度・不透明度・音量を初期値に戻す（速度はそのまま）")
-            MuteButton(muted: $slot.muted, what: "このクリップ")
-        }
-    }
-}
-
 struct ClipParams: View {
     @ObservedObject var slot: ClipSlot
 
@@ -570,11 +610,18 @@ struct ClipParams: View {
         VStack(alignment: .leading, spacing: 0) {
         HStack(alignment: .top, spacing: 16) {
             ParamColumn(title: "トランスフォーム") {
+                MiniButton(icon: "arrow.counterclockwise", label: "リセット", disabled: !slot.hasCustomTransform,
+                           help: "位置・スケール・角度・不透明度・音量を初期値に戻す（速度はそのまま）") { slot.resetTransform() }
+            } content: {
                 TransformFields(t: slot)
             }
             ParamColumn(title: "ミックス・再生") {
-                AnimField(label: "不透明度", value: $slot.opacity, range: 0...1, perPoint: 0.003, defaultValue: 1,
-                          showsBar: true, format: percent, key: .opacity, target: slot)
+                HStack(spacing: 4) {
+                    AnimField(label: "不透明度", value: $slot.opacity, range: 0...1, perPoint: 0.003, defaultValue: 1,
+                              showsBar: true, format: percent, key: .opacity, target: slot)
+                    VisibilityButton(muted: $slot.muted, what: "このクリップ")
+                }
+                .frame(height: UI.rowHeight)
                 if !slot.isStill {
                     HStack(spacing: 4) {
                         ValueDrag(label: "音量", value: $slot.clipVolume, range: 0...1, perPoint: 0.003,
