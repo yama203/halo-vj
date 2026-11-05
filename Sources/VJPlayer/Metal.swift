@@ -1290,6 +1290,7 @@ final class RenderLoop {
         let params = engine.renderParams()
         let groups = engine.layerGroups()
         let compFX = engine.compEffects()
+        let padFX = engine.padEffects()
         let kinds = Set(current.map { $0.2 })
         let clipGroups = kinds.contains(.clipPreview)
             ? engine.previewDraws().map { LayerGroup(draws: [$0], opacity: 1, blend: .normal, key: 1000) } : []
@@ -1311,14 +1312,22 @@ final class RenderLoop {
         }
         var sharedTextures: [Int: MTLTexture] = [:]
         sharedCompositors = sharedCompositors.filter { shared[$0.key] != nil }
+        padProcessors = padProcessors.filter { shared[$0.key] != nil }
         if !groups.isEmpty {
             for (key, v) in shared where v.needs {
                 guard let cb = ctx.queue.makeCommandBuffer() else { continue }
                 let comp = sharedCompositors[key] ?? Compositor()
                 sharedCompositors[key] = comp
-                if let t = comp.composite(groups, effects: compFX, width: v.size.0, height: v.size.1, cb: cb) {
-                    sharedTextures[key] = t
+                if var t = comp.composite(groups, effects: compFX, width: v.size.0, height: v.size.1, cb: cb) {
+                    // シーンのサムネイルにはパッドを入れない
                     lock.withLock { _lastComposite = t }
+                    // 押しているパッドのエフェクトを最後にかける
+                    if !padFX.isEmpty {
+                        let fx = padProcessors[key] ?? EffectProcessor()
+                        padProcessors[key] = fx
+                        for (n, st) in padFX.enumerated() { t = fx.apply(st, to: t, key: "pad\(n)", cb: cb) }
+                    }
+                    sharedTextures[key] = t
                 }
                 // GPU が使い終わるまで映像バッファを保持する
                 cb.addCompletedHandler { _ in _ = groups }
@@ -1358,6 +1367,8 @@ final class RenderLoop {
 
     /// 出力・コンポジションの合成（縦横比ごと。描画スレッドだけが触る）
     private var sharedCompositors: [Int: Compositor] = [:]
+    /// パッドのエフェクト用（縦横比ごと。描画スレッドだけが触る）
+    private var padProcessors: [Int: EffectProcessor] = [:]
     /// いちばん新しい出力の合成（シーンのサムネイル用。lock の中で）
     private var _lastComposite: MTLTexture?
     func lastComposite() -> MTLTexture? { lock.withLock { _lastComposite } }

@@ -269,6 +269,7 @@ enum SelfTest {
         testScenes(check: check, wait: wait)
         testSceneEdit(check: check, wait: wait)
         testDecks(check: check, wait: wait)
+        testPads(check: check)
 
         // 16. ミュート（クリップ・レイヤー・コンポジション）
         testMute(paths: paths, check: check, wait: wait)
@@ -1027,6 +1028,61 @@ enum SelfTest {
     }
 
     /// シーン：今の状態を保存して、切り替える（すぐ／フェード）
+    /// FX パッド：押している間だけ出力の最後にかかる。シーンとは無関係
+    static func testPads(check: (Bool, String) -> Void) {
+        let e = Engine(persistent: false)
+        check(e.pads.count == Engine.defaultPadCount && e.padEffects().isEmpty, "パッド：最初は空のパッドが並ぶ")
+        let p = e.pads[1]
+        e.padDown(e.pads[0].id)
+        check(e.padEffects().isEmpty, "パッド：空のパッドは押しても何もかからない")
+        e.padUp(e.pads[0].id)
+        p.addEffect(.strobe)
+        p.addEffect(.mirror)
+        check(e.padEffects().isEmpty, "パッド：押していなければかからない")
+        let t0 = CACurrentMediaTime()
+        e.padDown(p.id)
+        let st = e.padEffects()
+        check(st.count == 1 && st[0].effects.map(\.kind) == [.strobe, .mirror] && st[0].origin >= t0
+              && e.effects.isEmpty, "パッド：押している間だけ、そのエフェクトが（押した時刻から）かかる。コンポジションには入らない")
+        // シーンを呼んでも押している間は効いたまま
+        e.placeGenerator(.solid, at: 0)
+        e.trigger(0)
+        let sc = e.addScene()
+        e.updateScene(sc.id) { $0.fade = 0 }
+        e.recallScene(sc.id)
+        check(e.padEffects().count == 1, "パッド：シーンを切り替えても効いたまま")
+        e.padUp(p.id)
+        check(e.padEffects().isEmpty && e.heldPads.isEmpty, "パッド：離すと消える")
+        p.name = "フラッシュ"
+        e.addPad()
+        let e2 = Engine(persistent: false)
+        e2.apply(e.makeState(relativeTo: nil), baseDir: nil)
+        check(e2.pads.count == Engine.defaultPadCount + 1 && e2.pads[1].name == "フラッシュ"
+              && e2.pads[1].effects.map(\.kind) == [.strobe, .mirror] && e2.heldPads.isEmpty,
+              "パッド：保存して読み込むと、並び・名前・エフェクトが戻る")
+
+        // キーボード：1〜9・0 が並び順に付いていて、押している間だけ効く
+        let k = Engine(persistent: false)
+        check(k.pads.map { $0.key ?? "-" } == ["1", "2", "3", "4", "5", "6", "7", "8"], "パッド：最初はキー 1〜8 が付いている")
+        k.pads[1].addEffect(.mirror)
+        k.pads[2].addEffect(.strobe)
+        let downed = k.padKeyDown(19)   // 2
+        _ = k.padKeyDown(20)            // 3
+        check(downed && k.padEffects().count == 2, "パッド：キーで同時に複数押せる")
+        _ = k.padKeyUp(19)
+        check(k.padEffects().count == 1 && k.padEffects()[0].effects.first?.kind == .strobe, "パッド：キーを離すとそのパッドだけ消える")
+        k.releaseAllPads()
+        check(k.padEffects().isEmpty, "パッド：アプリから離れたら全部離す")
+        check(!k.padKeyDown(14), "パッド：割り当てのないキーは何もしない")
+        k.setPadKey(k.pads[0].id, "2")
+        check(k.pads[0].key == "2" && k.pads[1].key == nil, "パッド：キーを付け替えると、前のパッドからは外れる")
+        k.setPadKey(k.pads[3].id, "q")
+        let k2 = Engine(persistent: false)
+        k2.apply(k.makeState(relativeTo: nil), baseDir: nil)
+        check(k2.pads.map { $0.key ?? "-" } == ["2", "-", "3", "q", "5", "6", "7", "8"],
+              "パッド：キーの割り当て（なしも）が保存される")
+    }
+
     /// デッキ：グリッドを何枚も持ち、シーンはデッキを覚える
     static func testDecks(check: (Bool, String) -> Void, wait: (Double) -> Void) {
         let e = Engine(persistent: false)

@@ -118,6 +118,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let list = v.split(separator: ",").compactMap { Int($0) }
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { list.forEach { Engine.shared.trigger($0) } }
         }
+        // 画面確認用：VJ_HOLD_PAD=番号（1 から）で起動時にそのパッドを押したままにしておく
+        if let v = ProcessInfo.processInfo.environment["VJ_HOLD_PAD"], let n = Int(v) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                let ps = Engine.shared.pads
+                if ps.indices.contains(n - 1) { Engine.shared.padDown(ps[n - 1].id) }
+            }
+        }
         // 画面確認用：VJ_EDIT_SCENE=番号（1 から）で起動時にそのシーンを編集中にしておく
         if let v = ProcessInfo.processInfo.environment["VJ_EDIT_SCENE"], let n = Int(v) {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
@@ -138,9 +145,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp]) { event in
             Self.handleKey(event) ? nil : event
         }
+        // アプリから離れるとキーを離したのが届かないので、FX パッドは全部離す
+        NotificationCenter.default.addObserver(forName: NSApplication.didResignActiveNotification, object: nil,
+                                               queue: .main) { _ in Engine.shared.releaseAllPads() }
     }
 
     /// Finder でプロジェクトファイルをダブルクリック／アイコンにドロップしたとき
@@ -167,6 +177,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Esc でブラックアウト切り替え、⇧Esc で全レイヤー停止。
     /// （クリップのキー割り当ては、あとで手動で決められるようにする予定。今は割り当てなし）
     private static func handleKey(_ event: NSEvent) -> Bool {
+        // FX パッド：キーを離したら（修飾キーに関係なく）離す
+        if event.type == .keyUp { return Engine.shared.padKeyUp(event.keyCode) }
         let mods = event.modifierFlags.intersection([.command, .control, .option])
         guard mods.isEmpty else { return false }
         let shift = event.modifierFlags.contains(.shift)
@@ -177,6 +189,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if event.isARepeat { return true }
             if shift { Engine.shared.stopAll() } else { Engine.shared.toggleBlackout() }
             return true
+        }
+        // FX パッド：押している間だけ（押しっぱなしの繰り返しは無視）
+        if Engine.padKeyCodes.contains(where: { $0.1 == event.keyCode }) {
+            if event.isARepeat { return Engine.shared.pads.contains { p in p.key != nil && Engine.padKeyCodes.first { $0.0 == p.key }?.1 == event.keyCode } }
+            return Engine.shared.padKeyDown(event.keyCode)
         }
         return false
     }

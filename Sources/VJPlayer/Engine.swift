@@ -151,6 +151,10 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
     @Published var activeSceneID: UUID?
     /// シーンを切り替えている途中なら 0〜1
     @Published var sceneProgress: Double?
+    /// 押している間だけ効くエフェクトのパッド（グリッドの下）
+    @Published var pads: [FXPad] = []
+    /// 押しているパッドと、押した時刻
+    @Published var heldPads: [UUID: Double] = [:]
     /// 編集中のシーン（出力には出さず、左下のプレビューで見ながら直す）
     @Published var sceneDraft: SceneDraft?
     var sceneThumbWork: DispatchWorkItem?
@@ -316,6 +320,8 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
         /// ジェネレーターを描く大きさ（出力の縦横比で、高さ 1080）
         var generatorSize = (1920, 1080)
         var selectedLayer = 0
+        /// 押しているパッドのエフェクト（出力のいちばん最後に、この順でかける）
+        var padStacks: [EffectStack] = []
     }
     /// シーン編集のプレビューで描くもの（renderLock の中で触る）
     struct ScenePreviewState {
@@ -371,6 +377,7 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
             self?.syncRenderState()
             self?.scheduleSave()
         }
+        pads = makePads(nil)
         // 描画用の状態を先に作っておく（復元の途中で止めたりするので）
         syncRenderState()
         if persistent {
@@ -912,6 +919,7 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
         state.previewEffects = EffectStack(effects: inspectedIndex.flatMap { slots[$0]?.effects } ?? [], beat: beatClock,
                                            origin: inspectedIndex.flatMap { slots[$0]?.animOrigin } ?? 0)
         state.selectedLayer = selectedLayer
+        state.padStacks = heldPadStacks()
         renderLock.withLock { renderState = state }
         syncScenePreview()
     }
@@ -1231,6 +1239,11 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
         renderLock.withLock { renderState.compEffects }
     }
 
+    /// 押しているパッドのエフェクト（描画スレッド用）
+    func padEffects() -> [EffectStack] {
+        renderLock.withLock { renderState.padStacks }
+    }
+
     /// 1 レイヤー分（クロスフェード中は消えていく方 → 新しい方の順）。renderLock の中で呼ぶ
     private func layerGroupLocked(_ r: Int, now: CFTimeInterval, blend: BlendMode, comp: ClipTransform) -> LayerGroup? {
         makeGroupLocked(renderState.layers[r], frame: frames[r], outgoingFrame: outgoingFrames[r], key: r, now: now,
@@ -1426,6 +1439,8 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
         /// デッキ（無ければ 1 枚）。スロットはデッキごとに続けて slots に入っている
         var decks: [SavedDeck]?
         var currentDeck: Int?
+        /// 押している間だけ効くエフェクトのパッド
+        var pads: [SavedPad]?
         /// 自動保存だけ：開いていたプロジェクトと、未保存の変更があったか
         var projectPath: String?
         var projectDirty: Bool?
@@ -1510,7 +1525,8 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
             masterAudioMuted: masterAudioMuted ? true : nil,
             scenes: scenes.isEmpty ? nil : scenes,
             decks: decks.map { SavedDeck(id: $0.id, name: $0.name) },
-            currentDeck: currentDeck)
+            currentDeck: currentDeck,
+            pads: savedPads)
     }
 
     private func restore() {
@@ -1556,6 +1572,8 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
         sceneTween = nil
         sceneProgress = nil
         scenes = state.scenes ?? []
+        heldPads = [:]
+        pads = makePads(state.pads)
         activeSceneID = nil
         closeSceneEditor()
         bpm = state.bpm ?? 120

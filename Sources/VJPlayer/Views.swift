@@ -38,8 +38,9 @@ struct ContentView: View {
                 let cell = ClipGrid.cellSize(forWidth: gridWidth, columns: engine.columns)
                 let gridHeight = ClipGrid.contentHeight(cell: cell.height, layers: engine.layerCount)
                 let monitorHeight = (UI.sideWidth / max(engine.outputAspect, 0.1)) + 24
-                let topHeight = min(max(gridHeight, monitorHeight) + 24, max(g.size.height - 370 - 1, 200))
-                let bottomHeight = g.size.height - topHeight - 1
+                let padHeight: CGFloat = 58
+                let topHeight = min(max(gridHeight, monitorHeight) + 24, max(g.size.height - 370 - 1 - padHeight, 200))
+                let bottomHeight = g.size.height - topHeight - padHeight - 1
                 VStack(spacing: 0) {
                     HStack(alignment: .top, spacing: 12) {
                         ClipGrid(size: CGSize(width: gridWidth, height: topHeight - 24))
@@ -49,6 +50,10 @@ struct ContentView: View {
                     }
                     .padding(12)
                     .frame(height: topHeight, alignment: .top)
+                    // 押している間だけ効くエフェクトのパッド
+                    FXPadBar()
+                        .padding(.horizontal, 12)
+                        .frame(height: padHeight, alignment: .top)
                     Divider()
                     HStack(alignment: .top, spacing: 12) {
                         ParameterPanel(previewHeight: min(max(bottomHeight - 100, 176), 420))
