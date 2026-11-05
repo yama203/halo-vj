@@ -533,6 +533,10 @@ enum SelfTest {
 
     /// エフェクトを GPU で処理して、読み戻した色を確かめる
     static func testEffects(_ check: (Bool, String) -> Void) {
+        // 画面下の状態表示：GPU の使用率・メモリ・CPU の刻みが読める
+        let g = SystemMonitor.gpuUtilization(), m = SystemMonitor.memoryMB(), h = SystemMonitor.hostTicks()
+        check(g != nil && (0...100).contains(g!) && m > 1 && (h?.total ?? 0) > 0,
+              String(format: "状態表示：GPU %.0f%%・メモリ %.0f MB が読める", g ?? -1, m))
         let ctx = MetalContext.shared
         let W = 8
         func tex(_ f: (Int, Int) -> SIMD3<Float>) -> MTLTexture {

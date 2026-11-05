@@ -61,6 +61,8 @@ struct ContentView: View {
                     .frame(height: bottomHeight)
                 }
             }
+            Divider()
+            StatusBar()
         }
         .background(WindowTitleSync(
             title: (engine.projectURL?.deletingPathExtension().lastPathComponent ?? "名称未設定") + " — " + AppInfo.name,

@@ -1046,12 +1046,26 @@ final class RenderLoop {
         lock.withLock { stats }
     }
 
+    /// 画面下の状態表示用：前に呼んでから描いた回数と、いちばん長くあいた間隔（ms）。呼ぶと数え直す
+    private var monitorTicks = 0
+    private var monitorMaxGapMs = 0.0
+    func takeMonitorCounts() -> (ticks: Int, maxGapMs: Double) {
+        lock.withLock {
+            defer { monitorTicks = 0; monitorMaxGapMs = 0 }
+            return (monitorTicks, monitorMaxGapMs)
+        }
+    }
+
     private func tick() {
         let now = CACurrentMediaTime()
         let updated = engine.updateFrame()
         let current: [(ObjectIdentifier, CAMetalLayer, TargetKind)] = lock.withLock {
             stats.ticks += 1
-            if lastTick > 0 { stats.maxTickGapMs = max(stats.maxTickGapMs, (now - lastTick) * 1000) }
+            monitorTicks += 1
+            if lastTick > 0 {
+                stats.maxTickGapMs = max(stats.maxTickGapMs, (now - lastTick) * 1000)
+                monitorMaxGapMs = max(monitorMaxGapMs, (now - lastTick) * 1000)
+            }
             lastTick = now
             if updated > 0 {
                 stats.newFrames += 1
