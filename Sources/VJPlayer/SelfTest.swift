@@ -1147,6 +1147,49 @@ enum SelfTest {
         print("書き出しました: \(path)")
     }
 
+    /// 開発用：オーバードライブ加算の GPU 時間を測る（1 コマあたり ms）
+    static func odBench(width W: Int, height H: Int) {
+        let ctx = MetalContext.shared
+        func tex(_ f: (Int, Int) -> SIMD3<Float>) -> MTLTexture {
+            let td = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: W, height: H, mipmapped: false)
+            td.usage = [.shaderRead]
+            let t = ctx.device.makeTexture(descriptor: td)!
+            var px = [UInt8](repeating: 255, count: W * H * 4)
+            for y in 0..<H { for x in 0..<W {
+                let c = (f(x * 960 / W, y * 540 / H) * 255).rounded(.toNearestOrEven); let i = (y * W + x) * 4
+                px[i] = UInt8(c.z); px[i + 1] = UInt8(c.y); px[i + 2] = UInt8(c.x)
+            } }
+            t.replace(region: MTLRegionMake2D(0, 0, W, H), mipmapLevel: 0, withBytes: px, bytesPerRow: W * 4)
+            return t
+        }
+        let below = tex { x, y in SIMD3(repeating: ((x / 12 + y / 12) % 2 == 0) ? 0.35 : 0.55) }
+        let top = tex { x, y in
+            let dx = Float(x - 300), dy = Float(y - 270)
+            return dx * dx + dy * dy < 60 * 60 ? SIMD3(repeating: 1) : .zero
+        }
+        let base = LayerGroup(draws: [LayerDraw(texture: below, opacity: 1, blend: .normal, holder: nil)],
+                              opacity: 1, blend: .normal, key: 0)
+        func groups(_ od: Bool) -> [LayerGroup] {
+            var g = LayerGroup(draws: [LayerDraw(texture: top, opacity: 1, blend: od ? .overdrive : .add, holder: nil)],
+                               opacity: 1, blend: od ? .overdrive : .add, key: 3)
+            if od { g.blendFX = EffectStack(effects: [Effect(kind: .overdrive)]) }
+            return [base, g]
+        }
+        for od in [false, true] {
+            let c = Compositor()
+            var times: [Double] = []
+            for i in 0..<80 {
+                let cb = ctx.queue.makeCommandBuffer()!
+                _ = c.composite(groups(od), effects: EffectStack(), width: W, height: H, cb: cb, now: 10 + Double(i) / 60)
+                cb.commit(); cb.waitUntilCompleted()
+                if i >= 10 { times.append((cb.gpuEndTime - cb.gpuStartTime) * 1000) }
+            }
+            times.sort()
+            print(String(format: "%@ %dx%d: GPU 中央値 %.2f ms / 最大 %.2f ms", od ? "オーバードライブ" : "加算　　　　　", W, H,
+                         times[times.count / 2], times.last!))
+        }
+    }
+
     static func testAnimation(paths: [String], check: (Bool, String) -> Void, wait: (Double) -> Void) {
         func near(_ a: Double, _ b: Double, _ eps: Double = 0.01) -> Bool { abs(a - b) < eps }
         var a = ParamAnim(key: .rotation)

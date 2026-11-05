@@ -12,6 +12,12 @@ enum Main {
             SelfTest.odPreview(path: args[i + 1], values: Array(vals.prefix(8)), time: vals.count > 8 ? vals[8] : 10)
             exit(0)
         }
+        if let i = args.firstIndex(of: "--od-bench") {
+            // 開発用：オーバードライブ加算の GPU 時間を測る  VJPlayer --od-bench [幅 高さ]
+            let n = args.dropFirst(i + 1).compactMap(Int.init)
+            SelfTest.odBench(width: n.count > 1 ? n[0] : 1920, height: n.count > 1 ? n[1] : 1080)
+            exit(0)
+        }
         if let i = args.firstIndex(of: "--card-preview"), args.count > i + 2, let k = EffectKind(rawValue: args[i + 1]) {
             // 開発用：エフェクトの設定パネルを 1 枚の画像に書き出す（画面には出さない）
             //   VJPlayer --card-preview strobe out.png

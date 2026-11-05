@@ -50,6 +50,15 @@ fragment float4 fmain(VOut in [[stage_in]],
     if (any(uv < 0.0) || any(uv > 1.0)) return float4(0, 0, 0, 1);
     if (u.mode == 2) return testPattern(uv, in.pos.xy);
     if (u.mode == 0) return float4(0, 0, 0, 1);
+    // 大きな合成の絵を小さな画面（出力モニターなど）に縮めて出すときは、4 点を平均してちらつきを抑える
+    float2 duv = fwidth(uv);
+    float2 texel = duv * float2(tex.get_width(), tex.get_height());
+    if (max(texel.x, texel.y) > 1.25) {
+        float2 o = duv * 0.25;
+        float3 c = tex.sample(s, uv + float2(-o.x, -o.y)).rgb + tex.sample(s, uv + float2(o.x, -o.y)).rgb
+                 + tex.sample(s, uv + float2(-o.x, o.y)).rgb + tex.sample(s, uv + float2(o.x, o.y)).rgb;
+        return float4(c * 0.25 * u.master, 1.0);
+    }
     return float4(tex.sample(s, uv).rgb * u.master, 1.0);
 }
 
@@ -243,6 +252,19 @@ static float4 odLayer(constant ODUniforms& u, texture2d<float> tex, sampler s, f
     float2 uv = (u.inv * float3(px, 1.0)).xy;
     if (any(uv < 0.0) || any(uv > 1.0)) return float4(0.0);
     return tex.sample(s, uv) * u.opacity;   // 色に不透明度が掛かった絵
+}
+
+// 縮小：n x n ピクセルを平均する（あふれの 1/4 の絵から、波紋の山用のさらに小さい絵を作る）
+fragment float4 fdown(VOut in [[stage_in]], constant int& n [[buffer(0)]], texture2d<float> src [[texture(0)]]) {
+    int2 base = int2(in.pos.xy) * n;
+    int2 lim = int2(src.get_width(), src.get_height()) - 1;
+    float3 acc = float3(0.0);
+    for (int y = 0; y < n; y++) {
+        for (int x = 0; x < n; x++) {
+            acc += src.read(uint2(min(base + int2(x, y), lim))).rgb;
+        }
+    }
+    return float4(acc / float(n * n), 1.0);
 }
 
 // あふれた分（縮小した絵に書く）
@@ -447,6 +469,7 @@ final class MetalContext {
     let blurPipeline: MTLRenderPipelineState
     let odFinalPipeline: MTLRenderPipelineState
     let echoPipeline: MTLRenderPipelineState
+    let downPipeline: MTLRenderPipelineState
     let sampler: MTLSamplerState
     let textureCache: CVMetalTextureCache
     let dummyTexture: MTLTexture
@@ -528,6 +551,7 @@ final class MetalContext {
         odOverPipeline = plain("fodOver", .rgba16Float)
         blurPipeline = plain("fblur", .rgba16Float)
         odFinalPipeline = plain("fodFinal")
+        downPipeline = plain("fdown", .rgba16Float)
         // エコーの前の絵は少しずつ薄めるので、8bit だと暗い所が消え残る。16bit の小数で持つ
         let ecd = MTLRenderPipelineDescriptor()
         ecd.vertexFunction = library.makeFunction(name: "vmain")
@@ -906,6 +930,14 @@ final class Compositor {
             e.setFragmentTexture(below, index: 0)
             e.setFragmentTexture(layer, index: 1)
         }
+        // 1b. 波紋の山のもと：あふれ（1/4）を 8 x 8 ずつ平均して 1/32 に（全部のピクセルを読み直すより大幅に軽い）
+        if v(3) > 0.001 {
+            var n = Int32(rscale / scale)
+            pass(odRipple[0], ctx.downPipeline) { e in
+                e.setFragmentBytes(&n, length: MemoryLayout<Int32>.stride, index: 0)
+                e.setFragmentTexture(odLow[0], index: 0)
+            }
+        }
         // 2. ぼかす（横 → 縦）
         let radius = v(1) * k / Float(scale)
         for (src, dst, dir) in [(odLow[0], odLow[1], SIMD2<Float>(1, 0)), (odLow[1], odLow[0], SIMD2<Float>(0, 1))] {
@@ -915,15 +947,8 @@ final class Compositor {
                 e.setFragmentTexture(src, index: 0)
             }
         }
-        // 2b. 波紋の山：1/16 の大きさで、波紋の広がりだけ大きくぼかす
+        // 2b. 波紋の山：1/32 の大きさで、波紋の広がりだけ大きくぼかす
         if v(3) > 0.001 {
-            var ru = u
-            ru.b.w = Float(rscale)
-            pass(odRipple[0], ctx.odOverPipeline) { e in
-                e.setFragmentBytes(&ru, length: MemoryLayout<ODUniforms>.stride, index: 0)
-                e.setFragmentTexture(below, index: 0)
-                e.setFragmentTexture(layer, index: 1)
-            }
             // 3 回ぼかして、全体で σ = 広がり/2 になるように（1 回あたりの半径は 13 点で無理なく届く大きさ）
             let rr = v(7) * k / (Float(rscale) * 1.732)
             for _ in 0..<3 {
@@ -1084,22 +1109,71 @@ final class RenderLoop {
             ? engine.previewDraws().map { LayerGroup(draws: [$0], opacity: 1, blend: .normal, key: 1000) } : []
         let layerGroups = kinds.contains(.layer) ? engine.layerPreviewGroups() : []
         let plain = RenderParams(homographyInverse: matrix_identity_float3x3, testPattern: false, master: 1)
-        for (id, layer, kind) in current {
-            let comp = compositors[id] ?? Compositor()
-            compositors[id] = comp
-            switch kind {
-            case .output:
-                render(layer, compositor: comp, groups: params.testPattern ? [] : groups, effects: compFX, params: params)
-            case .composition:
-                var p = plain
-                p.master = params.compMaster
-                render(layer, compositor: comp, groups: groups, effects: compFX, params: p)
-            case .layer:
-                render(layer, compositor: comp, groups: layerGroups, effects: EffectStack(), params: plain)
-            case .clipPreview:
-                render(layer, compositor: comp, groups: clipGroups, effects: EffectStack(), params: plain)
+
+        // 出力・コンポジションは中身が同じ。合成は 1 コマに 1 回だけ（縦横比が同じ画面のうち一番大きい大きさで）して、
+        // 出力ウィンドウ・出力モニター・コンポジションのプレビューで使い回す（GPU を節約。見え方も必ず同じになる）
+        var shared: [Int: (size: (Int, Int), needs: Bool)] = [:]
+        for (_, layer, kind) in current where kind == .output || kind == .composition {
+            let w = Int(layer.drawableSize.width), h = Int(layer.drawableSize.height)
+            guard w > 0, h > 0 else { continue }
+            let key = Self.aspectKey(w, h)
+            let needs = kind == .composition || !params.testPattern
+            let old = shared[key]
+            let size = old.map { $0.size.0 * $0.size.1 >= w * h ? $0.size : (w, h) } ?? (w, h)
+            shared[key] = (size, (old?.needs ?? false) || needs)
+        }
+        var sharedTextures: [Int: MTLTexture] = [:]
+        sharedCompositors = sharedCompositors.filter { shared[$0.key] != nil }
+        if !groups.isEmpty {
+            for (key, v) in shared where v.needs {
+                guard let cb = ctx.queue.makeCommandBuffer() else { continue }
+                let comp = sharedCompositors[key] ?? Compositor()
+                sharedCompositors[key] = comp
+                if let t = comp.composite(groups, effects: compFX, width: v.size.0, height: v.size.1, cb: cb) {
+                    sharedTextures[key] = t
+                }
+                // GPU が使い終わるまで映像バッファを保持する
+                cb.addCompletedHandler { _ in _ = groups }
+                cb.commit()
             }
         }
+
+        for (id, layer, kind) in current {
+            switch kind {
+            case .output, .composition:
+                let key = Self.aspectKey(Int(layer.drawableSize.width), Int(layer.drawableSize.height))
+                let tex = sharedTextures[key]
+                if kind == .output {
+                    present(layer, texture: params.testPattern ? nil : tex, params: params)
+                } else {
+                    var p = plain
+                    p.master = params.compMaster
+                    present(layer, texture: tex, params: p)
+                }
+            case .layer, .clipPreview:
+                let comp = compositors[id] ?? Compositor()
+                compositors[id] = comp
+                if kind == .layer {
+                    render(layer, compositor: comp, groups: layerGroups, effects: EffectStack(), params: plain)
+                } else {
+                    render(layer, compositor: comp, groups: clipGroups, effects: EffectStack(), params: plain)
+                }
+            }
+        }
+    }
+
+    /// 出力・コンポジションの合成（縦横比ごと。描画スレッドだけが触る）
+    private var sharedCompositors: [Int: Compositor] = [:]
+
+    /// 縦横比を 1/100 に丸めた番号（同じ縦横比の画面は 1 つの合成を使い回す）
+    private static func aspectKey(_ w: Int, _ h: Int) -> Int {
+        h > 0 ? Int((Double(w) / Double(h) * 100).rounded()) : 0
+    }
+
+    /// できあがった合成の絵を画面に出す（コーナーピン・マスター・テストパターンはここで）
+    private func present(_ layer: CAMetalLayer, texture: MTLTexture?, params: RenderParams) {
+        guard let drawable = layer.nextDrawable(), let cb = ctx.queue.makeCommandBuffer() else { return }
+        draw(drawable, composite: texture, params: params, cb: cb)
     }
 
     private func render(_ layer: CAMetalLayer, compositor: Compositor, groups: [LayerGroup], effects: EffectStack,
@@ -1108,7 +1182,13 @@ final class RenderLoop {
         let w = drawable.texture.width, h = drawable.texture.height
         let composite = groups.isEmpty ? nil
             : compositor.composite(groups, effects: effects, width: w, height: h, cb: cb)
+        // GPU が使い終わるまで映像バッファを保持する
+        cb.addCompletedHandler { _ in _ = groups }
+        draw(drawable, composite: composite, params: params, cb: cb)
+    }
 
+    private func draw(_ drawable: CAMetalDrawable, composite: MTLTexture?, params: RenderParams, cb: MTLCommandBuffer) {
+        let w = drawable.texture.width, h = drawable.texture.height
         let rpd = MTLRenderPassDescriptor()
         rpd.colorAttachments[0].texture = drawable.texture
         rpd.colorAttachments[0].loadAction = .clear
@@ -1125,9 +1205,6 @@ final class RenderLoop {
         enc.setFragmentSamplerState(ctx.sampler, index: 0)
         enc.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
         enc.endEncoding()
-
-        // GPU が使い終わるまで映像バッファを保持する
-        cb.addCompletedHandler { _ in _ = groups }
         cb.present(drawable)
         cb.commit()
     }
