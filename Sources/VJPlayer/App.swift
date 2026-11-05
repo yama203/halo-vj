@@ -24,7 +24,13 @@ enum Main {
             //   VJPlayer --panel-preview 1500 クリップ番号 out.png
             _ = NSApplication.shared
             NSApp.setActivationPolicy(.prohibited)
-            Engine.shared.selectClip(clip)
+            //   クリップ番号が負なら、その番目（-1 = 1 番目）のシーンを編集している所
+            if clip < 0 {
+                let sc = Engine.shared.scenes
+                if sc.indices.contains(-clip - 1) { Engine.shared.editScene(sc[-clip - 1].id) }
+            } else {
+                Engine.shared.selectClip(clip)
+            }
             CardPreview.writePanel(width: w, path: args[i + 3])
             exit(0)
         }
@@ -111,6 +117,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let v = ProcessInfo.processInfo.environment["VJ_TRIGGER"] {
             let list = v.split(separator: ",").compactMap { Int($0) }
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { list.forEach { Engine.shared.trigger($0) } }
+        }
+        // 画面確認用：VJ_EDIT_SCENE=番号（1 から）で起動時にそのシーンを編集中にしておく
+        if let v = ProcessInfo.processInfo.environment["VJ_EDIT_SCENE"], let n = Int(v) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                let sc = Engine.shared.scenes
+                if sc.indices.contains(n - 1) { Engine.shared.editScene(sc[n - 1].id) }
+            }
         }
         // 画面確認用：VJ_SELECT_CLIP=番号 で起動時にそのクリップを選んでおく
         if let v = ProcessInfo.processInfo.environment["VJ_SELECT_CLIP"], let i = Int(v) {

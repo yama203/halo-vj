@@ -188,7 +188,9 @@ struct ParameterPanel: View {
     @State private var dragStartWidth: CGFloat?
 
     var body: some View {
-        let layer = engine.layers[engine.selectedLayer]
+        // シーンの編集中は、そのシーンのレイヤー・コンポジション
+        let layer = engine.viewLayer(engine.selectedLayer)
+        let draft = engine.sceneDraft
         let clipIndex = engine.inspectedIndex.flatMap { engine.slots[$0] != nil ? $0 : nil }
         let clip = clipIndex.flatMap { engine.slots[$0] }
 
@@ -207,9 +209,13 @@ struct ParameterPanel: View {
                 // タブごとの操作
                 switch engine.inspectorTab {
                 case .composition:
-                    HStack(spacing: 8) {
-                        ResetButton { engine.compTransform.reset() }
-                        MuteButton(muted: $engine.compMuted, what: "コンポジション（出力全体）")
+                    if let draft {
+                        ResetButton { draft.compTransform.reset() }
+                    } else {
+                        HStack(spacing: 8) {
+                            ResetButton { engine.compTransform.reset() }
+                            MuteButton(muted: $engine.compMuted, what: "コンポジション（出力全体）")
+                        }
                     }
                 case .layer:
                     LayerActions(layer: layer)
@@ -228,7 +234,8 @@ struct ParameterPanel: View {
                         .id(engine.inspectorTab)
                     // 自由な形のマスクの点の編集
                     switch engine.inspectorTab {
-                    case .composition: PolyMaskOverlay(holder: engine)
+                    case .composition:
+                        if let draft { PolyMaskOverlay(holder: draft) } else { PolyMaskOverlay(holder: engine) }
                     case .layer: PolyMaskOverlay(holder: layer)
                     case .clip:
                         if let clip {
@@ -262,9 +269,13 @@ struct ParameterPanel: View {
                 VStack(alignment: .leading, spacing: 0) {
                 switch engine.inspectorTab {
                 case .composition:
-                    CompositionParams()
+                    if let draft {
+                        SceneCompParams(draft: draft).id(ObjectIdentifier(draft))
+                    } else {
+                        CompositionParams()
+                    }
                 case .layer:
-                    LayerParams(layer: layer)
+                    LayerParams(layer: layer).id(ObjectIdentifier(layer))
                 case .clip:
                     if let clip, let clipIndex {
                         ClipParams(slot: clip)
@@ -309,7 +320,7 @@ struct ParameterPanel: View {
 
     private var previewKind: RenderLoop.TargetKind {
         switch engine.inspectorTab {
-        case .composition: .composition
+        case .composition: engine.sceneDraft != nil ? .scenePreview : .composition
         case .layer: .layer
         case .clip: .clipPreview
         }
@@ -318,9 +329,10 @@ struct ParameterPanel: View {
     private func previewCaption(clip: ClipSlot?, clipIndex: Int?) -> String {
         switch engine.inspectorTab {
         case .composition:
-            return "コンポジション"
+            return engine.editingScene.map { "シーン「\($0.name)」（出力しない・音なし）" } ?? "コンポジション"
         case .layer:
-            return "レイヤー \(engine.layers[engine.selectedLayer].name)"
+            let name = "レイヤー \(engine.layers[engine.selectedLayer].name)"
+            return engine.editingScene.map { "シーン「\($0.name)」の\(name)（出力しない）" } ?? name
         case .clip:
             guard let clipIndex else { return "クリップ" }
             let live = engine.activeByLayer[engine.layerOf(clipIndex)] == clipIndex
@@ -427,12 +439,12 @@ struct LayerActions: View {
             ResetButton(disabled: layer.transform.isDefault) { layer.transform.reset() }
             MuteButton(muted: $layer.muted, what: "このレイヤー")
             Button {
-                engine.stopLayer(layer.index)
+                engine.viewStop(layer.index)
             } label: {
                 Label("停止", systemImage: "stop.fill")
             }
             .controlSize(.regular)
-            .disabled(engine.activeByLayer[layer.index] == nil)
+            .disabled(engine.viewPlaying(layer.index) == nil)
         }
     }
 }

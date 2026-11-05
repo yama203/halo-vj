@@ -266,6 +266,9 @@ enum SelfTest {
         testEffects(check)
         testClipPosterizeTime(paths: paths, check: check, wait: wait)
         testGeneratorSlots(check: check)
+        testScenes(check: check, wait: wait)
+        testSceneEdit(check: check, wait: wait)
+        testDecks(check: check, wait: wait)
 
         // 16. ミュート（クリップ・レイヤー・コンポジション）
         testMute(paths: paths, check: check, wait: wait)
@@ -1021,6 +1024,253 @@ enum SelfTest {
         let g2 = run([group(clip(tex { _, _ in blue }), [fx(.posterizeTime, [4])])], compositor: c2, now: 5.2)(3, 3)
         let g3 = run([group(clip(tex { _, _ in blue }), [fx(.posterizeTime, [4])])], compositor: c2, now: 5.26)(3, 3)
         check(near(g1, red) && near(g2, red) && near(g3, blue), "ポスタライズ時間（レイヤー）：4fps なら 0.25 秒ごと")
+    }
+
+    /// シーン：今の状態を保存して、切り替える（すぐ／フェード）
+    /// デッキ：グリッドを何枚も持ち、シーンはデッキを覚える
+    static func testDecks(check: (Bool, String) -> Void, wait: (Double) -> Void) {
+        let e = Engine(persistent: false)
+        let c = e.columns
+        e.placeGenerator(.solid, at: 0)
+        e.placeGenerator(.noise, at: c + 1)
+        e.trigger(0)
+        let sa = e.addScene()
+        // 空のデッキを足す → 表示が切り替わり、デッキ 1 のクリップは再生を続ける
+        let d2 = e.addDeck()
+        check(d2 == 1 && e.currentDeck == 1 && e.slots.count == 2 * e.gridSize && e.activeByLayer[0] == 0
+              && e.slots[0] != nil && !e.deckHasClips(1),
+              "デッキ：空のデッキを足すと表示が変わり、前のデッキのクリップは再生を続ける")
+        let i2 = e.slotIndex(deck: 1, layer: 0, column: 2)
+        e.placeGenerator(.stripes, at: i2)
+        check(e.layerOf(i2) == 0 && e.deckOf(i2) == 1 && e.columnOf(i2) == 2, "デッキ：番号から段・列・デッキがわかる")
+        e.trigger(i2)
+        check(e.activeByLayer[0] == i2 && e.slots[0]?.isPlaying != true, "デッキ：別のデッキのクリップに切り替えられる（同じレイヤーの前のクリップは止まる）")
+        let sb = e.addScene()
+        check(sb.deck == e.decks[1].id && sb.playing[0] == 2 && sb.layerDecks == nil, "デッキ：シーンは保存したときのデッキを覚える")
+
+        // シーン A（デッキ 1）を呼ぶとデッキ 1 の表示になり、そのクリップに戻る
+        e.updateScene(sa.id) { $0.fade = 0 }
+        e.recallScene(sa.id)
+        check(e.currentDeck == 0 && e.activeByLayer[0] == 0, "デッキ：シーンを呼ぶと、そのデッキのグリッドとクリップになる")
+        e.updateScene(sb.id) { $0.fade = 0 }
+        e.recallScene(sb.id)
+        check(e.currentDeck == 1 && e.activeByLayer[0] == i2, "デッキ：別のデッキのシーンへも切り替えられる")
+
+        // 列を足してもデッキごとの位置はそのまま
+        e.insertColumn(at: 0)
+        let i2b = e.slotIndex(deck: 1, layer: 0, column: 3)
+        check(e.slots[i2b]?.generator?.kind == .stripes && e.activeByLayer[0] == i2b
+              && e.slots[e.slotIndex(deck: 0, layer: 1, column: 2)]?.generator?.kind == .noise,
+              "デッキ：列を足しても各デッキのクリップの位置がずれない")
+        e.removeColumn(0)
+
+        // 複製・保存と読み込み
+        let d3 = e.addDeck(duplicating: 0)
+        check(d3 == 2 && e.slots[e.slotIndex(deck: 2, layer: 1, column: 1)]?.generator?.kind == .noise
+              && e.slots[e.slotIndex(deck: 2, layer: 1, column: 1)] !== e.slots[e.slotIndex(deck: 0, layer: 1, column: 1)],
+              "デッキ：複製すると同じ並びの別のクリップができる")
+        e.renameDeck(1, to: "B")
+        let st = e.makeState(relativeTo: nil)
+        let e2 = Engine(persistent: false)
+        e2.apply(st, baseDir: nil)
+        check(e2.decks.map(\.name) == e.decks.map(\.name) && e2.decks.map(\.id) == e.decks.map(\.id)
+              && e2.slots[e2.slotIndex(deck: 1, layer: 0, column: 2)]?.generator?.kind == .stripes
+              && e2.slots[e2.slotIndex(deck: 2, layer: 1, column: 1)]?.generator?.kind == .noise
+              && e2.currentDeck == e.currentDeck,
+              "デッキ：保存して読み込むと、デッキの名前・中身・表示中のデッキが戻る")
+        // 古い保存データ（デッキ無し）は 1 枚のデッキとして読む
+        var old = st
+        old.decks = nil
+        old.slots = Array(st.slots.prefix(e.gridSize))
+        let e3 = Engine(persistent: false)
+        e3.apply(old, baseDir: nil)
+        check(e3.decks.count == 1 && e3.slots[c + 1]?.generator?.kind == .noise, "デッキ：デッキの無い古いデータも読める")
+
+        // 消す：再生中なら止まり、使っていたシーンは 1 枚目のデッキへ
+        e.removeDeck(1)
+        check(e.decks.count == 2 && e.activeByLayer[0] == nil && e.scenes.first { $0.id == sb.id }?.deck == nil
+              && e.slots.count == 2 * e.gridSize && e.slots[e.slotIndex(deck: 1, layer: 1, column: 1)]?.generator?.kind == .noise,
+              "デッキ：消すと中のクリップは止まって外れ、後ろのデッキが詰まる")
+    }
+
+    /// シーンの編集：グリッド・レイヤー欄・下のパネルがそのシーンになり、出力はそのまま
+    static func testSceneEdit(check: (Bool, String) -> Void, wait: (Double) -> Void) {
+        let e = Engine(persistent: false)
+        let c = e.columns
+        e.placeGenerator(.solid, at: 0)
+        e.placeGenerator(.noise, at: 1)
+        e.placeGenerator(.stripes, at: c)
+        e.trigger(0)
+        e.layers[0].opacity = 0.5
+        let a = e.addScene()
+        // 出力は別の状態（L1 ノイズ・L2 ストライプ）
+        e.trigger(1)
+        e.trigger(c)
+        e.layers[0].opacity = 1
+        e.editScene(a.id)
+        guard let d = e.sceneDraft else { check(false, "シーンの編集：編集を始められる"); return }
+        check(e.editingSceneID == a.id && e.viewPlaying(0) == 0 && e.viewPlaying(1) == nil
+              && abs(e.viewLayer(0).opacity - 0.5) < 1e-9 && e.viewLayer(0) !== e.layers[0],
+              "シーンの編集：グリッドとレイヤー欄がシーンの中身（流すクリップ・不透明度）になる")
+
+        // グリッドのクリップを押す → シーンに入るだけで、出力は変わらない
+        e.pressSlot(1)
+        e.pressSlot(c)
+        e.viewLayer(0).opacity = 0.3
+        e.viewLayer(1).effects = [Effect(kind: .mirror)]
+        e.selectedLayer = 1
+        e.inspectorTab = .layer
+        _ = e.addEffectToCurrentTab(.colorize)
+        e.inspectorTab = .composition
+        _ = e.addEffectToCurrentTab(.posterize)
+        let sc = e.scenes.first { $0.id == a.id }
+        check(sc?.playing[0] == 1 && sc?.playing[1] == 0 && abs((sc?.layers[0].opacity ?? 0) - 0.3) < 1e-9
+              && sc?.layers[1].effects?.map(\.kind) == [.mirror, .colorize] && sc?.compEffects.map(\.kind) == [.posterize],
+              "シーンの編集：クリップを押す・値を変える・エフェクトを付けると、すぐシーンに入る")
+        check(abs(e.layers[0].opacity - 1) < 1e-9 && e.layers[1].effects.isEmpty && e.activeByLayer[0] == 1
+              && e.activeByLayer[1] == c && e.effects.isEmpty && e.slots[0]?.isPlaying != true,
+              "シーンの編集：出力（レイヤー・再生中のクリップ・コンポジション）はそのまま")
+        e.viewStop(1)
+        check(e.scenes.first { $0.id == a.id }?.playing[1] == nil && e.activeByLayer[1] == c,
+              "シーンの編集：停止ボタンはシーンのそのレイヤーを「なし」にするだけ")
+        e.pressSlot(c)
+
+        // プレビュー：L1 は出力中と同じノイズ → 出力のフレーム、L2 は出力中のストライプ
+        e.pressSlot(0)
+        _ = e.updateFrame()
+        wait(0.1)
+        _ = e.updateFrame()
+        let g1 = e.scenePreviewGroups()
+        check(g1 != nil && g1?.groups.count == 2 && abs(Double(g1?.groups.first { $0.key == 0 }?.opacity ?? 0) - 0.3) < 1e-6
+              && g1?.effects.effects.map(\.kind) == [.posterize],
+              "シーンの編集：プレビューにはシーンの中身（出力していないクリップも）が映る")
+        e.selectedLayer = 0
+        check(e.layerPreviewGroups().count == 1, "シーンの編集：レイヤーのプレビューはシーンのそのレイヤー")
+
+        // デッキ：編集中のタブ切り替えはシーンのデッキになり、出力の表示デッキは変わらない
+        let d2 = e.addDeck()
+        let i2 = e.slotIndex(deck: d2, layer: 2, column: 0)
+        e.placeGenerator(.grid, at: i2)
+        e.pressSlot(i2)
+        let sc2 = e.scenes.first { $0.id == a.id }
+        check(e.currentDeck == 0 && e.shownDeck == d2 && sc2?.deck == e.decks[d2].id && sc2?.playing[2] == 0
+              && sc2?.layerDecks?[0] == e.decks[0].id && e.activeByLayer[2] == nil,
+              "シーンの編集：デッキを切り替えてクリップを選ぶと、シーンのデッキとクリップになる（出力は別）")
+        e.closeSceneEditor()
+        e.updateScene(a.id) { $0.fade = 0 }
+        e.recallScene(a.id)
+        check(e.currentDeck == d2 && e.activeByLayer[0] == 0 && e.activeByLayer[1] == c && e.activeByLayer[2] == i2,
+              "シーンの編集：編集したシーンを呼ぶと、その通りに出る")
+
+        // 上書き → 編集中の中身も読み直す。削除 → 編集を終える
+        e.editScene(a.id)
+        e.layers[0].opacity = 0.8
+        e.overwriteScene(a.id)
+        check(e.sceneDraft.map { abs($0.layers[0].opacity - 0.8) < 1e-9 } == true,
+              "シーンの編集：今の状態で上書きすると編集中の中身も変わる")
+        e.deleteScene(a.id)
+        check(e.sceneDraft == nil && e.scenePreviewGroups() == nil && e.viewLayer(0) === e.layers[0],
+              "シーンの編集：シーンを消すと編集も終わり、画面は出力の状態に戻る")
+
+        // 空のシーン：何も流さず、すぐ編集。出力はそのまま
+        let live = e.activeByLayer
+        let em = e.addEmptyScene()
+        check(e.editingSceneID == em.id && em.playing.allSatisfy { $0 == nil } && em.compEffects.isEmpty
+              && em.layers.count == e.layers.count && em.deck == e.decks[e.shownDeck].id && e.activeByLayer == live
+              && e.activeSceneID != em.id && e.scenes.last?.id == em.id,
+              "シーン：空のシーンを足すと、何も流さないシーンの編集が始まる（出力はそのまま）")
+        e.pressSlot(1)
+        check(e.scenes.last?.playing[0] == 1 && e.activeByLayer == live, "シーン：空のシーンにグリッドでクリップを入れられる")
+        _ = d
+    }
+
+    static func testScenes(check: (Bool, String) -> Void, wait: (Double) -> Void) {
+        let e = Engine(persistent: false)
+        let c = e.columns
+        e.placeGenerator(.solid, at: 0)
+        e.placeGenerator(.noise, at: 1)
+        e.placeGenerator(.stripes, at: c)
+        // シーン A：レイヤー 1 は単色・不透明度 50%、レイヤー 2 は止める、コンポジションにミラー
+        e.trigger(0)
+        e.layers[0].opacity = 0.5
+        e.layers[0].blend = .add
+        e.effects = [Effect(kind: .mirror)]
+        var lv = Effect(kind: .levels); lv.values = [0, 1, 1, 0, 1]
+        e.layers[0].effects = [lv]
+        let a = e.addScene()
+        // シーン B：レイヤー 1 はノイズ・100%、レイヤー 2 はストライプ、エフェクトなし
+        e.trigger(1)
+        e.trigger(c)
+        e.layers[0].opacity = 1
+        e.layers[0].blend = .normal
+        e.effects = []
+        var lv2 = lv; lv2.values = [0.4, 1, 1, 0, 1]
+        e.layers[0].effects = [lv2]
+        let b = e.addScene()
+        check(e.scenes.count == 2 && a.playing.first == 0 && a.playing.count > 1 && a.playing[1] == nil && b.playing[1] == 0
+              && e.activeSceneID == b.id, "シーン：再生中のクリップと設定を保存できる")
+
+        e.updateScene(a.id) { $0.fade = 0 }
+        e.recallScene(a.id)
+        check(e.activeByLayer[0] == 0 && e.activeByLayer[1] == nil && abs(e.layers[0].opacity - 0.5) < 1e-9
+              && e.layers[0].blend == .add && e.effects.map(\.kind) == [.mirror] && e.activeSceneID == a.id,
+              "シーン（すぐ）：クリップ・止めるレイヤー・不透明度・重ね方・エフェクトがそのシーンになる")
+        e.updateScene(b.id) { $0.fade = 0 }
+        e.recallScene(b.id)
+        let origin = e.slots[1]?.animOrigin ?? -1
+        wait(0.05)
+        e.recallScene(b.id)
+        check(e.activeByLayer[0] == 1 && e.activeByLayer[1] == c && e.slots[1]?.animOrigin == origin,
+              "シーン：同じクリップは頭から出し直さずに続ける")
+
+        // フェード 0.4 秒：途中は値が間、終わればシーンの値。止めるレイヤーはフェードしてから止まる
+        e.updateScene(a.id) { $0.fade = 0.4 }
+        e.recallScene(a.id)
+        wait(0.2)
+        let mid = e.layers[0].opacity
+        let midLevel = e.layers[0].effects.first?.value(0) ?? -1
+        let stillPlaying = e.activeByLayer[1] == c
+        let midL2 = e.layers[1].opacity
+        wait(0.4)
+        check(mid > 0.55 && mid < 0.95 && midLevel > 0.05 && midLevel < 0.35 && stillPlaying && midL2 < 0.95,
+              String(format: "シーン（フェード）：途中は不透明度 %.2f・エフェクトの値 %.2f と間の値、消えるレイヤーは薄くなりつつ再生中", mid, midLevel))
+        check(abs(e.layers[0].opacity - 0.5) < 1e-9 && e.activeByLayer[1] == nil && abs(e.layers[1].opacity - 1) < 1e-9
+              && e.sceneProgress == nil && e.layers[0].blend == .add,
+              "シーン（フェード）：終わるとシーンの値になり、消えたレイヤーは止まって不透明度は元に戻る")
+
+        // エフェクトの混ぜ方：同じ並びなら値を混ぜ、違えば半分で入れ替える
+        let mixed = Engine.mixEffects([lv], [lv2], k: 0.5, p: 0.5)
+        let swapA = Engine.mixEffects([lv], [Effect(kind: .mirror)], k: 0.3, p: 0.3)
+        let swapB = Engine.mixEffects([lv], [Effect(kind: .mirror)], k: 0.7, p: 0.7)
+        check(abs((mixed.first?.value(0) ?? 0) - 0.2) < 1e-9 && swapA.first?.kind == .levels && swapB.first?.kind == .mirror,
+              "シーン：同じエフェクトは値をなめらかに、違うエフェクトは途中で入れ替え")
+
+        let st = e.makeState(relativeTo: nil)
+        let e2 = Engine(persistent: false)
+        e2.apply(st, baseDir: nil)
+        check(e2.scenes.map(\.name) == e.scenes.map(\.name) && e2.scenes.first?.fade == 0.4,
+              "シーンを保存して読み込める")
+        e2.recallScene(e2.scenes[0].id)
+        wait(0.6)
+        check(e2.activeByLayer[0] == 0 && abs(e2.layers[0].opacity - 0.5) < 1e-9, "読み込んだシーンに切り替えられる")
+        e.deleteScene(a.id)
+        check(e.scenes.map(\.id) == [b.id], "シーンを削除できる")
+
+        // サムネイル：出力の合成を小さな PNG にする（赤い絵 → 赤い画像）
+        let ctx = MetalContext.shared
+        let td = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: 64, height: 36, mipmapped: false)
+        td.usage = [.shaderRead]
+        let redTex = ctx.device.makeTexture(descriptor: td)!
+        let px = [UInt8](repeating: 0, count: 64 * 36 * 4).enumerated().map { $0.offset % 4 == 2 || $0.offset % 4 == 3 ? 255 : 0 } as [UInt8]
+        redTex.replace(region: MTLRegionMake2D(0, 0, 64, 36), mipmapLevel: 0, withBytes: px, bytesPerRow: 64 * 4)
+        let old = RenderLoop.shared.lastComposite()
+        RenderLoop.shared.setLastCompositeForTest(redTex)
+        let png = RenderLoop.shared.snapshotPNG()
+        RenderLoop.shared.setLastCompositeForTest(old)
+        let rep = png.flatMap { NSBitmapImageRep(data: $0) }
+        let c0 = rep?.colorAt(x: 96, y: 54)
+        check(rep?.pixelsWide == 192 && (c0?.redComponent ?? 0) > 0.9 && (c0?.blueComponent ?? 1) < 0.1,
+              "シーンのサムネイル：出力の今の絵を小さな画像にする")
     }
 
     /// ジェネレーターのクリップ：置く・再生する・複製・保存して読み込む

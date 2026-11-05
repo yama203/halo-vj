@@ -237,6 +237,8 @@ struct ClipGrid: View {
     static let headerWidth: CGFloat = 156
     /// 上の列番号の帯と、下の「レイヤーを追加」の高さ
     static let columnBarHeight: CGFloat = 26
+    /// 上のデッキのタブの高さ
+    static let deckBarHeight: CGFloat = 28
     static let addRowHeight: CGFloat = 32
     /// 右端の「列を追加」ボタンの幅
     static let addColumnWidth: CGFloat = 34
@@ -255,17 +257,23 @@ struct ClipGrid: View {
 
     /// 全段を表示したときの高さ
     static func contentHeight(cell: CGFloat, layers: Int) -> CGFloat {
-        columnBarHeight + spacing + (cell + spacing) * CGFloat(layers) + addRowHeight + 12
+        deckBarHeight + spacing + columnBarHeight + spacing + (cell + spacing) * CGFloat(layers) + addRowHeight + 12
     }
 
     var body: some View {
         let cell = Self.cellSize(forWidth: size.width, columns: engine.columns)
+        VStack(alignment: .leading, spacing: Self.spacing) {
+        SceneEditBanner()
+        DeckBar()
+            .frame(height: Self.deckBarHeight)
         ScrollView([.horizontal, .vertical]) {
             VStack(alignment: .leading, spacing: Self.spacing) {
                 ColumnBar(cellWidth: cell.width)
                     .frame(height: Self.columnBarHeight)
-                ForEach(engine.layers) { layer in
-                    let r = layer.index
+                ForEach(engine.layers) { live in
+                    let r = live.index
+                    // シーンの編集中は、そのシーンのレイヤー
+                    let layer = engine.viewLayer(r)
                     HStack(spacing: Self.spacing) {
                         LayerHeader(layer: layer)
                             .frame(width: Self.headerWidth, height: cell.height)
@@ -275,7 +283,8 @@ struct ClipGrid: View {
                                           height: cell.height)
                         } else {
                             ForEach(0..<engine.columns, id: \.self) { c in
-                                SlotCell(index: r * engine.columns + c, width: cell.width, height: cell.height)
+                                SlotCell(index: engine.slotIndex(deck: engine.shownDeck, layer: r, column: c),
+                                         width: cell.width, height: cell.height)
                             }
                         }
                     }
@@ -323,6 +332,9 @@ struct ClipGrid: View {
         }
         .scrollIndicators(.automatic)
         .environmentObject(drag)
+        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.orange, lineWidth: 2)
+            .opacity(engine.sceneDraft != nil ? 1 : 0).allowsHitTesting(false))
+        }
     }
 }
 
@@ -414,7 +426,7 @@ struct LayerHeader: View {
 
     var body: some View {
         let selected = engine.selectedLayer == layer.index
-        let playing = engine.activeByLayer[layer.index].flatMap { engine.slots[$0] }
+        let playing = engine.viewPlaying(layer.index).flatMap { engine.slots[$0] }
 
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
@@ -434,14 +446,14 @@ struct LayerHeader: View {
                 Spacer(minLength: 0)
                 MuteButton(muted: $layer.muted, what: layer.name, compact: true)
                 Button {
-                    engine.stopLayer(layer.index)
+                    engine.viewStop(layer.index)
                 } label: {
                     Image(systemName: "stop.fill").font(.system(size: 11))
                         .frame(width: 18, height: 16)
                 }
                 .controlSize(.regular)
                 .disabled(playing == nil)
-                .help("このレイヤーを停止")
+                .help(engine.sceneDraft != nil ? "このシーンではこのレイヤーに何も流さない" : "このレイヤーを停止")
             }
             // 不透明度：左右ドラッグ（クリックだけでは変わらない）、ダブルクリックで 100%
             ValueDrag(label: "不透明度", value: $layer.opacity, range: 0...1, perPoint: 0.006,
@@ -459,6 +471,11 @@ struct LayerHeader: View {
                         .background(Color.purple.opacity(0.45), in: RoundedRectangle(cornerRadius: 3))
                 }
                 if !layer.isAdjustment { EffectIcons(effects: layer.effects, max: 3) }
+                if let a = engine.viewPlaying(layer.index), engine.deckOf(a) != engine.shownDeck,
+                   engine.decks.indices.contains(engine.deckOf(a)) {
+                    Image(systemName: "square.grid.3x3.fill").font(.system(size: 10)).foregroundStyle(.orange)
+                        .help("別のデッキ（\(engine.decks[engine.deckOf(a)].name)）のクリップを再生中")
+                }
                 Text(playing?.name ?? "—")
                     .font(.system(size: 11))
                     .foregroundStyle(playing != nil ? Color.primary.opacity(0.8) : Color.secondary)
@@ -591,7 +608,10 @@ struct SlotCell: View {
 
     var body: some View {
         let slot = engine.slots[index]
-        let active = engine.activeByLayer[engine.layerOf(index)] == index
+        let editing = engine.sceneDraft != nil
+        let active = engine.viewPlaying(engine.layerOf(index)) == index
+        // 編集中に、出力で再生中のクリップ（小さな印だけ）
+        let liveHere = editing && engine.activeByLayer[engine.layerOf(index)] == index
         let moving = drag.source == index && !drag.copying
         let dropHere = drag.source != nil && drag.source != index && drag.target == index
         let moveTarget = dropHere && (!drag.copying || engine.canDuplicate(to: index))
@@ -612,9 +632,21 @@ struct SlotCell: View {
         .overlay(
             RoundedRectangle(cornerRadius: 6)
                 .stroke(badTarget ? Color.red
-                        : dropTargeted || moveTarget ? Color.accentColor : (active ? Color.green : Color.gray.opacity(0.3)),
+                        : dropTargeted || moveTarget ? Color.accentColor
+                        : (active ? (editing ? Color.orange : Color.green) : Color.gray.opacity(0.3)),
                         lineWidth: active || dropTargeted || moveTarget || badTarget ? 3 : 1)
         )
+        .overlay(alignment: .topTrailing) {
+            if liveHere {
+                Text("出力中")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(.black)
+                    .padding(.horizontal, 4).padding(.vertical, 1)
+                    .background(Color.green, in: RoundedRectangle(cornerRadius: 3))
+                    .padding(4)
+                    .allowsHitTesting(false)
+            }
+        }
         .background(GeometryReader { g in
             Color.clear.preference(key: SlotFramesKey.self, value: [index: g.frame(in: .named(SlotDragState.space))])
         })
@@ -639,7 +671,7 @@ struct SlotCell: View {
                             } else if inNameStrip(v.startLocation) {
                                 engine.selectClip(index)   // 名前の帯（または ⌥クリック）は選択だけ。出力しない
                             } else {
-                                engine.trigger(index)
+                                engine.pressSlot(index)
                             }
                         }
                     }
@@ -698,7 +730,9 @@ struct SlotCell: View {
                 }
                 Button("別のクリップに差し替え…") { engine.openPanel(for: index) }
                 if active {
-                    Button("このレイヤーを停止") { engine.stopLayer(engine.layerOf(index)) }
+                    Button(editing ? "このシーンではこのレイヤーに何も流さない" : "このレイヤーを停止") {
+                        engine.viewStop(engine.layerOf(index))
+                    }
                 }
                 Divider()
                 Button("このスロットを空にする", role: .destructive) { engine.clear(index) }
@@ -807,13 +841,14 @@ struct SlotContent: View {
 // MARK: - 右下のパネル（ライブ操作 / エフェクト一覧）
 
 struct SidePanel: View {
-    enum Tab: String { case live, effects, generators }
+    enum Tab: String { case live, scenes, effects, generators }
     @AppStorage("sidePanelTab") private var tab = Tab.live
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Picker("", selection: $tab) {
                 Text("ライブ").tag(Tab.live)
+                Text("シーン").tag(Tab.scenes)
                 Text("エフェクト").tag(Tab.effects)
                 Text("ジェネレーター").tag(Tab.generators)
             }
@@ -822,6 +857,7 @@ struct SidePanel: View {
             .controlSize(.large)
             switch tab {
             case .live: LivePanel()
+            case .scenes: ScenesPanel()
             case .effects: EffectBrowser()
             case .generators: EffectBrowser(generators: true)
             }

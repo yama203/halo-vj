@@ -1,4 +1,5 @@
 import AVFoundation
+import Combine
 import AppKit
 import Metal
 import simd
@@ -44,9 +45,32 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
     /// 1 段のクリップ数（列数）
     @Published private(set) var columns = Engine.defaultColumns
     var layerCount: Int { layers.count }
-    var slotCount: Int { layers.count * columns }
+    /// 1 枚のグリッド（デッキ）のスロット数
+    var gridSize: Int { layers.count * columns }
+    /// 全デッキのスロット数
+    var slotCount: Int { decks.count * gridSize }
     /// スロット番号 → レイヤー（段）
-    func layerOf(_ slotIndex: Int) -> Int { slotIndex / columns }
+    func layerOf(_ slotIndex: Int) -> Int { (slotIndex % max(gridSize, 1)) / columns }
+    /// スロット番号 → デッキ
+    func deckOf(_ slotIndex: Int) -> Int { slotIndex / max(gridSize, 1) }
+    /// スロット番号 → 列
+    func columnOf(_ slotIndex: Int) -> Int { slotIndex % columns }
+    /// デッキ・段・列 → スロット番号
+    func slotIndex(deck d: Int, layer r: Int, column c: Int) -> Int { d * gridSize + r * columns + c }
+
+    /// デッキ：グリッド 1 枚ぶん。何枚でも持てて、上のタブで切り替える。
+    /// スロット番号は「デッキ × (段数 × 列数) + 段 × 列数 + 列」
+    struct Deck: Identifiable, Equatable {
+        var id = UUID()
+        var name: String
+    }
+    @Published private(set) var decks: [Deck] = [Deck(name: "デッキ 1")]
+    /// 上のグリッドに出しているデッキ
+    @Published var currentDeck = 0 {
+        didSet {
+            if !decks.indices.contains(currentDeck) { currentDeck = max(min(currentDeck, decks.count - 1), 0) }
+        }
+    }
 
     /// スロット。番号は「段 × 列数 + 列」
     @Published private(set) var slots: [ClipSlot?] = Array(repeating: nil, count: Engine.defaultLayers * Engine.defaultColumns)
@@ -120,6 +144,20 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
         bpmChanged()
     }
     /// マスター不透明度（出力全体をフェード）
+    // MARK: シーン
+    /// お気に入りの組み合わせ（保存される）
+    @Published var scenes: [VJScene] = [] { didSet { scheduleSave() } }
+    /// 最後に呼び出した（保存した）シーン
+    @Published var activeSceneID: UUID?
+    /// シーンを切り替えている途中なら 0〜1
+    @Published var sceneProgress: Double?
+    /// 編集中のシーン（出力には出さず、左下のプレビューで見ながら直す）
+    @Published var sceneDraft: SceneDraft?
+    var sceneThumbWork: DispatchWorkItem?
+    /// 編集中のシーンが変わったら画面（グリッドなど）も描き直す
+    var sceneDraftSink: AnyCancellable?
+    var sceneTween: Timer?
+
     @Published var masterOpacity = 1.0 {
         didSet { syncRenderState(); scheduleSave() }
     }
@@ -279,6 +317,27 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
         var generatorSize = (1920, 1080)
         var selectedLayer = 0
     }
+    /// シーン編集のプレビューで描くもの（renderLock の中で触る）
+    struct ScenePreviewState {
+        enum Source {
+            /// 出力で同じクリップを再生中 → そのレイヤーのフレームを使う
+            case live(Int)
+            case player(PreviewPlayer)
+            case generator(Effect, origin: Double)
+        }
+        var layers: [RenderState.LayerState] = []
+        var sources: [Source?] = []
+        var compTransform = AnimTransform()
+        var compEffects = EffectStack()
+        var master: Float = 1
+        var masterAnim: ParamAnim?
+    }
+    private var scenePreview: ScenePreviewState?
+    /// シーン編集のプレビューで、レイヤーごとに表示中のフレーム（renderLock の中で触る）
+    private var sceneFrames: [Int: FrameHolder] = [:]
+    /// シーン編集のプレビュー専用の再生（メインスレッド）
+    private var scenePlayers: [Int: PreviewPlayer] = [:]
+
     /// クリッププレビュー用の再生（メインスレッドで管理）
     private var previewPlayer: PreviewPlayer?
     private var previewIn = 0.0
@@ -383,21 +442,86 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
     }
 
     /// その段・列にクリップが入っているか（消す前の確認用）
-    func layerHasClips(_ r: Int) -> Bool { (0..<columns).contains { slots[r * columns + $0] != nil } }
-    func columnHasClips(_ c: Int) -> Bool { layers.indices.contains { slots[$0 * columns + c] != nil } }
+    func layerHasClips(_ r: Int) -> Bool {
+        decks.indices.contains { d in (0..<columns).contains { slots[slotIndex(deck: d, layer: r, column: $0)] != nil } }
+    }
+    func columnHasClips(_ c: Int) -> Bool {
+        decks.indices.contains { d in layers.indices.contains { slots[slotIndex(deck: d, layer: $0, column: c)] != nil } }
+    }
+    func deckHasClips(_ d: Int) -> Bool {
+        decks.indices.contains(d) && slots[(d * gridSize)..<((d + 1) * gridSize)].contains { $0 != nil }
+    }
 
-    /// グリッドの形を変える。layerMap / columnMap は「前の段・列 → 新しい段・列（nil = 消える）」
+    // MARK: - デッキ
+
+    /// 新しいデッキを足して、それを表示する。duplicate なら、そのデッキのクリップを複製して入れる
+    @discardableResult
+    func addDeck(duplicating src: Int? = nil) -> Int {
+        var n = decks.count + 1
+        while decks.contains(where: { $0.name == "デッキ \(n)" }) { n += 1 }
+        let name = src.flatMap { decks.indices.contains($0) ? decks[$0].name + " のコピー" : nil } ?? "デッキ \(n)"
+        restructure(layers: layers, columns: columns, layerMap: { $0 }, decks: decks + [Deck(name: name)])
+        let d = decks.count - 1
+        if let src, decks.indices.contains(src) {
+            for r in layers.indices {
+                for c in 0..<columns {
+                    if let s = slots[slotIndex(deck: src, layer: r, column: c)] {
+                        setSlot(slotIndex(deck: d, layer: r, column: c), Self.copy(of: s, url: s.url))
+                    }
+                }
+            }
+        }
+        showDeck(d)
+        scheduleSave()
+        return d
+    }
+
+    /// デッキを消す（中のクリップも外れる。再生中なら止まる）。最後の 1 枚は消せない。
+    /// そのデッキを使っていたシーンは、1 枚目のデッキを使う
+    func removeDeck(_ d: Int) {
+        guard decks.count > 1, decks.indices.contains(d) else { return }
+        let id = decks[d].id
+        var nd = decks
+        nd.remove(at: d)
+        let keep = currentDeck
+        restructure(layers: layers, columns: columns, layerMap: { $0 }, decks: nd,
+                    deckMap: { $0 == d ? nil : ($0 > d ? $0 - 1 : $0) })
+        currentDeck = keep == d ? max(d - 1, 0) : (keep > d ? keep - 1 : keep)
+        for i in scenes.indices {
+            if scenes[i].deck == id { scenes[i].deck = nil }
+            if let ld = scenes[i].layerDecks, ld.contains(id) { scenes[i].layerDecks = ld.map { $0 == id ? nil : $0 } }
+        }
+        if sceneDraft != nil { reloadSceneDraft() }
+        scheduleSave()
+    }
+
+    func renameDeck(_ d: Int, to name: String) {
+        guard decks.indices.contains(d), !name.isEmpty else { return }
+        decks[d].name = name
+        scheduleSave()
+    }
+
+    /// デッキの番号（見つからなければ nil）
+    func deckIndex(_ id: UUID?) -> Int? { id.flatMap { id in decks.firstIndex { $0.id == id } } }
+
+    /// グリッドの形を変える。layerMap / columnMap / deckMap は「前の段・列・デッキ → 新しい段・列・デッキ（nil = 消える）」
     private func restructure(layers newLayers: [Layer], columns newColumns: Int,
-                             layerMap: (Int) -> Int?, columnMap: (Int) -> Int? = { $0 }) {
+                             layerMap: (Int) -> Int?, columnMap: (Int) -> Int? = { $0 },
+                             decks newDecks: [Deck]? = nil, deckMap: (Int) -> Int? = { $0 }) {
         for r in layers.indices { finishCrossfade(r) }
         let oldColumns = columns
+        let oldGrid = max(gridSize, 1)
+        let newDecks = newDecks ?? decks
+        let newGrid = newLayers.count * newColumns
         func map(_ i: Int) -> Int? {
-            guard let r = layerMap(i / oldColumns), let c = columnMap(i % oldColumns) else { return nil }
-            return r * newColumns + c
+            let rest = i % oldGrid
+            guard let d = deckMap(i / oldGrid), let r = layerMap(rest / oldColumns), let c = columnMap(rest % oldColumns)
+            else { return nil }
+            return d * newGrid + r * newColumns + c
         }
 
         // 消えるクリップは止めて外す
-        var newSlots: [ClipSlot?] = Array(repeating: nil, count: newLayers.count * newColumns)
+        var newSlots: [ClipSlot?] = Array(repeating: nil, count: newDecks.count * newGrid)
         for (i, slot) in slots.enumerated() {
             guard let slot else { continue }
             if let n = map(i) {
@@ -411,7 +535,7 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
         let oldFrames = renderLock.withLock { frames }
         for (r, a) in activeByLayer.enumerated() {
             guard let a, let n = map(a) else { continue }
-            let nr = n / newColumns
+            let nr = (n % newGrid) / newColumns
             newActive[nr] = n
             newFrames[nr] = oldFrames[r]
         }
@@ -435,10 +559,12 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
 
         layers = newLayers
         columns = newColumns
+        decks = newDecks
+        currentDeck = deckMap(currentDeck) ?? min(currentDeck, newDecks.count - 1)
         slots = newSlots
         activeByLayer = newActive
         for (i, slot) in slots.enumerated() {
-            slot?.layerVolume = layers[i / columns].audible ? Float(layers[i / columns].volume) : 0
+            slot?.layerVolume = layers[layerOf(i)].audible ? Float(layers[layerOf(i)].volume) : 0
             slot?.fadeGain = 1
         }
         inspectedIndex = newInspected
@@ -450,12 +576,14 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
     // MARK: - 再生操作
 
     /// スロットを頭から再生する。同じレイヤーで再生中だったクリップは止まる（他のレイヤーはそのまま）。
-    func trigger(_ index: Int) {
+    /// fadeTime を渡すと、レイヤーの切り替えフェードの代わりにその秒数でクロスフェードする（シーン）。
+    /// select = false ならレイヤーの選択を変えない
+    func trigger(_ index: Int, fadeTime fadeOverride: Double? = nil, select: Bool = true) {
         guard index >= 0, index < slots.count, let slot = slots[index] else { return }
         let r = layerOf(index)
         // 消えかけのクリップをもう一度押した → それは頭から出し直す（クロスフェードの相手ではなくなる）
         if outgoing[r] == index { dropOutgoing(r, stop: false) }
-        let fadeTime = layers[r].fadeTime
+        let fadeTime = fadeOverride ?? layers[r].fadeTime
         if let a = activeByLayer[r], a != index {
             if fadeTime > 0, slots[a]?.isPlaying == true {
                 // 前のクリップは止めずに残して、フェードが終わったら止める
@@ -470,7 +598,7 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
             crossfades[r] = Fade()
         }
         activeByLayer[r] = index
-        selectedLayer = r
+        if select { selectedLayer = r }
         slot.fadeGain = sin(crossfades[r].value(at: CACurrentMediaTime()) * .pi / 2)
         slot.playFromStart()
         slot.invalidateShownFrame()
@@ -602,8 +730,8 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
     @discardableResult
     func addEffectToCurrentTab(_ k: EffectKind) -> Bool {
         switch inspectorTab {
-        case .composition: addEffect(k)
-        case .layer: layers[selectedLayer].addEffect(k)
+        case .composition: if let d = sceneDraft { d.addEffect(k) } else { addEffect(k) }
+        case .layer: viewLayer(selectedLayer).addEffect(k)
         case .clip:
             guard let i = inspectedIndex, let s = slots[i] else { return false }
             s.addEffect(k)
@@ -633,7 +761,7 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
     @discardableResult
     func placeGeneratorInSelectedLayer(_ kind: EffectKind) -> Bool {
         let r = selectedLayer
-        guard let i = (0..<columns).map({ r * columns + $0 }).first(where: { slots[$0] == nil }),
+        guard let i = (0..<columns).map({ slotIndex(deck: currentDeck, layer: r, column: $0) }).first(where: { slots[$0] == nil }),
               placeGenerator(kind, at: i) else { return false }
         selectClip(i)
         return true
@@ -641,7 +769,7 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
 
     /// 複数のクリップを index から右へ順番に入れる（その段の右端まで）
     func load(urls: [URL], startingAt index: Int) {
-        let rowEnd = (layerOf(index) + 1) * columns
+        let rowEnd = index - columnOf(index) + columns
         var i = index
         for url in urls where i < rowEnd {
             setSlot(i, ClipSlot(url: url))
@@ -736,8 +864,8 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
 
     private func applyVolume(layer r: Int) {
         let v = layers[r].audible ? Float(layers[r].volume) : 0
-        for c in 0..<columns {
-            slots[r * columns + c]?.layerVolume = v
+        for d in decks.indices {
+            for c in 0..<columns { slots[slotIndex(deck: d, layer: r, column: c)]?.layerVolume = v }
         }
     }
 
@@ -785,6 +913,105 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
                                            origin: inspectedIndex.flatMap { slots[$0]?.animOrigin } ?? 0)
         state.selectedLayer = selectedLayer
         renderLock.withLock { renderState = state }
+        syncScenePreview()
+    }
+
+    /// シーン編集のプレビューの中身を作り直す（シーンを編集中で、下のパネルがシーンのタブのときだけ再生する）
+    func syncScenePreview() {
+        checkSceneDraftLayers()
+        guard let d = sceneDraft else {
+            for p in scenePlayers.values { p.cancel() }
+            scenePlayers = [:]
+            renderLock.withLock { scenePreview = nil; sceneFrames = [:] }
+            return
+        }
+        var st = ScenePreviewState()
+        for (r, l) in d.layers.enumerated() {
+            let i = r < layers.count ? scenePlayingIndex(d, r) : nil
+            let slot = i.flatMap { slots[$0] }
+            st.layers.append(RenderState.LayerState(
+                slot: slot, opacity: Float(l.opacity), blend: l.blend,
+                transform: slot?.animTransform ?? AnimTransform(),
+                layerTransform: l.transform.animValue,
+                opacityAnim: l.anims[.opacity].flatMap { $0.isOn ? $0 : nil },
+                muted: l.muted, isAdjustment: l.isAdjustment, blendFX: l.blendFX,
+                clipMuted: slot?.muted ?? false,
+                clipEffects: EffectStack(effects: slot?.effects ?? [], beat: beatClock, origin: slot?.animOrigin ?? 0),
+                generator: slot?.generator,
+                layerEffects: EffectStack(effects: l.effects, beat: beatClock)))
+            var src: ScenePreviewState.Source?
+            if let i, let slot, !l.isAdjustment {
+                if activeByLayer[r] == i {
+                    src = .live(r)
+                } else if let g = slot.generator {
+                    src = .generator(g, origin: generatorPreviewOrigin(slot))
+                } else if slot.isReady {
+                    if scenePlayers[r]?.slot !== slot {
+                        scenePlayers[r]?.cancel()
+                        scenePlayers[r] = PreviewPlayer(slot: slot)
+                    }
+                    scenePlayers[r]?.setRate(slot.effectiveSpeed)
+                    src = scenePlayers[r].map { .player($0) }
+                }
+            }
+            if case .player = src {} else if let p = scenePlayers.removeValue(forKey: r) { p.cancel() }
+            st.sources.append(src)
+        }
+        for r in scenePlayers.keys where r >= d.layers.count { scenePlayers.removeValue(forKey: r)?.cancel() }
+        st.compTransform = d.compTransform.animValue
+        st.compEffects = EffectStack(effects: d.effects, beat: beatClock)
+        st.master = Float(d.masterOpacity)
+        st.masterAnim = d.anims[.opacity].flatMap { $0.isOn ? $0 : nil }
+        renderLock.withLock {
+            // 出所が変わったレイヤーの古いフレームは捨てる
+            if let old = scenePreview {
+                for r in sceneFrames.keys where r >= st.layers.count || old.layers.indices.contains(r) == false
+                    || old.layers[r].slot !== st.layers[r].slot { sceneFrames.removeValue(forKey: r) }
+            }
+            scenePreview = st
+        }
+    }
+
+    /// シーンの編集中のレイヤープレビュー：シーンのそのレイヤーだけ（調整レイヤーなら下も）。編集中でなければ nil
+    private func sceneLayerPreviewGroups() -> [LayerGroup]? {
+        let now = CACurrentMediaTime()
+        return renderLock.withLock {
+            guard let sp = scenePreview else { return nil }
+            let r = renderState.selectedLayer
+            guard sp.layers.indices.contains(r) else { return [] }
+            let beat = renderState.beat
+            let rows = sp.layers[r].isAdjustment ? Array(sp.layers.indices.reversed().filter { $0 >= r }) : [r]
+            return rows.compactMap { i in
+                makeGroupLocked(sp.layers[i], frame: sceneFrameLocked(sp, i), outgoingFrame: nil, key: i, now: now,
+                                blend: i == r ? .normal : sp.layers[i].blend, comp: ClipTransform(), beat: beat)
+            }
+        }
+    }
+
+    /// シーン編集のプレビューで、レイヤー r に描くフレーム。renderLock の中で呼ぶ
+    private func sceneFrameLocked(_ sp: ScenePreviewState, _ r: Int) -> FrameHolder? {
+        switch sp.sources[r] {
+        case .live(let lr)?: return frames.indices.contains(lr) ? frames[lr] : nil
+        case .player?, .generator?: return sceneFrames[r]
+        case nil: return nil
+        }
+    }
+
+    /// シーン編集のプレビューの合成に使うもの（描画スレッドから）
+    func scenePreviewGroups() -> (groups: [LayerGroup], effects: EffectStack, master: Float)? {
+        let now = CACurrentMediaTime()
+        return renderLock.withLock {
+            guard let sp = scenePreview else { return nil }
+            let beat = renderState.beat
+            let comp = sp.compTransform.at(now, beat: beat)
+            let groups: [LayerGroup] = sp.layers.indices.reversed().compactMap { r in
+                makeGroupLocked(sp.layers[r], frame: sceneFrameLocked(sp, r), outgoingFrame: nil, key: r, now: now,
+                                       blend: sp.layers[r].blend, comp: comp, beat: beat)
+            }
+            let m = Float(sp.masterAnim.map { min(max($0.value(base: Double(sp.master), at: now, beat: beat), 0), 1) }
+                          ?? Double(sp.master))
+            return (groups, sp.compEffects, m)
+        }
     }
 
     /// 選択中のクリップのプレビューをどこから出すか決める
@@ -895,6 +1122,27 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
         } else {
             renderLock.withLock { previewFrame = nil }
         }
+
+        // シーン編集のプレビュー
+        if let sources = renderLock.withLock({ scenePreview?.sources }) {
+            for (r, src) in sources.enumerated() {
+                switch src {
+                case .player(let p)?:
+                    if let pb = p.frame(at: now), let holder = makeHolder(pb) {
+                        renderLock.withLock {
+                            if let sp = scenePreview, sp.sources.indices.contains(r), case .player(let cur)? = sp.sources[r], cur === p {
+                                sceneFrames[r] = holder
+                            }
+                        }
+                    }
+                case .generator(let g, let origin)?:
+                    if let holder = renderGenerator(g, origin: origin, key: "gs\(r)", now: now) {
+                        renderLock.withLock { if scenePreview != nil { sceneFrames[r] = holder } }
+                    }
+                default: break
+                }
+            }
+        }
         return updated
     }
 
@@ -985,9 +1233,14 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
 
     /// 1 レイヤー分（クロスフェード中は消えていく方 → 新しい方の順）。renderLock の中で呼ぶ
     private func layerGroupLocked(_ r: Int, now: CFTimeInterval, blend: BlendMode, comp: ClipTransform) -> LayerGroup? {
-        let l = renderState.layers[r]
+        makeGroupLocked(renderState.layers[r], frame: frames[r], outgoingFrame: outgoingFrames[r], key: r, now: now,
+                        blend: blend, comp: comp, beat: renderState.beat)
+    }
+
+    /// 1 レイヤーの状態とフレームから、描くものを作る。renderLock の中で呼ぶ
+    private func makeGroupLocked(_ l: RenderState.LayerState, frame: FrameHolder?, outgoingFrame: FrameHolder?, key r: Int,
+                                 now: CFTimeInterval, blend: BlendMode, comp: ClipTransform, beat: BeatClock) -> LayerGroup? {
         guard !l.muted else { return nil }
-        let beat = renderState.beat
         if l.isAdjustment {
             // 調整レイヤー：クリップは描かず、エフェクトを下の絵全体にかける（不透明度＝かかり具合）
             guard !l.layerEffects.isEmpty else { return nil }
@@ -1003,16 +1256,16 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
         let clipT = l.transform.at(now, beat: beat)
         var draws: [LayerDraw] = []
         let x = l.outgoing == nil ? 1 : l.crossfade.value(at: now)
-        if l.outgoing != nil, !l.outgoingMuted, let f = outgoingFrames[r] {
+        if l.outgoing != nil, !l.outgoingMuted, let f = outgoingFrame {
             // 通常の重ね方なら下の絵はそのまま残し、上に新しい絵を x で重ねる（途中で暗くならない）
-            let k: Float = blend == .normal && frames[r] != nil ? 1 : 1 - x
+            let k: Float = blend == .normal && frame != nil ? 1 : 1 - x
             if k > 0.001 {
                 draws.append(LayerDraw(texture: f.texture, opacity: k, blend: blend,
                                        transform: l.outgoingTransform.at(now, beat: beat), layerTransform: layerT,
                                        compTransform: comp, holder: f, effects: l.outgoingEffects, effectKey: r * 2 + 1))
             }
         }
-        if l.slot != nil, !l.clipMuted, let f = frames[r], x > 0.001, clipT.opacity > 0.001 {
+        if l.slot != nil, !l.clipMuted, let f = frame, x > 0.001, clipT.opacity > 0.001 {
             draws.append(LayerDraw(texture: f.texture, opacity: x, blend: blend, transform: clipT,
                                    layerTransform: layerT, compTransform: comp, holder: f,
                                    effects: l.clipEffects, effectKey: r * 2))
@@ -1049,7 +1302,8 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
 
     /// レイヤープレビュー：選択中レイヤーだけを黒の上に（レイヤーの不透明度・エフェクト込み）
     func layerPreviewGroups() -> [LayerGroup] {
-        renderLock.withLock {
+        if let g = sceneLayerPreviewGroups() { return g }
+        return renderLock.withLock {
             let r = renderState.selectedLayer
             guard renderState.layers.indices.contains(r) else { return [] }
             let now = CACurrentMediaTime()
@@ -1110,10 +1364,10 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
     }
 
     /// [ParamKey: ParamAnim] ⇔ 保存用の [String: ParamAnim]
-    private static func encodeAnims(_ a: [ParamKey: ParamAnim]) -> [String: ParamAnim]? {
+    static func encodeAnims(_ a: [ParamKey: ParamAnim]) -> [String: ParamAnim]? {
         a.isEmpty ? nil : Dictionary(uniqueKeysWithValues: a.map { ($0.key.rawValue, $0.value) })
     }
-    private static func decodeAnims(_ a: [String: ParamAnim]?) -> [ParamKey: ParamAnim] {
+    static func decodeAnims(_ a: [String: ParamAnim]?) -> [ParamKey: ParamAnim] {
         var out: [ParamKey: ParamAnim] = [:]
         for (k, v) in a ?? [:] { if let key = ParamKey(rawValue: k) { out[key] = v } }
         return out
@@ -1146,6 +1400,11 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
         var blendFX: Effect?
     }
 
+    struct SavedDeck: Codable {
+        var id: UUID
+        var name: String
+    }
+
     struct SavedState: Codable {
         /// プロジェクトファイルの印
         var format: String?
@@ -1163,6 +1422,10 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
         var compEffects: [Effect]?
         var compMuted: Bool?
         var masterAudioMuted: Bool?
+        var scenes: [VJScene]?
+        /// デッキ（無ければ 1 枚）。スロットはデッキごとに続けて slots に入っている
+        var decks: [SavedDeck]?
+        var currentDeck: Int?
         /// 自動保存だけ：開いていたプロジェクトと、未保存の変更があったか
         var projectPath: String?
         var projectDirty: Bool?
@@ -1244,7 +1507,10 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
             bpm: bpm,
             compEffects: effects.isEmpty ? nil : effects,
             compMuted: compMuted ? true : nil,
-            masterAudioMuted: masterAudioMuted ? true : nil)
+            masterAudioMuted: masterAudioMuted ? true : nil,
+            scenes: scenes.isEmpty ? nil : scenes,
+            decks: decks.map { SavedDeck(id: $0.id, name: $0.name) },
+            currentDeck: currentDeck)
     }
 
     private func restore() {
@@ -1270,7 +1536,12 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
         let savedLayers = min(max(state.layers?.count ?? Self.defaultLayers, 1), Self.maxLayers)
         let newLayers = (0..<savedLayers).map { Layer(index: $0) }
         newLayers.forEach(wire)
-        restructure(layers: newLayers, columns: savedColumns, layerMap: { _ in nil })
+        let savedDecks = (state.decks?.isEmpty == false ? state.decks! : [SavedDeck(id: UUID(), name: "デッキ 1")])
+            .map { Deck(id: $0.id, name: $0.name) }
+        restructure(layers: newLayers, columns: savedColumns, layerMap: { _ in nil },
+                    decks: savedDecks, deckMap: { _ in nil })
+        // 保存したときの 1 デッキのスロット数（段数はクランプ前の数）
+        let savedGrid = max((state.layers?.count ?? Self.defaultLayers) * savedColumns, 1)
         selectedLayer = 0
 
         masterOpacity = min(max(state.masterOpacity ?? 1, 0), 1)
@@ -1281,6 +1552,12 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
         effects = state.compEffects ?? []
         compMuted = state.compMuted ?? false
         masterAudioMuted = state.masterAudioMuted ?? false
+        sceneTween?.invalidate()
+        sceneTween = nil
+        sceneProgress = nil
+        scenes = state.scenes ?? []
+        activeSceneID = nil
+        closeSceneEditor()
         bpm = state.bpm ?? 120
         masterSpeed = 1
         corners = state.corners.count == 4 ? state.corners.map { SIMD2($0[0], $0[1]) } : Engine.defaultCorners
@@ -1298,8 +1575,8 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
             layer.blendFX = saved.blendFX ?? Effect(kind: .overdrive)
         }
         for (i, saved) in state.slots.enumerated() {
-            let r = i / savedColumns, c = i % savedColumns
-            guard r < layers.count, c < columns, let saved else { continue }
+            let d = i / savedGrid, r = (i % savedGrid) / savedColumns, c = i % savedColumns
+            guard d < decks.count, r < layers.count, c < columns, let saved else { continue }
             // プロジェクトのフォルダからの場所 → 元の場所の順に探す。どちらにも無ければ「見つからない」クリップとして置く
             var url = URL(fileURLWithPath: saved.path)
             if let baseDir, let rel = saved.relPath {
@@ -1322,8 +1599,9 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
             slot.effects = saved.effects ?? []
             slot.muted = saved.muted ?? false
             slot.audioMuted = saved.audioMuted ?? false
-            setSlot(r * columns + c, slot)
+            setSlot(slotIndex(deck: d, layer: r, column: c), slot)
         }
+        currentDeck = min(max(state.currentDeck ?? 0, 0), decks.count - 1)
         syncRenderState()
     }
 

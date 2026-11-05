@@ -1192,6 +1192,8 @@ final class RenderLoop {
         case layer
         /// 選択中のクリップだけ（出力していなくてもプレビュー用に再生）
         case clipPreview
+        /// 編集中のシーン（出力しない）
+        case scenePreview
     }
     private var targets: [ObjectIdentifier: (layer: CAMetalLayer, visible: Bool, kind: TargetKind)] = [:]
     private var stats = Stats()
@@ -1292,6 +1294,7 @@ final class RenderLoop {
         let clipGroups = kinds.contains(.clipPreview)
             ? engine.previewDraws().map { LayerGroup(draws: [$0], opacity: 1, blend: .normal, key: 1000) } : []
         let layerGroups = kinds.contains(.layer) ? engine.layerPreviewGroups() : []
+        let sceneParts = kinds.contains(.scenePreview) ? engine.scenePreviewGroups() : nil
         let plain = RenderParams(homographyInverse: matrix_identity_float3x3, testPattern: false, master: 1)
 
         // 出力・コンポジションは中身が同じ。合成は 1 コマに 1 回だけ（縦横比が同じ画面のうち一番大きい大きさで）して、
@@ -1315,6 +1318,7 @@ final class RenderLoop {
                 sharedCompositors[key] = comp
                 if let t = comp.composite(groups, effects: compFX, width: v.size.0, height: v.size.1, cb: cb) {
                     sharedTextures[key] = t
+                    lock.withLock { _lastComposite = t }
                 }
                 // GPU が使い終わるまで映像バッファを保持する
                 cb.addCompletedHandler { _ in _ = groups }
@@ -1334,13 +1338,19 @@ final class RenderLoop {
                     p.master = params.compMaster
                     present(layer, texture: tex, params: p)
                 }
-            case .layer, .clipPreview:
+            case .layer, .clipPreview, .scenePreview:
                 let comp = compositors[id] ?? Compositor()
                 compositors[id] = comp
                 if kind == .layer {
                     render(layer, compositor: comp, groups: layerGroups, effects: EffectStack(), params: plain)
-                } else {
+                } else if kind == .clipPreview {
                     render(layer, compositor: comp, groups: clipGroups, effects: EffectStack(), params: plain)
+                } else {
+                    var p = plain
+                    p.master = sceneParts?.master ?? 1
+                    let t = render(layer, compositor: comp, groups: sceneParts?.groups ?? [],
+                                   effects: sceneParts?.effects ?? EffectStack(), params: p)
+                    lock.withLock { _lastScenePreview = t }
                 }
             }
         }
@@ -1348,6 +1358,14 @@ final class RenderLoop {
 
     /// 出力・コンポジションの合成（縦横比ごと。描画スレッドだけが触る）
     private var sharedCompositors: [Int: Compositor] = [:]
+    /// いちばん新しい出力の合成（シーンのサムネイル用。lock の中で）
+    private var _lastComposite: MTLTexture?
+    func lastComposite() -> MTLTexture? { lock.withLock { _lastComposite } }
+    /// いちばん新しいシーン編集プレビューの合成（編集中のシーンのサムネイル用。lock の中で）
+    private var _lastScenePreview: MTLTexture?
+    func lastScenePreview() -> MTLTexture? { lock.withLock { _lastScenePreview } }
+    /// テスト用：出力の合成を差し替える
+    func setLastCompositeForTest(_ t: MTLTexture?) { lock.withLock { _lastComposite = t } }
 
     /// 縦横比を 1/100 に丸めた番号（同じ縦横比の画面は 1 つの合成を使い回す）
     private static func aspectKey(_ w: Int, _ h: Int) -> Int {
@@ -1360,15 +1378,17 @@ final class RenderLoop {
         draw(drawable, composite: texture, params: params, cb: cb)
     }
 
+    @discardableResult
     private func render(_ layer: CAMetalLayer, compositor: Compositor, groups: [LayerGroup], effects: EffectStack,
-                        params: RenderParams) {
-        guard let drawable = layer.nextDrawable(), let cb = ctx.queue.makeCommandBuffer() else { return }
+                        params: RenderParams) -> MTLTexture? {
+        guard let drawable = layer.nextDrawable(), let cb = ctx.queue.makeCommandBuffer() else { return nil }
         let w = drawable.texture.width, h = drawable.texture.height
         let composite = groups.isEmpty ? nil
             : compositor.composite(groups, effects: effects, width: w, height: h, cb: cb)
         // GPU が使い終わるまで映像バッファを保持する
         cb.addCompletedHandler { _ in _ = groups }
         draw(drawable, composite: composite, params: params, cb: cb)
+        return composite
     }
 
     private func draw(_ drawable: CAMetalDrawable, composite: MTLTexture?, params: RenderParams, cb: MTLCommandBuffer) {

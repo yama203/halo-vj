@@ -77,8 +77,8 @@ struct EffectBrowser: View {
 
     private var targetName: String {
         switch engine.inspectorTab {
-        case .composition: "コンポジション"
-        case .layer: "レイヤー " + engine.layers[engine.selectedLayer].name
+        case .composition: (engine.sceneDraft != nil ? "シーンの" : "") + "コンポジション"
+        case .layer: (engine.sceneDraft != nil ? "シーンの" : "") + "レイヤー " + engine.layers[engine.selectedLayer].name
         case .clip: engine.inspectedIndex.flatMap { engine.slots[$0]?.name }.map { "クリップ " + $0 } ?? "クリップ（未選択）"
         }
     }
