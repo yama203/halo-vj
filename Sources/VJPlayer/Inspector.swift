@@ -182,6 +182,10 @@ struct ValueDrag: NSViewRepresentable {
 struct ParameterPanel: View {
     @EnvironmentObject var engine: Engine
     var previewHeight: CGFloat = 176
+    /// プレビューの幅（右端の縦の線をドラッグで変える。0 = おまかせ：エフェクトが横に並ぶ大きさ）
+    @AppStorage("inspectorPreviewWidth") private var previewWidthSetting = 0.0
+    /// ドラッグを始めたときの幅
+    @State private var dragStartWidth: CGFloat?
 
     var body: some View {
         let layer = engine.layers[engine.selectedLayer]
@@ -215,11 +219,10 @@ struct ParameterPanel: View {
             }
 
             GeometryReader { geo in
-            // パラメーター 2 列（左：設定、右：エフェクト）を並べても、プレビューが本来の 55% 以上の大きさで残るなら横に並べる。
-            // そうでなければ 1 列（エフェクトは下）にして、プレビューを大きく
-            let previewW = previewHeight * engine.outputAspect
-            let twoCol = geo.size.width - 16 - SideBySide<EmptyView, EmptyView>.twoColumnWidth >= max(previewW * 0.55, 240)
-            HStack(alignment: .top, spacing: 16) {
+            let w = previewWidth(available: geo.size.width)
+            // プレビューの残りにパラメーター 2 列（左：設定、右：エフェクト）が入れば横に並べる。入らなければエフェクトは下に
+            let twoCol = geo.size.width - w - Self.handleWidth >= SideBySide<EmptyView, EmptyView>.twoColumnWidth
+            HStack(alignment: .top, spacing: 0) {
                 ZStack(alignment: .topLeading) {
                     MetalPreview(kind: previewKind)
                         .id(engine.inspectorTab)
@@ -240,10 +243,20 @@ struct ParameterPanel: View {
                         .background(Color.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 4))
                         .padding(5)
                 }
-                .aspectRatio(engine.outputAspect, contentMode: .fit)
+                .frame(width: w, height: w / max(engine.outputAspect, 0.1))
                 .overlay(Rectangle().stroke(Color.gray.opacity(0.35)))
-                // パラメーター欄の幅を確保した残りに収める（余ったら右に寄せずに左詰め）
-                .frame(maxWidth: previewHeight * engine.outputAspect, maxHeight: previewHeight, alignment: .topLeading)
+
+                // プレビューの大きさを変えるつまみ（ドラッグ。ダブルクリックでおまかせに戻す）
+                PreviewResizeHandle(height: w / max(engine.outputAspect, 0.1), isCustom: previewWidthSetting > 0)
+                    .gesture(DragGesture(minimumDistance: 1)
+                        .onChanged { v in
+                            let start = dragStartWidth ?? w
+                            dragStartWidth = start
+                            previewWidthSetting = Double(min(max(start + v.translation.width, Self.minPreviewWidth),
+                                                             maxPreviewWidth(available: geo.size.width)))
+                        }
+                        .onEnded { _ in dragStartWidth = nil })
+                    .onTapGesture(count: 2) { previewWidthSetting = 0 }
 
                 ScrollView(.vertical) {
                 VStack(alignment: .leading, spacing: 0) {
@@ -276,6 +289,22 @@ struct ParameterPanel: View {
         .padding(12)
         .frame(maxHeight: .infinity, alignment: .top)
         .background(RoundedRectangle(cornerRadius: 8).fill(UI.panelBackground))
+    }
+
+    static let handleWidth: CGFloat = 16
+    static let minPreviewWidth: CGFloat = 160
+
+    /// プレビューの最大の幅：高さに収まる大きさで、パラメーター 1 列ぶんは残す
+    private func maxPreviewWidth(available: CGFloat) -> CGFloat {
+        max(min(previewHeight * engine.outputAspect, available - Self.handleWidth - UI.paramsWidth), Self.minPreviewWidth)
+    }
+
+    /// 今のプレビューの幅。おまかせなら、エフェクトが横に並ぶいちばん大きな幅（入らなければ最大）
+    private func previewWidth(available: CGFloat) -> CGFloat {
+        let maxW = maxPreviewWidth(available: available)
+        if previewWidthSetting > 0 { return min(max(CGFloat(previewWidthSetting), Self.minPreviewWidth), maxW) }
+        let fitTwo = available - Self.handleWidth - SideBySide<EmptyView, EmptyView>.twoColumnWidth
+        return fitTwo >= Self.minPreviewWidth ? min(fitTwo, maxW) : maxW
     }
 
     private var previewKind: RenderLoop.TargetKind {
@@ -804,5 +833,28 @@ extension EnvironmentValues {
     var paramsTwoColumn: Bool {
         get { self[ParamsTwoColumnKey.self] }
         set { self[ParamsTwoColumnKey.self] = newValue }
+    }
+}
+
+/// プレビューの右の、大きさを変えるつまみ（縦の細い線）
+struct PreviewResizeHandle: View {
+    let height: CGFloat
+    let isCustom: Bool
+    @State private var hovering = false
+
+    var body: some View {
+        ZStack {
+            Color.clear
+            Capsule()
+                .fill(hovering ? Color.accentColor : Color.gray.opacity(isCustom ? 0.6 : 0.35))
+                .frame(width: hovering ? 4 : 3, height: min(max(height * 0.35, 28), 80))
+        }
+        .frame(width: ParameterPanel.handleWidth, height: height)
+        .contentShape(Rectangle())
+        .onHover { h in
+            hovering = h
+            if h { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
+        }
+        .help("ドラッグでプレビューの大きさを変える。ダブルクリックでおまかせ（エフェクトが横に並ぶ大きさ）に戻す")
     }
 }
