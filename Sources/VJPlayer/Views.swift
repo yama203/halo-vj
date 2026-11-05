@@ -683,6 +683,9 @@ struct SlotCell: View {
     @EnvironmentObject var drag: SlotDragState
     @State private var pressed = false
     @State private var dropTargeted = false
+    @State private var hovering = false
+    /// 空きの枠で、右上の＋の上を押した（離したらクリップを読み込む）
+    @State private var addPressed = false
 
     var body: some View {
         let slot = engine.slots[index]
@@ -700,9 +703,18 @@ struct SlotCell: View {
             if let slot {
                 SlotContent(slot: slot, active: active, selected: engine.inspectedIndex == index)
             } else {
+                // 空きの枠：クリックでこのレイヤーを停止（Arena と同じ）。右上の＋でクリップを読み込む
                 RoundedRectangle(cornerRadius: 6)
-                    .fill(Color.white.opacity(0.04))
-                    .overlay(Image(systemName: "plus").foregroundStyle(.secondary))
+                    .fill(Color.white.opacity(hovering ? 0.07 : 0.04))
+                    .overlay(alignment: .topTrailing) {
+                        Image(systemName: "plus")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(hovering ? Color.primary : Color.secondary.opacity(0.6))
+                            .frame(width: 20, height: 20)
+                            .background(RoundedRectangle(cornerRadius: 4)
+                                .fill(Color.white.opacity(addPressed ? 0.25 : (hovering ? 0.12 : 0.05))))
+                            .padding(4)
+                    }
             }
         }
         .frame(width: width, height: height)
@@ -744,6 +756,8 @@ struct SlotCell: View {
             Color.clear.preference(key: SlotFramesKey.self, value: [index: g.frame(in: .named(SlotDragState.space))])
         })
         .contentShape(Rectangle())
+        .onHover { hovering = $0 }
+        .help(slot == nil ? "クリックでこのレイヤーを停止。右上の＋・右クリック・動画のドロップでクリップを入れる" : "")
         // クリックを離した時ではなく「押した瞬間」に再生する。
         // ⌘ドラッグで移動、⌥ドラッグで複製（どちらも再生しない。⌥クリックだけなら選択）
         .gesture(
@@ -751,7 +765,15 @@ struct SlotCell: View {
                 .onChanged { v in
                     if !pressed {
                         pressed = true
-                        if slot != nil {
+                        if slot == nil {
+                            if inAddCorner(v.startLocation) {
+                                addPressed = true
+                            } else {
+                                // 空きの枠を押した → そのレイヤーを止める（シーンの編集中は、シーンのそのレイヤーを「なし」に）
+                                engine.clearMultiSelection()
+                                engine.viewStop(engine.layerOf(index))
+                            }
+                        } else {
                             let mods = NSEvent.modifierFlags
                             if mods.contains(.shift) && !mods.contains(.command) && !mods.contains(.option) {
                                 engine.toggleMultiSelect(index)   // ⇧クリック：複数選択に足す・外す（再生しない）
@@ -796,9 +818,10 @@ struct SlotCell: View {
                         drag.target = nil
                         drag.copying = false
                         drag.group = false
-                    } else if slot == nil {
+                    } else if slot == nil && addPressed {
                         engine.openPanel(for: index)
                     }
+                    addPressed = false
                     pressed = false
                 }
         )
@@ -866,6 +889,12 @@ struct SlotCell: View {
                 }
             }
         }
+    }
+
+    /// 空きの枠の右上の＋の上か
+    private func inAddCorner(_ p: CGPoint) -> Bool {
+        guard let f = drag.frames[index] else { return false }
+        return p.x >= f.maxX - 30 && p.y <= f.minY + 30
     }
 
     /// サムネイル下の名前の帯の上か
