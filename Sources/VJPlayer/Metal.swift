@@ -425,6 +425,13 @@ static float4 odLayer(constant ODUniforms& u, texture2d<float> tex, sampler s, f
 }
 
 // 縮小：n x n ピクセルを平均する（あふれの 1/4 の絵から、波紋の山用のさらに小さい絵を作る）
+// 2 枚の絵を k で混ぜる（FX パッドのフェード：かける前 a とかけた後 b）
+fragment float4 fmix(VOut in [[stage_in]], constant float& k [[buffer(0)]],
+                     texture2d<float> a [[texture(0)]], texture2d<float> b [[texture(1)]]) {
+    uint2 p = uint2(in.pos.xy);
+    return mix(a.read(p), b.read(p), k);
+}
+
 fragment float4 fdown(VOut in [[stage_in]], constant int& n [[buffer(0)]], texture2d<float> src [[texture(0)]]) {
     int2 base = int2(in.pos.xy) * n;
     int2 lim = int2(src.get_width(), src.get_height()) - 1;
@@ -644,6 +651,7 @@ final class MetalContext {
     let odFinalPipeline: MTLRenderPipelineState
     let echoPipeline: MTLRenderPipelineState
     let downPipeline: MTLRenderPipelineState
+    let mixPipeline: MTLRenderPipelineState
     let sampler: MTLSamplerState
     let textureCache: CVMetalTextureCache
     let dummyTexture: MTLTexture
@@ -729,6 +737,7 @@ final class MetalContext {
         blurPipeline = plain("fblur", .rgba16Float)
         odFinalPipeline = plain("fodFinal")
         downPipeline = plain("fdown", .rgba16Float)
+        mixPipeline = plain("fmix")
         // エコーの前の絵は少しずつ薄めるので、8bit だと暗い所が消え残る。16bit の小数で持つ
         let ecd = MTLRenderPipelineDescriptor()
         ecd.vertexFunction = library.makeFunction(name: "vmain")
@@ -794,6 +803,27 @@ final class EffectProcessor {
         e.last = now
         echoes[key] = e
         return (prev, out, dt)
+    }
+
+    /// a と b（同じ大きさ）を k（0 = a、1 = b）で混ぜた絵
+    func mix(_ a: MTLTexture, _ b: MTLTexture, k: Float, key: String, cb: MTLCommandBuffer) -> MTLTexture {
+        if k >= 0.999 { return b }
+        if k <= 0.001 { return a }
+        let pool = textures(key, width: a.width, height: a.height)
+        guard pool.count == 2, let dst = pool.first(where: { $0 !== a && $0 !== b }) else { return b }
+        let rpd = MTLRenderPassDescriptor()
+        rpd.colorAttachments[0].texture = dst
+        rpd.colorAttachments[0].loadAction = .dontCare
+        rpd.colorAttachments[0].storeAction = .store
+        guard let enc = cb.makeRenderCommandEncoder(descriptor: rpd) else { return b }
+        var kk = k
+        enc.setRenderPipelineState(ctx.mixPipeline)
+        enc.setFragmentBytes(&kk, length: MemoryLayout<Float>.stride, index: 0)
+        enc.setFragmentTexture(a, index: 0)
+        enc.setFragmentTexture(b, index: 1)
+        enc.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
+        enc.endEncoding()
+        return dst
     }
 
     /// input にエフェクトを上から順にかけた結果（エフェクトが無ければ input のまま）
@@ -1331,7 +1361,12 @@ final class RenderLoop {
                     if !padFX.isEmpty {
                         let fx = padProcessors[key] ?? EffectProcessor()
                         padProcessors[key] = fx
-                        for (n, st) in padFX.enumerated() { t = fx.apply(st, to: t, key: "pad\(n)", cb: cb) }
+                        let now = CACurrentMediaTime()
+                        for (n, pr) in padFX.enumerated() {
+                            let out = fx.apply(pr.stack, to: t, key: "pad\(n)", cb: cb)
+                            // 効き始め・消え方：かける前とかけた後を、今の効き具合で混ぜる
+                            t = fx.mix(t, out, k: Float(pr.amount(at: now)), key: "padmix\(n)", cb: cb)
+                        }
                     }
                     sharedTextures[key] = t
                 }

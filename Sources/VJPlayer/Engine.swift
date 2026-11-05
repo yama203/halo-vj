@@ -158,6 +158,10 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
     @Published var pads: [FXPad] = []
     /// 押しているパッドと、押した時刻
     @Published var heldPads: [UUID: Double] = [:]
+    /// 離して消えている途中のパッド
+    @Published var releasingPads: [UUID: PadRelease] = [:]
+    /// パッドのエフェクトの時間の基準（押した時刻。消えている途中に押し直しても変えない）
+    var padOrigins: [UUID: Double] = [:]
     /// 編集中のシーン（出力には出さず、左下のプレビューで見ながら直す）
     @Published var sceneDraft: SceneDraft?
     var sceneThumbWork: DispatchWorkItem?
@@ -329,7 +333,7 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
         var generatorSize = (1920, 1080)
         var selectedLayer = 0
         /// 押しているパッドのエフェクト（出力のいちばん最後に、この順でかける）
-        var padStacks: [EffectStack] = []
+        var padStacks: [PadRender] = []
     }
     /// シーン編集のプレビューで描くもの（renderLock の中で触る）
     struct ScenePreviewState {
@@ -1323,7 +1327,7 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
     }
 
     /// 押しているパッドのエフェクト（描画スレッド用）
-    func padEffects() -> [EffectStack] {
+    func padEffects() -> [PadRender] {
         renderLock.withLock { renderState.padStacks }
     }
 
@@ -1656,6 +1660,7 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
         sceneProgress = nil
         scenes = state.scenes ?? []
         heldPads = [:]
+        releasingPads = [:]
         pads = makePads(state.pads)
         activeSceneID = nil
         closeSceneEditor()

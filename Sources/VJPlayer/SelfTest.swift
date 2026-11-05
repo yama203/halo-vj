@@ -1420,6 +1420,54 @@ enum SelfTest {
         k2.apply(k.makeState(relativeTo: nil), baseDir: nil)
         check(k2.pads.map { $0.key ?? "-" } == ["2", "-", "3", "q", "5", "6", "7", "8"],
               "パッド：キーの割り当て（なしも）が保存される")
+
+        // 効き始め・離したとき：だんだん効く・だんだん消える
+        let f = Engine(persistent: false)
+        let fp = f.pads[0]
+        fp.addEffect(.invert)
+        fp.attack = 1
+        fp.release = 0.5
+        f.padDown(fp.id)
+        guard let pr = f.padEffects().first else { check(false, "パッド（効き始め）：押すと効く"); return }
+        check(abs(pr.amount(at: pr.down + 0.25) - 0.25) < 1e-6 && abs(pr.amount(at: pr.down + 0.5) - 0.5) < 1e-6
+              && pr.amount(at: pr.down + 2) == 1, "パッド（効き始め 1 秒）：0.25 秒で 25%、0.5 秒で 50%、1 秒で全開")
+        f.padUp(fp.id)
+        let rel = f.padEffects().first
+        let rs = f.releasingPads[fp.id]
+        check(rel != nil && rs != nil && f.heldPads.isEmpty, "パッド（離したとき 0.5 秒）：離しても、消え切るまでは効いている")
+        if let rel, let rs {
+            check(abs(rel.amount(at: rs.start + 0.25) - rs.from * 0.5) < 1e-6 && rel.amount(at: rs.start + 0.6) == 0,
+                  "パッド（離したとき）：離したときの効き具合から 0.5 秒で 0 になる")
+        }
+        f.padDown(fp.id)
+        let again = f.padEffects().first
+        check(again?.release == nil && f.releasingPads.isEmpty && again.map { abs($0.amount(at: CACurrentMediaTime()) - (rs?.from ?? 0)) < 0.05 } == true,
+              "パッド：消えている途中に押し直すと、今の効き具合から続けて上がる")
+        f.padUp(fp.id)
+        let st2 = f.makeState(relativeTo: nil)
+        let f2 = Engine(persistent: false)
+        f2.apply(st2, baseDir: nil)
+        check(f2.pads[0].attack == 1 && f2.pads[0].release == 0.5 && f2.pads[1].attack == 0, "パッド：効き始め・離したときの秒数が保存される")
+        // 混ぜる：赤と青を半分ずつ → 紫
+        do {
+            let ctx = MetalContext.shared
+            func solid(_ b: UInt8, _ g: UInt8, _ r: UInt8) -> MTLTexture {
+                let td = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: 4, height: 4, mipmapped: false)
+                td.usage = [.shaderRead]
+                td.storageMode = .shared
+                let t = ctx.device.makeTexture(descriptor: td)!
+                let px = [UInt8]((0..<16).flatMap { _ in [b, g, r, 255] })
+                t.replace(region: MTLRegionMake2D(0, 0, 4, 4), mipmapLevel: 0, withBytes: px, bytesPerRow: 16)
+                return t
+            }
+            let fxp = EffectProcessor(); fxp.storageMode = .shared
+            let cb = ctx.queue.makeCommandBuffer()!
+            let out = fxp.mix(solid(0, 0, 255), solid(255, 0, 0), k: 0.5, key: "m", cb: cb)
+            cb.commit(); cb.waitUntilCompleted()
+            var px = [UInt8](repeating: 0, count: 4)
+            out.getBytes(&px, bytesPerRow: 16, from: MTLRegionMake2D(1, 1, 1, 1), mipmapLevel: 0)
+            check(abs(Int(px[0]) - 128) <= 2 && abs(Int(px[2]) - 128) <= 2, "パッド：かける前と後を効き具合で混ぜる（赤＋青 50% → 紫）")
+        }
     }
 
     /// デッキ：グリッドを何枚も持ち、シーンはデッキを覚える
