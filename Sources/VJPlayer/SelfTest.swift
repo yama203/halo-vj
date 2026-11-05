@@ -272,6 +272,7 @@ enum SelfTest {
         testPads(check: check)
         testMultiSelect(check: check)
         testMoveLayer(check: check)
+        testCues(check: check, wait: wait)
         do {
             // レイアウト：保存して読み戻せる（古い保存データの無い項目は既定値）
             var l = LayoutState()
@@ -287,6 +288,19 @@ enum SelfTest {
             let std = DockNode.standard
             check(Set(std.panels) == Set(DockPanel.allCases) && std.panels.count == DockPanel.allCases.count,
                   "自由レイアウト：最初の並べ方に全部のパネルが 1 回ずつある")
+            for (name, tpl) in [("ポン出し", DockNode.cuePlayback), ("クラブ VJ", DockNode.clubVJ)] {
+                check(Set(tpl.panels) == Set(DockPanel.allCases) && tpl.panels.count == DockPanel.allCases.count,
+                      "おすすめのレイアウト（\(name)）：全部のパネルが 1 回ずつある")
+            }
+            for (name, tpl) in [("ポン出し", DockNode.cuePlayback), ("クラブ VJ", DockNode.clubVJ)] {
+                if case .split(_, .vertical, _, _, .tabs(_, let bottom, _)) = tpl {
+                    check(bottom == [.pads], "おすすめのレイアウト（\(name)）：FX パッドが下いっぱい")
+                } else {
+                    check(false, "おすすめのレイアウト（\(name)）：FX パッドが下いっぱい")
+                }
+            }
+            check(DockNode.cuePlayback.tabsID(containing: .live) != DockNode.cuePlayback.tabsID(containing: .cues),
+                  "おすすめのレイアウト（ポン出し）：ライブとキューが別々に見える")
             func tabsID(of p: DockPanel, in n: DockNode) -> UUID? {
                 switch n {
                 case .tabs(let id, let ps, _): return ps.contains(p) ? id : nil
@@ -1267,6 +1281,81 @@ enum SelfTest {
         for _ in 0..<40 where got == nil { wait(0.1) }
         check((got?.frames.count ?? 0) == SourceThumbs.frameCount && (got?.duration ?? 0) > 1,
               "ソース：なぞって見る用のコマと長さを作れる")
+    }
+
+    /// キュー：並べたものを GO で順に出す
+    static func testCues(check: (Bool, String) -> Void, wait: (Double) -> Void) {
+        let e = Engine(persistent: false)
+        let c = e.columns
+        e.placeGenerator(.solid, at: 0)
+        e.placeGenerator(.noise, at: c + 2)
+        e.trigger(0)
+        let sa = e.addScene()
+        e.stopAll()
+        e.addCue(.scene(sa.id))
+        e.addClipCue(c + 2)
+        e.addCue(.stopAll)
+        e.updateCue(e.cues[0].id) { $0.fade = 0; $0.note = "司会のあと" }
+        e.updateCue(e.cues[1].id) { $0.fade = 0 }
+        check(e.cues.count == 3 && e.currentCue == nil && e.nextCue == 0, "キュー：並べた直後は、次が 1 番")
+        check(e.goCue() && e.currentCue == 0 && e.activeByLayer[0] == 0 && e.nextCue == 1,
+              "キュー：GO で 1 番（シーン）が出る")
+        check(!e.goCue() && e.currentCue == 0, "キュー：GO の連打は少しの間受け付けない")
+        e.lastGoHost = 0
+        check(e.goCue() && e.currentCue == 1 && e.activeByLayer[1] == c + 2 && e.activeByLayer[0] == nil,
+              "キュー：次の GO で 2 番（クリップ）が出る。クリップのキューはそのクリップだけ（ほかのレイヤーは止まる）")
+        e.lastGoHost = 0
+        check(e.goCue() && e.activeByLayer.allSatisfy { $0 == nil } && e.nextCue == nil, "キュー：3 番（全停止）で暗転。次は無い")
+        e.lastGoHost = 0
+        check(!e.goCue(), "キュー：最後まで行ったら GO しても何もしない")
+        check(e.backCue() && e.currentCue == 1 && e.activeByLayer[1] == c + 2, "キュー：戻ると 1 つ前を出し直す")
+        e.fireCue(0)
+        check(e.currentCue == 0, "キュー：一覧から直接飛べる")
+        // 「ほかのレイヤーはそのまま」
+        e.trigger(0)
+        e.updateCue(e.cues[1].id) { $0.keepOthers = true }
+        e.fireCue(1)
+        check(e.activeByLayer[0] == 0 && e.activeByLayer[1] == c + 2 && e.cueTitle(e.cues[1]).contains("差し替え"),
+              "キュー：「ほかのレイヤーはそのまま」なら、そのレイヤーだけ差し替える")
+        e.updateCue(e.cues[1].id) { $0.keepOthers = nil }
+        // フェード付き：ほかのレイヤーは薄くなってから止まり、不透明度は元に戻る
+        e.layers[0].opacity = 0.8
+        e.updateCue(e.cues[1].id) { $0.fade = 0.3 }
+        e.fireCue(1)
+        wait(0.15)
+        let midOp = e.layers[0].opacity
+        let stillOn = e.activeByLayer[0] == 0
+        wait(0.3)
+        check(midOp < 0.75 && midOp > 0.05 && stillOn && e.activeByLayer[0] == nil && abs(e.layers[0].opacity - 0.8) < 1e-9,
+              String(format: "キュー（クリップだけ・フェード）：ほかのレイヤーは薄くなって（%.2f）から止まり、不透明度は元に戻る", midOp))
+        // 消している途中に手で出し直したら、消すのをやめる
+        e.trigger(0)
+        e.fireCue(1)
+        wait(0.1)
+        e.trigger(0)
+        wait(0.35)
+        check(e.activeByLayer[0] == 0 && abs(e.layers[0].opacity - 0.8) < 1e-9, "キュー：消している途中に出し直したレイヤーは消さない")
+        e.updateCue(e.cues[1].id) { $0.fade = 0 }
+        e.layers[0].opacity = 1
+        e.fireCue(0)
+        // 並べ替え・削除で「今」が付いてくる
+        e.moveCue(from: IndexSet(integer: 0), to: 3)
+        check(e.currentCue == 2 && e.cueTitle(e.cues[2]).contains("シーン"), "キュー：並べ替えても「今」の印は同じキューに付く")
+        e.removeCue(e.cues[0].id)
+        check(e.currentCue == 1 && e.cues.count == 2, "キュー：前のキューを消すと、番号がずれても「今」はそのまま")
+        // レイヤーを足すとクリップのキューも付いていく
+        e.cues = []
+        e.addClipCue(c + 2)
+        e.insertLayer(at: 0)
+        if case .clip(_, let l, let col) = e.cues[0].kind {
+            check(l == 2 && col == 2 && !e.cueTitle(e.cues[0]).contains("見つからない"), "キュー：レイヤーを足しても、クリップのキューは同じクリップを指す")
+        }
+        // 保存
+        e.addCue(.scene(sa.id))
+        let st = e.makeState(relativeTo: nil)
+        let e2 = Engine(persistent: false)
+        e2.apply(st, baseDir: nil)
+        check(e2.cues == e.cues && e2.currentCue == nil, "キュー：保存して読み込める（「今」は最初から）")
     }
 
     /// レイヤーの移動：クリップ・再生中・設定ごと動き、シーンも付いてくる

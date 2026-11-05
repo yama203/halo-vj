@@ -3,13 +3,14 @@ import SwiftUI
 
 /// 別ウィンドウに出せるパネル
 enum PanelID: String, Codable, CaseIterable, Identifiable {
-    case live, scenes, effects, generators, sources, pads, monitor
+    case live, scenes, cues, effects, generators, sources, pads, monitor
     var id: String { rawValue }
 
     var title: String {
         switch self {
         case .live: "ライブ"
         case .scenes: "シーン"
+        case .cues: "キュー"
         case .effects: "エフェクト"
         case .generators: "ジェネレーター"
         case .sources: "ソース"
@@ -23,6 +24,7 @@ enum PanelID: String, Codable, CaseIterable, Identifiable {
         switch self {
         case .live: .live
         case .scenes: .scenes
+        case .cues: .cues
         case .effects: .effects
         case .generators: .generators
         case .sources: .sources
@@ -30,7 +32,7 @@ enum PanelID: String, Codable, CaseIterable, Identifiable {
         }
     }
 
-    static let tabs: [PanelID] = [.live, .scenes, .effects, .generators, .sources]
+    static let tabs: [PanelID] = [.live, .scenes, .cues, .effects, .generators, .sources]
 
     /// 別ウィンドウにしたときの最初の大きさ
     var defaultSize: NSSize {
@@ -246,6 +248,17 @@ final class LayoutManager: NSObject, ObservableObject, NSWindowDelegate {
         state.dockMode = on
     }
 
+    /// おすすめのレイアウトにする（自由レイアウト。別ウィンドウは全部戻す）
+    func applyTemplate(_ dock: DockNode) {
+        var s = state
+        s.dockMode = true
+        s.dock = dock.normalized()
+        s.detached = []
+        s.floating = []
+        state = s
+        syncWindows()
+    }
+
     /// 最初の並べ方に戻す（別ウィンドウは全部戻す）
     func reset() {
         state = LayoutState()
@@ -281,6 +294,7 @@ struct PanelWindowContent: View {
                 switch panel {
                 case .live: LivePanel()
                 case .scenes: ScenesPanel()
+                case .cues: CuePanel()
                 case .effects: EffectBrowser()
                 case .generators: EffectBrowser(generators: true)
                 case .sources: SourcePanel()
@@ -345,6 +359,11 @@ struct LayoutMenu: View {
         Button((layout.state.dockMode ? "✓ " : "") + "自由レイアウト（試験中）") { layout.setDockMode(!layout.state.dockMode) }
         if layout.state.dockMode {
             Button("自由レイアウトを最初の並べ方に戻す") { layout.state.dock = DockNode.standard }
+        }
+        Menu("おすすめのレイアウト") {
+            Button("ポン出し（グリッド・モニター・ライブ・キュー、下に FX パッド）") { layout.applyTemplate(DockNode.cuePlayback) }
+            Button("クラブ VJ（FX パッドを下いっぱい・ライブとシーンをモニターの下）") { layout.applyTemplate(DockNode.clubVJ) }
+            Button("いつもの並べ方（自由レイアウト）") { layout.applyTemplate(DockNode.standard) }
         }
         Divider()
         Button("今のレイアウトを保存…") {

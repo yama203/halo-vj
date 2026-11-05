@@ -375,8 +375,25 @@ struct ClipGrid: View {
                 }
             }
             .coordinateSpace(name: SlotDragState.space)
+            .background(GeometryReader { g in
+                Color.clear.onAppear { drag.gridOrigin = g.frame(in: .global).origin }
+                    .onChange(of: g.frame(in: .global).origin) { _, o in drag.gridOrigin = o }
+            })
             .onPreferenceChange(SlotFramesKey.self) { drag.frames = $0 }
             .onPreferenceChange(LayerFramesKey.self) { drag.layerFrames = $0 }
+            .overlay(alignment: .topLeading) {
+                // 名前の帯からキューへドラッグしているときの印
+                if let s = drag.cueSource, engine.slots.indices.contains(s), let slot = engine.slots[s] {
+                    Label("キューに足す：" + slot.name, systemImage: "list.number")
+                        .font(.system(size: 11, weight: .semibold))
+                        .lineLimit(1)
+                        .padding(.horizontal, 8).padding(.vertical, 4)
+                        .background(Color.green.opacity(0.85), in: Capsule())
+                        .fixedSize()
+                        .position(x: drag.location.x, y: drag.location.y - 14)
+                        .allowsHitTesting(false)
+                }
+            }
             .overlay(alignment: .topLeading) {
                 // レイヤーを動かしているときの印
                 if let s = drag.layerSource, let t = drag.layerTarget, t != s {
@@ -481,6 +498,10 @@ final class SlotDragState: ObservableObject {
     @Published var copying = false
     /// 複数選択したクリップをまとめて動かしている
     @Published var group = false
+    /// 名前の帯からドラッグして、キューに足そうとしているクリップ
+    @Published var cueSource: Int?
+    /// グリッドの左上（ウィンドウの中の位置。キューの一覧の上かを調べるのに使う）
+    var gridOrigin: CGPoint = .zero
     /// レイヤー欄をドラッグしてレイヤーを動かしているときの、元の段と行き先の段
     @Published var layerSource: Int?
     @Published var layerTarget: Int?
@@ -731,6 +752,8 @@ struct SlotCell: View {
     @State private var hovering = false
     /// 空きの枠で、右上の＋の上を押した（離したらクリップを読み込む）
     @State private var addPressed = false
+    /// 名前の帯を押した（そのままドラッグするとキューに足せる）
+    @State private var stripPress = false
 
     var body: some View {
         let slot = engine.slots[index]
@@ -837,6 +860,7 @@ struct SlotCell: View {
                             } else if inNameStrip(v.startLocation) {
                                 engine.clearMultiSelection()
                                 engine.selectClip(index)   // 名前の帯（または ⌥クリック）は選択だけ。出力しない
+                                stripPress = true
                             } else {
                                 engine.clearMultiSelection()
                                 engine.pressSlot(index)
@@ -846,6 +870,13 @@ struct SlotCell: View {
                     if drag.source == index {
                         drag.location = v.location
                         drag.target = drag.index(at: v.location)
+                    }
+                    // 名前の帯からドラッグ → キューの一覧へ落とせば足す
+                    if stripPress && hypot(v.translation.width, v.translation.height) > 6 {
+                        drag.cueSource = index
+                        drag.location = v.location
+                        CueDropTarget.shared.track(CGPoint(x: drag.gridOrigin.x + v.location.x,
+                                                           y: drag.gridOrigin.y + v.location.y))
                     }
                 }
                 .onEnded { _ in
@@ -865,7 +896,12 @@ struct SlotCell: View {
                         drag.group = false
                     } else if slot == nil && addPressed {
                         engine.openPanel(for: index)
+                    } else if drag.cueSource == index {
+                        if CueDropTarget.shared.hovering { engine.addClipCue(index) }
+                        drag.cueSource = nil
+                        CueDropTarget.shared.hovering = false
                     }
+                    stripPress = false
                     addPressed = false
                     pressed = false
                 }
@@ -918,6 +954,7 @@ struct SlotCell: View {
                     Button("動画ファイルを付け直す…（設定はそのまま）") { ProjectMenu.relink(index) }
                 }
                 Button("別のクリップに差し替え…") { engine.openPanel(for: index) }
+                Button("キューに足す") { engine.addClipCue(index) }
                 if active {
                     Button(editing ? "このシーンではこのレイヤーに何も流さない" : "このレイヤーを停止") {
                         engine.viewStop(engine.layerOf(index))
@@ -1037,7 +1074,7 @@ struct SlotContent: View {
 // MARK: - 右下のパネル（ライブ操作 / エフェクト一覧）
 
 struct SidePanel: View {
-    enum Tab: String { case live, scenes, effects, generators, sources }
+    enum Tab: String { case live, scenes, cues, effects, generators, sources }
     @AppStorage("sidePanelTab") private var tab = Tab.live
     @ObservedObject private var layout = LayoutManager.shared
 
@@ -1060,6 +1097,7 @@ struct SidePanel: View {
             switch shown {
             case .live: LivePanel()
             case .scenes: ScenesPanel()
+            case .cues: CuePanel()
             case .effects: EffectBrowser()
             case .generators: EffectBrowser(generators: true)
             case .sources: SourcePanel()

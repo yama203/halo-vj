@@ -205,6 +205,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if shift { Engine.shared.stopAll() } else { Engine.shared.toggleBlackout() }
             return true
         }
+        // スペース：キューの GO、⇧スペース：1 つ戻る（キューがあるときだけ）
+        if event.keyCode == 49 && !Engine.shared.cues.isEmpty {
+            if !event.isARepeat { if shift { Engine.shared.backCue() } else { Engine.shared.goCue() } }
+            return true
+        }
         // Delete：⇧クリックで選んだクリップをまとめて削除
         if (event.keyCode == 51 || event.keyCode == 117) && !Engine.shared.multiSelection.isEmpty {
             if !event.isARepeat { SelectionMenu.delete(Engine.shared) }

@@ -5,7 +5,7 @@ import SwiftUI
 
 /// 区画に置くパネル
 enum DockPanel: String, Codable, CaseIterable, Identifiable {
-    case grid, monitor, pads, preview, params, live, scenes, effects, generators, sources
+    case grid, monitor, pads, preview, params, live, scenes, cues, effects, generators, sources
     var id: String { rawValue }
 
     var title: String {
@@ -17,6 +17,7 @@ enum DockPanel: String, Codable, CaseIterable, Identifiable {
         case .params: "パラメーター"
         case .live: "ライブ"
         case .scenes: "シーン"
+        case .cues: "キュー"
         case .effects: "エフェクト"
         case .generators: "ジェネレーター"
         case .sources: "ソース"
@@ -32,6 +33,7 @@ enum DockPanel: String, Codable, CaseIterable, Identifiable {
         case .params: "slider.horizontal.3"
         case .live: "play.circle"
         case .scenes: "square.stack.3d.up"
+        case .cues: "list.number"
         case .effects: "camera.filters"
         case .generators: "paintpalette"
         case .sources: "folder"
@@ -78,8 +80,30 @@ indirect enum DockNode: Codable, Equatable {
                                        second: .tabs(id: UUID(), panels: [.params], selected: 0))
         let lower = DockNode.split(id: UUID(), axis: .horizontal, ratio: 0.68,
                                    first: inspector,
-                                   second: .tabs(id: UUID(), panels: [.live, .scenes, .effects, .generators, .sources], selected: 0))
+                                   second: .tabs(id: UUID(), panels: [.live, .scenes, .cues, .effects, .generators, .sources], selected: 0))
         return .split(id: UUID(), axis: .vertical, ratio: 0.6, first: upper, second: lower)
+    }
+
+    private static func t(_ ps: [DockPanel], _ sel: Int = 0) -> DockNode { .tabs(id: UUID(), panels: ps, selected: sel) }
+    private static func h(_ r: Double, _ a: DockNode, _ b: DockNode) -> DockNode { .split(id: UUID(), axis: .horizontal, ratio: r, first: a, second: b) }
+    private static func v(_ r: Double, _ a: DockNode, _ b: DockNode) -> DockNode { .split(id: UUID(), axis: .vertical, ratio: r, first: a, second: b) }
+
+    /// おすすめ：ポン出し用。グリッドとモニターを大きく、右にライブとキューリスト、下いっぱいに FX パッド
+    static var cuePlayback: DockNode {
+        v(0.87,
+          h(0.56,
+            v(0.6, t([.grid]), h(0.4, t([.preview]), t([.params, .effects, .generators, .sources]))),
+            v(0.4, t([.monitor]), v(0.36, t([.live]), t([.cues, .scenes])))),
+          t([.pads]))
+    }
+
+    /// おすすめ：クラブ VJ 用。上にグリッドとモニター、下いっぱいに FX パッド、モニターの下にライブ・シーン
+    static var clubVJ: DockNode {
+        v(0.85,
+          h(0.62,
+            v(0.6, t([.grid]), h(0.35, t([.preview]), t([.params, .effects, .generators, .sources]))),
+            v(0.45, t([.monitor]), t([.live, .scenes, .cues]))),
+          t([.pads]))
     }
 
     /// panel を取り除く（空になった区画は閉じる）。全部無くなれば nil
@@ -222,10 +246,20 @@ indirect enum DockNode: Codable, Equatable {
             }
         }
         guard var out = dedupe(self) else { return .standard }
+        // 後から増えたパネルは、近い仲間のいる区画へ（無ければ最初の区画）
+        let buddy: [DockPanel: DockPanel] = [.cues: .scenes, .preview: .params, .sources: .effects]
         for p in DockPanel.allCases where !seen.contains(p) {
-            if let t = out.firstTabsID { out = out.inserting(p, at: t, zone: .center) }
+            let t = buddy[p].flatMap { out.tabsID(containing: $0) } ?? out.firstTabsID
+            if let t { out = out.inserting(p, at: t, zone: .center) }
         }
         return out
+    }
+
+    func tabsID(containing p: DockPanel) -> UUID? {
+        switch self {
+        case .tabs(let id, let ps, _): ps.contains(p) ? id : nil
+        case .split(_, _, _, let a, let b): a.tabsID(containing: p) ?? b.tabsID(containing: p)
+        }
     }
 
     var firstTabsID: UUID? {
@@ -625,6 +659,7 @@ struct DockPanelContent: View {
         case .params: ParameterPanel(framed: false, part: .settings)
         case .live: LivePanel()
         case .scenes: ScenesPanel()
+        case .cues: CuePanel()
         case .effects: EffectBrowser()
         case .generators: EffectBrowser(generators: true)
         case .sources: SourcePanel()

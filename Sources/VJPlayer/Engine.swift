@@ -154,6 +154,12 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
     @Published var activeSceneID: UUID?
     /// シーンを切り替えている途中なら 0〜1
     @Published var sceneProgress: Double?
+    /// キューリスト（GO で上から順に出す）
+    @Published var cues: [Cue] = [] { didSet { scheduleSave() } }
+    /// 今出しているキュー（nil = まだ何も出していない）
+    @Published var currentCue: Int?
+    /// GO の連打よけ：最後に GO した時刻
+    var lastGoHost = 0.0
     /// 押している間だけ効くエフェクトのパッド（グリッドの下）
     @Published var pads: [FXPad] = []
     /// 押しているパッドと、押した時刻
@@ -168,6 +174,9 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
     /// 編集中のシーンが変わったら画面（グリッドなど）も描き直す
     var sceneDraftSink: AnyCancellable?
     var sceneTween: Timer?
+    /// キュー（クリップだけ）でほかのレイヤーを消している途中：消す段と、元の不透明度
+    var cueFadeTimer: Timer?
+    var cueFadeLayers: [Int: Double] = [:]
 
     @Published var masterOpacity = 1.0 {
         didSet { syncRenderState(); scheduleSave() }
@@ -455,6 +464,7 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
 
     /// レイヤーを足す・消す・動かしたときに、シーンのレイヤーごとの中身も同じように並べ直す
     private func remapSceneLayers(oldCount: Int, newCount: Int, _ map: (Int) -> Int?) {
+        remapCueLayers(map)
         guard !scenes.isEmpty else { return }
         var out = scenes
         for k in out.indices {
@@ -646,6 +656,8 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
     func trigger(_ index: Int, fadeTime fadeOverride: Double? = nil, select: Bool = true) {
         guard index >= 0, index < slots.count, let slot = slots[index] else { return }
         let r = layerOf(index)
+        // キューで消している途中のレイヤーを出し直したら、消すのをやめる
+        cancelCueFade(layer: r)
         // 消えかけのクリップをもう一度押した → それは頭から出し直す（クロスフェードの相手ではなくなる）
         if outgoing[r] == index { dropOutgoing(r, stop: false) }
         let fadeTime = fadeOverride ?? layers[r].fadeTime
@@ -1528,6 +1540,8 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
         var currentDeck: Int?
         /// 押している間だけ効くエフェクトのパッド
         var pads: [SavedPad]?
+        /// キューリスト
+        var cues: [Cue]?
         /// 自動保存だけ：開いていたプロジェクトと、未保存の変更があったか
         var projectPath: String?
         var projectDirty: Bool?
@@ -1613,7 +1627,8 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
             scenes: scenes.isEmpty ? nil : scenes,
             decks: decks.map { SavedDeck(id: $0.id, name: $0.name) },
             currentDeck: currentDeck,
-            pads: savedPads)
+            pads: savedPads,
+            cues: cues.isEmpty ? nil : cues)
     }
 
     private func restore() {
@@ -1662,6 +1677,8 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
         heldPads = [:]
         releasingPads = [:]
         pads = makePads(state.pads)
+        cues = state.cues ?? []
+        currentCue = nil
         activeSceneID = nil
         closeSceneEditor()
         bpm = state.bpm ?? 120

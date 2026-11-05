@@ -105,12 +105,13 @@ extension Engine {
     // MARK: - シーン：呼び出し
 
     /// シーンに切り替える。フェード時間があれば、クリップはクロスフェード、値はなめらかに動かす
-    func recallScene(_ id: UUID) {
+    func recallScene(_ id: UUID, fade fadeOverride: Double? = nil) {
         guard let sc = scenes.first(where: { $0.id == id }) else { return }
         sceneTween?.invalidate()
         sceneTween = nil
+        finishCueFade()
         activeSceneID = id
-        let T = max(sc.fade, 0)
+        let T = max(fadeOverride ?? sc.fade, 0)
         let n = min(layers.count, sc.layers.count, sc.playing.count)
 
         // 始まりの値
@@ -386,6 +387,8 @@ struct SceneTile: View {
             }
             .contentShape(Rectangle())
             .onTapGesture { engine.recallScene(scene.id) }
+            // キューの一覧へドラッグして足せる
+            .onDrag { NSItemProvider(object: ("halovj-scene:" + scene.id.uuidString) as NSString) }
             .help("クリックで「\(scene.name)」に切り替え（\(VJScene.fadeLabel(scene.fade))）")
             HStack(spacing: 4) {
                 if editing && size < 2 { Image(systemName: "slider.horizontal.3").font(.system(size: 10, weight: .bold)) }
@@ -418,6 +421,7 @@ struct SceneTile: View {
         .onHover { hovering = $0 }
         .contextMenu {
             Button("編集（出力はそのまま）") { engine.editScene(scene.id) }
+            Button("キューに足す") { engine.addCue(.scene(scene.id)) }
             Button("今の状態で上書き") { engine.overwriteScene(scene.id) }
             Button("名前を変える…") { rename() }
             if engine.decks.count > 1 {
