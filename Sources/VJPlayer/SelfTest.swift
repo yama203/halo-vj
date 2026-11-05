@@ -272,6 +272,8 @@ enum SelfTest {
         testPads(check: check)
         testMultiSelect(check: check)
         testMoveLayer(check: check)
+        testStillImages(check: check, wait: wait)
+        testSources(dir: URL(fileURLWithPath: paths[0]).deletingLastPathComponent(), check: check, wait: wait)
 
         // 16. ミュート（クリップ・レイヤー・コンポジション）
         testMute(paths: paths, check: check, wait: wait)
@@ -1042,6 +1044,148 @@ enum SelfTest {
     }
 
     /// シーン：今の状態を保存して、切り替える（すぐ／フェード）
+    /// 静止画：PNG・PDF・AI（PDF 互換）・SVG・PSD を読み、クリップとして出力に出せる
+    static func testStillImages(check: (Bool, String) -> Void, wait: (Double) -> Void) {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("halovj-still-\(UUID().uuidString)")
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        // 赤い 64×32 の絵（右半分は透明）
+        let cs = CGColorSpace(name: CGColorSpace.sRGB)!
+        let ctx = CGContext(data: nil, width: 64, height: 32, bitsPerComponent: 8, bytesPerRow: 0, space: cs,
+                            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        ctx.setFillColor(red: 1, green: 0, blue: 0, alpha: 1)
+        ctx.fill(CGRect(x: 0, y: 0, width: 32, height: 32))
+        let red = ctx.makeImage()!
+        func write(_ name: String, _ type: String) -> URL? {
+            let u = dir.appendingPathComponent(name)
+            guard let d = CGImageDestinationCreateWithURL(u as CFURL, type as CFString, 1, nil) else { return nil }
+            CGImageDestinationAddImage(d, red, nil)
+            return CGImageDestinationFinalize(d) ? u : nil
+        }
+        let png = write("a.png", "public.png")!
+        let psd = write("a.psd", "com.adobe.photoshop-image")
+        // PDF（AI も中身は PDF）
+        let pdf = dir.appendingPathComponent("a.pdf")
+        var box = CGRect(x: 0, y: 0, width: 200, height: 100)
+        if let pc = CGContext(pdf as CFURL, mediaBox: &box, nil) {
+            pc.beginPDFPage(nil)
+            pc.setFillColor(red: 0, green: 0, blue: 1, alpha: 1)
+            pc.fill(box)
+            pc.endPDFPage()
+            pc.closePDF()
+        }
+        let ai = dir.appendingPathComponent("a.ai")
+        try? FileManager.default.copyItem(at: pdf, to: ai)
+        let svg = dir.appendingPathComponent("a.svg")
+        try? "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"200\" height=\"100\"><rect width=\"200\" height=\"100\" fill=\"#00ff00\"/></svg>"
+            .write(to: svg, atomically: true, encoding: .utf8)
+
+        let ip = StillImage.load(png), idoc = StillImage.load(pdf), iai = StillImage.load(ai), isvg = StillImage.load(svg)
+        check(ip?.width == 64 && ip?.height == 32, "静止画：PNG を読める")
+        check((idoc?.width ?? 0) >= 200 && idoc.map { abs(Double($0.width) / Double($0.height) - 2) < 0.02 } == true,
+              "静止画：PDF を（くっきりするよう大きめに）読める")
+        check(iai != nil, "静止画：AI（PDF 互換で保存したもの）を読める")
+        check(isvg.map { abs(Double($0.width) / Double($0.height) - 2) < 0.02 } == true, "静止画：SVG を読める")
+        if let psd { check(StillImage.load(psd)?.width == 64, "静止画：PSD（重ねた結果）を読める") }
+        check(StillImage.isImage(ai) && StillImage.isImage(svg) && StillImage.isImage(png) && !StillImage.isImage(URL(fileURLWithPath: "/a.mov")),
+              "静止画：拡張子で見分ける")
+        // テクスチャ：左上（赤）と右上（透明）
+        if let ip, let tex = StillImage.texture(ip) {
+            var px = [UInt8](repeating: 0, count: 64 * 32 * 4)
+            tex.getBytes(&px, bytesPerRow: 64 * 4, from: MTLRegionMake2D(0, 0, 64, 32), mipmapLevel: 0)
+            let l = Array(px[(16 * 64 + 8) * 4 ..< (16 * 64 + 8) * 4 + 4]), r = Array(px[(16 * 64 + 56) * 4 ..< (16 * 64 + 56) * 4 + 4])
+            check(l == [0, 0, 255, 255] && r == [0, 0, 0, 0], "静止画：色と透明のまま描画用にできる（BGRA・乗算済み）")
+        } else {
+            check(false, "静止画：描画用にできる")
+        }
+
+        // クリップとして置いて出す
+        let e = Engine(persistent: false)
+        e.load(urls: [png], startingAt: 0)
+        for _ in 0..<40 where e.slots[0]?.isReady != true { wait(0.05) }
+        let slot = e.slots[0]
+        check(slot?.isImage == true && slot?.isStill == true && slot?.isReady == true && slot?.thumbnail != nil,
+              "静止画：クリップの枠に入れると、すぐ使える（サムネイル付き）")
+        e.selectClip(0)
+        check(e.previewDraws().first?.texture === slot?.stillTexture, "静止画：出力していなくてもプレビューに出る")
+        e.trigger(0)
+        _ = e.updateFrame()
+        check(e.frame(layer: 0)?.texture === slot?.stillTexture && e.slots[0]?.isPlaying == true,
+              "静止画：トリガーするとレイヤーに出る")
+        let st = e.makeState(relativeTo: nil)
+        let e2 = Engine(persistent: false)
+        e2.apply(st, baseDir: nil)
+        for _ in 0..<40 where e2.slots[0]?.isReady != true { wait(0.05) }
+        check(e2.slots[0]?.isImage == true && e2.slots[0]?.stillTexture != nil, "静止画：保存して読み込める")
+        let bad = dir.appendingPathComponent("bad.ai")
+        try? "not a pdf".write(to: bad, atomically: true, encoding: .utf8)
+        let b = ClipSlot(url: bad)
+        for _ in 0..<20 where b.errorMessage == nil { wait(0.05) }
+        check(b.errorMessage?.contains("PDF 互換") == true && !b.isReady, "静止画：読めない AI は、その理由を出す")
+
+        // GIF アニメ：赤・緑・青を 0.2 秒ずつ
+        let gif = dir.appendingPathComponent("anim.gif")
+        if let d = CGImageDestinationCreateWithURL(gif as CFURL, "com.compuserve.gif" as CFString, 3, nil) {
+            CGImageDestinationSetProperties(d, [kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFLoopCount: 0]] as CFDictionary)
+            for (r, g, bl) in [(1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0)] {
+                let c = CGContext(data: nil, width: 16, height: 16, bitsPerComponent: 8, bytesPerRow: 0, space: cs,
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+                c.setFillColor(red: r, green: g, blue: bl, alpha: 1)
+                c.fill(CGRect(x: 0, y: 0, width: 16, height: 16))
+                CGImageDestinationAddImage(d, c.makeImage()!,
+                                           [kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFDelayTime: 0.2]] as CFDictionary)
+            }
+            CGImageDestinationFinalize(d)
+        }
+        let anim = StillImage.loadAnimation(gif)
+        check(anim?.frames.count == 3 && anim.map { abs($0.duration - 0.6) < 0.01 } == true,
+              "GIF アニメ：全コマと表示時間を読める")
+        check(StillImage.loadAnimation(png) == nil, "GIF アニメ：1 コマの画像は動く画像として扱わない")
+        let gs = ClipSlot(url: gif)
+        for _ in 0..<40 where gs.isReady != true { wait(0.05) }
+        // 真ん中の色（BGRA）
+        func color(_ t: MTLTexture?) -> [UInt8] {
+            guard let t else { return [] }
+            var px = [UInt8](repeating: 0, count: 4)
+            t.getBytes(&px, bytesPerRow: t.width * 4, from: MTLRegionMake2D(t.width / 2, t.height / 2, 1, 1), mipmapLevel: 0)
+            return px
+        }
+        let rd: [UInt8] = [0, 0, 255, 255], gr: [UInt8] = [0, 255, 0, 255], bu: [UInt8] = [255, 0, 0, 255]
+        check(gs.isAnimatedImage && abs(gs.animationDuration - 0.6) < 0.01, "GIF アニメ：クリップは動く画像になる")
+        // 出力していないとき：読み込んだ時刻から動く。t は読み込みからの秒数
+        let e3 = Engine(persistent: false)
+        e3.load(urls: [gif], startingAt: 0)
+        for _ in 0..<40 where e3.slots[0]?.isReady != true { wait(0.05) }
+        guard let gslot = e3.slots[0] else { check(false, "GIF アニメ：クリップに入る"); return }
+        e3.trigger(0)
+        let o = gslot.animOrigin
+        check(color(gslot.imageTexture(at: o + 0.1)) == rd && color(gslot.imageTexture(at: o + 0.3)) == gr
+              && color(gslot.imageTexture(at: o + 0.5)) == bu && color(gslot.imageTexture(at: o + 0.7)) == rd,
+              "GIF アニメ：再生すると、コマの表示時間どおりに進んでくり返す")
+        // 速度 2 倍で頭から：0.15 秒後は 0.3 秒の所（緑）、0.25 秒後は 0.5 秒の所（青）
+        gslot.speed = 2
+        e3.trigger(0)
+        let o2 = gslot.animOrigin
+        check(color(gslot.imageTexture(at: o2 + 0.05)) == rd && color(gslot.imageTexture(at: o2 + 0.15)) == gr
+              && color(gslot.imageTexture(at: o2 + 0.25)) == bu, "GIF アニメ：速度 2 倍なら 2 倍で進む")
+        _ = e3.updateFrame()
+        check(e3.frame(layer: 0) != nil, "GIF アニメ：レイヤーに出る")
+    }
+
+    /// ソース：フォルダの動画を読んで、サムネイルと長さを作る
+    static func testSources(dir: URL, check: (Bool, String) -> Void, wait: (Double) -> Void) {
+        let (dirs, movies) = SourceBrowser.list(dir)
+        check(movies.count >= 2 && movies.allSatisfy(SourceBrowser.isMovie) && !dirs.contains(where: SourceBrowser.isMovie),
+              "ソース：フォルダの動画を一覧できる（\(movies.count) 本）")
+        check(!SourceBrowser.isMovie(URL(fileURLWithPath: "/tmp/a.txt")) && SourceBrowser.isMovie(URL(fileURLWithPath: "/tmp/a.MP4")),
+              "ソース：動画だけを並べる（拡張子の大文字小文字は問わない）")
+        var got: SourceThumbs.Thumb?
+        if let u = movies.first { SourceThumbs.shared.load(u) { got = $0 } }
+        for _ in 0..<40 where got == nil { wait(0.1) }
+        check((got?.frames.count ?? 0) == SourceThumbs.frameCount && (got?.duration ?? 0) > 1,
+              "ソース：なぞって見る用のコマと長さを作れる")
+    }
+
     /// レイヤーの移動：クリップ・再生中・設定ごと動き、シーンも付いてくる
     static func testMoveLayer(check: (Bool, String) -> Void) {
         let e = Engine(persistent: false)

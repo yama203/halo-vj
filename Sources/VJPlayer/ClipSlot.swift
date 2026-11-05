@@ -1,5 +1,6 @@
 import AVFoundation
 import AppKit
+import Metal
 
 /// 再生位置を計算する時計。速度を変えても位置は連続する（ここで飛ばないのでカクつかない）。
 struct PlayheadClock {
@@ -467,6 +468,84 @@ final class ClipSlot: ObservableObject, Identifiable, Animatable, EffectHolder {
     var isGenerator: Bool { generator != nil }
     private var thumbnailWork: DispatchWorkItem?
 
+    /// 静止画のクリップ（PNG・JPEG・PSD・AI・PDF・SVG など）。動画の代わりにこの絵を出す
+    private(set) var isImage = false
+    private let stillLock = NSLock()
+    /// 静止画のコマ（ふつうは 1 枚。GIF などのアニメーションなら全コマ）と、各コマの終わる時刻
+    private var _stillFrames: [MTLTexture] = []
+    private var _frameEnds: [Double] = []
+    /// 静止画の絵（1 コマ目。読み込めたら入る。描画スレッドからも読む）
+    var stillTexture: MTLTexture? { stillLock.withLock { _stillFrames.first } }
+    /// GIF などの動く画像か
+    var isAnimatedImage: Bool { stillLock.withLock { _stillFrames.count > 1 } }
+    /// 動く画像の 1 周の長さ（秒）
+    var animationDuration: Double { stillLock.withLock { _frameEnds.last ?? 0 } }
+    /// 読み込んだ時刻（出力していないプレビューで、ここから動かす）
+    private var imageLoadedHost = 0.0
+
+    /// 静止画の、host 時刻に出すコマ（描画スレッドから）。動く画像は再生位置（速度込み）でくり返す
+    func imageTexture(at host: Double) -> MTLTexture? {
+        let (frames, ends, base) = stillLock.withLock { (_stillFrames, _frameEnds, imageLoadedHost) }
+        guard frames.count > 1, let total = ends.last, total > 0 else { return frames.first }
+        let pos: Double = lock.withLock { _playing ? _clock.position(at: host) : host - base }
+        var t = pos.truncatingRemainder(dividingBy: total)
+        if t < 0 { t += total }
+        // 二分探索：t より後に終わる最初のコマ
+        var lo = 0, hi = ends.count - 1
+        while lo < hi {
+            let mid = (lo + hi) / 2
+            if ends[mid] > t { hi = mid } else { lo = mid + 1 }
+        }
+        return frames[min(lo, frames.count - 1)]
+    }
+    /// 動画ではない（ジェネレーター・静止画）。速度・再生範囲などは使わない
+    var isStill: Bool { isGenerator || isImage }
+
+    private func loadImage() {
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            isMissing = true
+            errorMessage = "見つかりません：" + url.lastPathComponent
+            return
+        }
+        let u = url
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            // GIF などのアニメーションなら全コマ、そうでなければ 1 枚
+            let anim = StillImage.loadAnimation(u)
+            let img = anim?.frames.first ?? StillImage.load(u)
+            var texs: [MTLTexture] = [], ends: [Double] = []
+            if let anim {
+                var acc = 0.0
+                for (f, d) in zip(anim.frames, anim.delays) {
+                    guard let t = StillImage.texture(f) else { continue }
+                    texs.append(t)
+                    acc += d
+                    ends.append(acc)
+                }
+            } else if let img, let t = StillImage.texture(img) {
+                texs = [t]
+            }
+            let tex = texs.first
+            DispatchQueue.main.async {
+                guard let self else { return }
+                guard let img, tex != nil else {
+                    let ext = u.pathExtension.lowercased()
+                    self.errorMessage = "読み込めません：" + u.lastPathComponent
+                        + (ext == "ai" ? "（Illustrator で「PDF 互換ファイルを作成」にして保存したものが読めます）" : "")
+                    return
+                }
+                let now = CACurrentMediaTime()
+                self.stillLock.withLock {
+                    self._stillFrames = texs
+                    self._frameEnds = ends
+                    self.imageLoadedHost = now
+                }
+                self.thumbnail = NSImage(cgImage: img, size: NSSize(width: img.width, height: img.height))
+                self.isReady = true
+                self.onReady?()
+            }
+        }
+    }
+
     /// ジェネレーターのクリップを作る。読み込みは要らないので、すぐ再生できる
     init(generator g: Effect) {
         url = URL(string: "halovj-generator:" + g.kind.rawValue)!
@@ -524,6 +603,11 @@ final class ClipSlot: ObservableObject, Identifiable, Animatable, EffectHolder {
         self.inPoint = max(inPoint, 0)
         self.outPoint = outPoint
         asset = AVURLAsset(url: url, options: [AVURLAssetPreferPreciseDurationAndTimingKey: true])
+        if StillImage.isImage(url) {
+            isImage = true
+            loadImage()
+            return
+        }
 
         restartObserver = NotificationCenter.default.addObserver(
             forName: .audioEngineRestarted, object: nil, queue: .main

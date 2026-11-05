@@ -117,7 +117,7 @@ enum ProjectMenu {
     /// 1 つのクリップの動画を選び直す（設定はそのまま）
     static func relink(_ index: Int) {
         let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.movie, .quickTimeMovie, .mpeg4Movie]
+        panel.allowedContentTypes = [.movie, .quickTimeMovie, .mpeg4Movie] + StillImage.openTypes
         panel.message = "このクリップの動画ファイルを選んでください（位置・エフェクトなどの設定はそのまま）"
         guard panel.runModal() == .OK, let url = panel.url else { return }
         engine.relinkSlot(index, to: url)

@@ -297,6 +297,9 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
             var layerEffects = EffectStack()
             /// 新しいクリップの見え具合（0→1）。消えていく方は 1 - これ
             var crossfade = Fade()
+            /// 静止画のクリップなら、その絵
+            var still: MTLTexture?
+            var outgoingStill: MTLTexture?
         }
         enum Preview {
             case none
@@ -306,6 +309,8 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
             case player(PreviewPlayer)
             /// 出力していないジェネレーター → プレビュー用に描く
             case generator(Effect, origin: Double)
+            /// 出力していない静止画（GIF などはコマを進める）
+            case image(ClipSlot)
         }
         var layers: [LayerState] = []
         var homographyInverse = matrix_identity_float3x3
@@ -333,6 +338,7 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
             case live(Int)
             case player(PreviewPlayer)
             case generator(Effect, origin: Double)
+            case image(ClipSlot)
         }
         var layers: [RenderState.LayerState] = []
         var sources: [Source?] = []
@@ -887,7 +893,7 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
 
     func openPanel(for index: Int) {
         let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.movie, .quickTimeMovie, .mpeg4Movie]
+        panel.allowedContentTypes = [.movie, .quickTimeMovie, .mpeg4Movie] + StillImage.openTypes
         panel.allowsMultipleSelection = true
         panel.message = "クリップを選択（複数選ぶと右隣のスロットに順番に入ります。この段の右端まで）"
         if panel.runModal() == .OK {
@@ -950,7 +956,9 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
                                               generator: slot?.generator,
                                               outgoingGenerator: out?.generator,
                                               layerEffects: EffectStack(effects: l.effects, beat: beatClock),
-                                              crossfade: crossfades[l.index])
+                                              crossfade: crossfades[l.index],
+                                              still: slot?.stillTexture,
+                                              outgoingStill: out?.stillTexture)
             },
             homographyInverse: homographyInverse,
             testPattern: testPattern)
@@ -994,11 +1002,14 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
                 clipMuted: slot?.muted ?? false,
                 clipEffects: EffectStack(effects: slot?.effects ?? [], beat: beatClock, origin: slot?.animOrigin ?? 0),
                 generator: slot?.generator,
-                layerEffects: EffectStack(effects: l.effects, beat: beatClock)))
+                layerEffects: EffectStack(effects: l.effects, beat: beatClock),
+                still: slot?.stillTexture))
             var src: ScenePreviewState.Source?
             if let i, let slot, !l.isAdjustment {
                 if activeByLayer[r] == i {
                     src = .live(r)
+                } else if slot.isImage {
+                    src = .image(slot)
                 } else if let g = slot.generator {
                     src = .generator(g, origin: generatorPreviewOrigin(slot))
                 } else if slot.isReady {
@@ -1049,6 +1060,7 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
         switch sp.sources[r] {
         case .live(let lr)?: return frames.indices.contains(lr) ? frames[lr] : nil
         case .player?, .generator?: return sceneFrames[r]
+        case .image(let s)?: return s.imageTexture(at: CACurrentMediaTime()).map { FrameHolder(texture: $0) }
         case nil: return nil
         }
     }
@@ -1088,6 +1100,11 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
             previewPlayer = nil
             return (.generator(g, origin: generatorPreviewOrigin(slot)), slot.animTransform)
         }
+        if slot.isImage {
+            previewPlayer?.cancel()
+            previewPlayer = nil
+            return (slot.stillTexture != nil ? .image(slot) : .none, slot.animTransform)
+        }
         guard slot.isReady else { return (.none, slot.animTransform) }
         if previewPlayer?.slot !== slot {
             previewPlayer?.cancel()
@@ -1111,7 +1128,14 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
         var updated = 0
         for (r, l) in layerStates.enumerated() {
             if let out = l.outgoing {
-                if let g = l.outgoingGenerator {
+                if l.outgoingStill != nil, let t = out.imageTexture(at: now) {
+                    renderLock.withLock {
+                        if renderState.layers.indices.contains(r), outgoingFrames.indices.contains(r),
+                           renderState.layers[r].outgoing === out, outgoingFrames[r]?.texture !== t {
+                            outgoingFrames[r] = FrameHolder(texture: t)
+                        }
+                    }
+                } else if let g = l.outgoingGenerator {
                     if let holder = renderGenerator(g, origin: l.outgoingEffects.origin, key: "go\(r)", now: now) {
                         renderLock.withLock {
                             if renderState.layers.indices.contains(r), outgoingFrames.indices.contains(r),
@@ -1137,6 +1161,16 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
                 let id = ObjectIdentifier(slot)
                 if clipTicks[id] == tick && renderLock.withLock({ frames.indices.contains(r) && frames[r] != nil }) { continue }
                 clipTicks[id] = tick
+            }
+            if l.still != nil, let t = slot.imageTexture(at: now) {
+                let changed: Bool = renderLock.withLock {
+                    guard renderState.layers.indices.contains(r), frames.indices.contains(r),
+                          renderState.layers[r].slot === slot, frames[r]?.texture !== t else { return false }
+                    frames[r] = FrameHolder(texture: t)
+                    return true
+                }
+                if changed { updated += 1 }
+                continue
             }
             if let g = l.generator {
                 guard let holder = renderGenerator(g, origin: l.clipEffects.origin, key: "g\(r)", now: now) else { continue }
@@ -1252,6 +1286,7 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
             case .none: f = nil
             case .live(let r): f = frames[r]
             case .player, .generator: f = previewFrame
+            case .image(let s): f = s.imageTexture(at: CACurrentMediaTime()).map { FrameHolder(texture: $0) }
             }
             guard let f else { return [] }
             return [LayerDraw(texture: f.texture, opacity: 1, blend: .normal,

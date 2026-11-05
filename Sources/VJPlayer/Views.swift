@@ -954,10 +954,11 @@ struct SlotContent: View {
 
             VStack(spacing: 2) {
                 HStack(spacing: 4) {
-                    if slot.endAction != .hold { Image(systemName: slot.endAction.icon).font(.system(size: 10)) }
-                    if slot.hasInOut { Image(systemName: "scissors").font(.system(size: 10)) }
+                    if slot.isImage { Image(systemName: "photo").font(.system(size: 10)) }
+                    if slot.endAction != .hold && !slot.isImage { Image(systemName: slot.endAction.icon).font(.system(size: 10)) }
+                    if slot.hasInOut && !slot.isImage { Image(systemName: "scissors").font(.system(size: 10)) }
                     if slot.audioMuted { Image(systemName: "speaker.slash.fill").font(.system(size: 10)).foregroundStyle(.red) }
-                    if slot.jumpBeats > 0 { Image(systemName: "die.face.5").font(.system(size: 10)).foregroundStyle(.purple) }
+                    if slot.jumpBeats > 0 && !slot.isImage { Image(systemName: "die.face.5").font(.system(size: 10)).foregroundStyle(.purple) }
                     if slot.syncMode == .bpm {
                         Text(ParamAnim.beatsLabel(slot.syncBeats))
                             .font(.system(size: 10, weight: .bold).monospacedDigit())
@@ -991,7 +992,7 @@ struct SlotContent: View {
 // MARK: - 右下のパネル（ライブ操作 / エフェクト一覧）
 
 struct SidePanel: View {
-    enum Tab: String { case live, scenes, effects, generators }
+    enum Tab: String { case live, scenes, effects, generators, sources }
     @AppStorage("sidePanelTab") private var tab = Tab.live
 
     var body: some View {
@@ -1001,6 +1002,7 @@ struct SidePanel: View {
                 Text("シーン").tag(Tab.scenes)
                 Text("エフェクト").tag(Tab.effects)
                 Text("ジェネレーター").tag(Tab.generators)
+                Text("ソース").tag(Tab.sources)
             }
             .pickerStyle(.segmented)
             .labelsHidden()
@@ -1010,6 +1012,7 @@ struct SidePanel: View {
             case .scenes: ScenesPanel()
             case .effects: EffectBrowser()
             case .generators: EffectBrowser(generators: true)
+            case .sources: SourcePanel()
             }
         }
         .padding(12)

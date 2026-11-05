@@ -530,7 +530,7 @@ struct ClipParams: View {
             ParamColumn(title: "ミックス・再生") {
                 AnimField(label: "不透明度", value: $slot.opacity, range: 0...1, perPoint: 0.003, defaultValue: 1,
                           showsBar: true, format: percent, key: .opacity, target: slot)
-                if !slot.isGenerator {
+                if !slot.isStill {
                     HStack(spacing: 4) {
                         ValueDrag(label: "音量", value: $slot.clipVolume, range: 0...1, perPoint: 0.003,
                                   defaultValue: 1, showsBar: true, format: percent)
@@ -539,7 +539,7 @@ struct ClipParams: View {
                     }
                     .frame(height: UI.rowHeight)
                 }
-                if !slot.isGenerator { ClipSpeedFields(slot: slot) }
+                if !slot.isStill { ClipSpeedFields(slot: slot) }
             }
         }
         if slot.generator != nil {
@@ -549,6 +549,24 @@ struct ClipParams: View {
                 EffectCard(effect: Binding(get: { slot.generator ?? Effect(kind: .solid) }, set: { slot.generator = $0 }),
                            origin: slot.animOrigin, isFirst: true, isLast: true, move: { _ in }, remove: {},
                            isBlendSettings: true)
+            }
+            .frame(width: UI.paramsWidth, alignment: .leading)
+            .padding(.top, 10)
+        } else if slot.isImage {
+            // 静止画：再生範囲は無い。動く画像（GIF など）は速度だけ
+            VStack(alignment: .leading, spacing: 8) {
+                Text((slot.isAnimatedImage
+                      ? String(format: "動く画像（%@・1 周 %.2f 秒）", slot.url.pathExtension.uppercased(), slot.animationDuration)
+                      : "静止画（\(slot.url.pathExtension.uppercased())）") + (slot.errorMessage.map { "\n" + $0 } ?? ""))
+                    .font(.system(size: 12))
+                    .foregroundStyle(slot.errorMessage == nil ? Color.secondary : Color.red)
+                    .fixedSize(horizontal: false, vertical: true)
+                if slot.isAnimatedImage {
+                    ValueDrag(label: "速度", value: $slot.speed, range: ClipSlot.speedRange, perPoint: 0.005,
+                              defaultValue: 1, format: { String(format: "%.2fx", $0) })
+                        .frame(height: UI.rowHeight)
+                        .help("動く画像の速さ（コンポジション速度も掛かる）。ダブルクリックで 1.00x")
+                }
             }
             .frame(width: UI.paramsWidth, alignment: .leading)
             .padding(.top, 10)
