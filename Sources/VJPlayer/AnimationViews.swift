@@ -145,7 +145,9 @@ struct BlendChoice: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             Text("重ね方").font(.system(size: 11)).foregroundStyle(.secondary)
-            ChoiceButtons(selection: $blend, items: BlendMode.allCases.filter { !$0.isSpecial }.map { ($0, $0.label) })
+            ChoiceButtons(selection: $blend, items: BlendMode.allCases.filter { !$0.isSpecial && !$0.isMask }.map { ($0, $0.label) })
+            ChoiceButtons(selection: $blend, items: BlendMode.allCases.filter(\.isMask).map { ($0, $0.label) })
+                .help("このレイヤーを見せずに、明るさを使って下のレイヤー全部を切り抜く（白黒の動画や、マスクのエフェクトを付けた白い絵など）。不透明度でかかり具合")
             ChoiceButtons(selection: $blend, items: BlendMode.allCases.filter(\.isSpecial).map { ($0, $0.label) })
                 .help("特殊合成：下のレイヤーの明るさを読んで、100% を超えた分をにじみ・色相ずれ・波紋に変える")
         }
@@ -269,6 +271,8 @@ final class EffectUIState: ObservableObject {
     @Published var expanded: Set<UUID> = []
     /// 並べ替えでドラッグしているエフェクト
     var dragging: UUID?
+    /// プレビューの上で点を編集している「自由な形のマスク」
+    @Published var editingPoly: UUID?
     static let movePrefix = "vjeffectmove:"
 }
 
@@ -467,6 +471,7 @@ struct EffectCard: View {
                     PaletteEditor(palette: $effect.palette)
                 }
             }
+            if effect.kind == .polyMask { PolyMaskControls(effect: $effect) }
             if effect.kind == .strobe && effect.value(0) < 0.5 {
                 HStack(spacing: 10) {
                     Text("光る色").font(.system(size: 12)).foregroundStyle(.secondary)

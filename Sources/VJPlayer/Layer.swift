@@ -6,6 +6,8 @@ enum BlendMode: Int, CaseIterable, Codable, Identifiable {
     case normal, add, screen, multiply
     /// 特殊合成：下の絵を読んで、シェーダーで混ぜる（設定はレイヤーの blendFX）
     case overdrive
+    /// マスク：このレイヤーの明るさで、下に重ねた絵を見せる（白 = 見える、黒 = 隠す）／反転（白い所を隠す）
+    case maskLuma, maskInvert
 
     var id: Int { rawValue }
 
@@ -16,8 +18,13 @@ enum BlendMode: Int, CaseIterable, Codable, Identifiable {
         case .screen: "スクリーン"
         case .multiply: "乗算"
         case .overdrive: "オーバードライブ加算"
+        case .maskLuma: "マスク（白で見せる）"
+        case .maskInvert: "マスク（白で隠す）"
         }
     }
+
+    /// マスクとして使う重ね方か（このレイヤー自体は見えず、下の絵を見せる・隠す）
+    var isMask: Bool { self == .maskLuma || self == .maskInvert }
 
     /// 特殊合成か（下の絵を読む。値は blendFX）
     var isSpecial: Bool { self == .overdrive }

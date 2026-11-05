@@ -7,7 +7,7 @@ import QuartzCore
 // 出力を、指定したフレームレートでしか更新しない（並び順には関係なく、その段全体にかかる）。
 
 enum EffectKind: String, Codable, CaseIterable, Identifiable {
-    case mirror, colorize, levels, posterize, posterizeTime, strobe, echo
+    case mirror, colorize, levels, posterize, posterizeTime, strobe, echo, shapeMask, polyMask
     /// 特殊合成（レイヤーの重ね方）の値。エフェクト一覧には出さない
     case overdrive
     var id: String { rawValue }
@@ -24,6 +24,8 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
         case .posterizeTime: "ポスタライズ時間"
         case .strobe: "ストロボ"
         case .echo: "エコー（残像）"
+        case .shapeMask: "マスク（形）"
+        case .polyMask: "マスク（自由な形）"
         case .overdrive: "オーバードライブ加算"
         }
     }
@@ -34,6 +36,7 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
         case .mirror: .shape
         case .colorize, .levels, .posterize: .color
         case .posterizeTime, .strobe, .echo: .time
+        case .shapeMask, .polyMask: .mask
         case .overdrive: .blend
         }
     }
@@ -47,6 +50,8 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
         case .posterizeTime: "timer"
         case .strobe: "bolt.fill"
         case .echo: "square.stack.3d.forward.dottedline"
+        case .shapeMask: "circle.dashed.inset.filled"
+        case .polyMask: "skew"
         case .overdrive: "sun.max"
         }
     }
@@ -70,6 +75,8 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
         case .posterize: 3
         case .strobe: 4
         case .echo: 5
+        case .shapeMask: 6
+        case .polyMask: 7
         case .posterizeTime, .overdrive: -1
         }
     }
@@ -123,6 +130,31 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
                 EffectParam(label: "波紋の広がり", range: 40...800, defaultValue: 300, perPoint: 1,
                             format: { String(format: "%.0f px（1080p）", $0) }),
             ]
+        case .shapeMask:
+            // 四角・丸で切り抜く。位置・大きさは絵の幅・高さに対する割合
+            return [
+                EffectParam(label: "形", range: 0...1, defaultValue: 0, choices: ["四角", "丸"]),
+                EffectParam(label: "反転（中を隠す）", range: 0...1, defaultValue: 0, isToggle: true),
+                EffectParam(label: "位置 X", range: -1...1, defaultValue: 0, perPoint: 0.002,
+                            format: { String(format: "%+.1f%%", $0 * 100) }, animRange: -0.3...0.3),
+                EffectParam(label: "位置 Y", range: -1...1, defaultValue: 0, perPoint: 0.002,
+                            format: { String(format: "%+.1f%%", $0 * 100) }, animRange: -0.3...0.3),
+                EffectParam(label: "幅", range: 0...2, defaultValue: 0.6, perPoint: 0.002, format: EffectParam.percent,
+                            animRange: 0.2...0.8),
+                EffectParam(label: "高さ", range: 0...2, defaultValue: 0.6, perPoint: 0.002, format: EffectParam.percent,
+                            animRange: 0.2...0.8),
+                EffectParam(label: "角度", range: 0...360, defaultValue: 0, perPoint: 1,
+                            format: { String(format: "%.0f°", $0) }, animRange: 0...360),
+                EffectParam(label: "ぼかし", range: 0...0.5, defaultValue: 0.02, perPoint: 0.0005,
+                            format: { String(format: "%.1f%%", $0 * 100) }),
+            ]
+        case .polyMask:
+            // 点を結んだ形で切り抜く。点はプレビューの上で編集する（Effect.points）
+            return [
+                EffectParam(label: "ぼかし", range: 0...0.3, defaultValue: 0.005, perPoint: 0.0005,
+                            format: { String(format: "%.1f%%", $0 * 100) }),
+                EffectParam(label: "反転（中を隠す）", range: 0...1, defaultValue: 0, isToggle: true),
+            ]
         case .echo:
             // 前の絵を少しずつ薄めながら残して、今の絵と重ねる（フィードバック）
             return [
@@ -162,6 +194,8 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
         case .colorize: "明るさをもとに、1 色で染める（カラー）か、パレットの色に置き換える（パレット）"
         case .levels: "黒と白の位置・ガンマで明るさとコントラストを整える"
         case .posterize: "色の段数を減らす。ディザとドットを足すと GIF アニメのような見た目に"
+        case .shapeMask: "四角・丸の形で切り抜く（外は透明）。位置や大きさを動かせる。反転すると中を隠す"
+        case .polyMask: "プレビューの上で点を置いて描いた形で切り抜く。建物や物に合わせるのに"
         case .echo: "動いた跡が残像になって残る。レイヤーかコンポジションにかけると、位置や回転の動きも跡になる"
         case .strobe: "BPM か秒に合わせて点滅させる（色で光る・消える・反転）。残光を上げると光ったあとすっと消える"
         case .posterizeTime: "コマを間引いて、指定したフレームレートでしか動かないようにする（この段全体にかかる）"
@@ -172,12 +206,13 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
 
 /// エフェクト一覧の分類
 enum EffectCategory: Int, CaseIterable, Identifiable {
-    case color, shape, time, blend
+    case color, shape, mask, time, blend
     var id: Int { rawValue }
     var label: String {
         switch self {
         case .color: "色"
         case .shape: "形"
+        case .mask: "マスク"
         case .time: "時間"
         case .blend: "合成"
         }
@@ -230,6 +265,14 @@ struct RGB: Codable, Equatable, Hashable {
     static let black = RGB(r: 0, g: 0, b: 0)
 }
 
+/// マスクの点（絵の左上が 0,0、右下が 1,1）
+struct MaskPoint: Codable, Equatable, Hashable {
+    var x: Double, y: Double
+    /// 最初の形：真ん中の四角
+    static let defaultShape = [MaskPoint(x: 0.25, y: 0.25), MaskPoint(x: 0.75, y: 0.25),
+                               MaskPoint(x: 0.75, y: 0.75), MaskPoint(x: 0.25, y: 0.75)]
+}
+
 /// パレットのひな形
 struct PalettePreset: Identifiable {
     let name: String
@@ -261,6 +304,9 @@ struct Effect: Codable, Identifiable, Equatable {
     var color = RGB.hsb(200.0 / 360, 0.7, 1)
     /// パレット（カラーライズのパレットモード。暗い所 → 明るい所の順）
     var palette: [RGB] = PalettePreset.all[1].colors
+    /// 自由な形のマスクの点（絵の左上が 0,0、右下が 1,1）
+    var points: [MaskPoint] = MaskPoint.defaultShape
+    static let maxPoints = 32
     static let maxPalette = 8
     /// 値のアニメーション（キーは値の番号）
     var anims: [String: ParamAnim] = [:]
@@ -310,7 +356,7 @@ struct Effect: Codable, Identifiable, Equatable {
         return value(5, at: t, beat: beat, origin: origin) * (1 - decay * f / duty)
     }
 
-    enum CodingKeys: String, CodingKey { case id, kind, enabled, values, color, palette, anims }
+    enum CodingKeys: String, CodingKey { case id, kind, enabled, values, color, palette, anims, points }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -327,6 +373,7 @@ struct Effect: Codable, Identifiable, Equatable {
         }
         palette = try c.decodeIfPresent([RGB].self, forKey: .palette) ?? PalettePreset.all[1].colors
         anims = try c.decodeIfPresent([String: ParamAnim].self, forKey: .anims) ?? [:]
+        points = try c.decodeIfPresent([MaskPoint].self, forKey: .points) ?? MaskPoint.defaultShape
         // 値が足りない（あとから値が増えた）ときは初期値で埋める
         while values.count < kind.params.count { values.append(kind.params[values.count].defaultValue) }
     }

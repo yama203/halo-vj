@@ -218,6 +218,17 @@ struct ParameterPanel: View {
                 ZStack(alignment: .topLeading) {
                     MetalPreview(kind: previewKind)
                         .id(engine.inspectorTab)
+                    // 自由な形のマスクの点の編集
+                    switch engine.inspectorTab {
+                    case .composition: PolyMaskOverlay(holder: engine)
+                    case .layer: PolyMaskOverlay(holder: layer)
+                    case .clip:
+                        if let clip {
+                            PolyMaskOverlay(holder: clip, transform: ClipTransform(
+                                x: Float(clip.posX), y: Float(clip.posY), scale: Float(clip.scale),
+                                rotation: Float(clip.rotation * .pi / 180)))
+                        }
+                    }
                     Text(previewCaption(clip: clip, clipIndex: clipIndex))
                         .font(.system(size: 10, weight: .semibold))
                         .padding(.horizontal, 6).padding(.vertical, 2)

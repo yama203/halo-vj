@@ -104,7 +104,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         // 画面確認用：VJ_SELECT_CLIP=番号 で起動時にそのクリップを選んでおく
         if let v = ProcessInfo.processInfo.environment["VJ_SELECT_CLIP"], let i = Int(v) {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { Engine.shared.selectClip(i) }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                Engine.shared.selectClip(i)
+                // VJ_EDIT_POLY=1 なら、そのクリップの「自由な形のマスク」を開いて点の編集を始める
+                if ProcessInfo.processInfo.environment["VJ_EDIT_POLY"] != nil,
+                   let e = Engine.shared.slots[i]?.effects.first(where: { $0.kind == .polyMask }) {
+                    EffectUIState.shared.expanded.insert(e.id)
+                    EffectUIState.shared.editingPoly = e.id
+                }
+            }
         }
 
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in

@@ -79,6 +79,14 @@ fragment float4 flayer(VOut in [[stage_in]],
     float2 e = min(uv, 1.0 - uv) / max(fwidth(uv), float2(1e-6));
     float cover = saturate(min(e.x, e.y) + 0.5);
     float4 c = tex.sample(s, saturate(uv));
+    if (u.blend == 5 || u.blend == 6) {
+        // マスク：明るさ（クリップの外は 0）で下の絵を残す。不透明度でかかり具合
+        float3 rgb = u.premul == 1 ? c.rgb : c.rgb * c.a;
+        float l = saturate(dot(rgb, float3(0.2126, 0.7152, 0.0722))) * cover;
+        if (u.blend == 6) l = 1.0 - l;
+        float m = mix(1.0, l, saturate(u.opacity));
+        return float4(m, m, m, 1.0);
+    }
     if (u.premul == 1) {
         float cov = saturate(u.opacity * cover);
         float k = c.a * cov;
@@ -99,7 +107,12 @@ struct EffectUniforms {
     float4 color;      // カラーライズの色
     float4 pal[8];     // カラーライズのパレット（暗い → 明るい）
     int palCount;
+    int ptCount;       // 自由な形のマスク：点の数と、点（ピクセル。1 つの float4 に 2 点）
+    float4 pts[16];
 };
+
+// マスク：m（1 = 見える、0 = 隠す）を、ふちのぼかしの幅 f（px）で、形からの距離 sd（中がマイナス）から決める
+static float maskFrom(float sd, float f) { return saturate(0.5 - sd / max(f, 1.0)); }
 
 constant float bayer4[16] = { 0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5 };
 
@@ -133,6 +146,45 @@ fragment float4 feffect(VOut in [[stage_in]],
                         sampler s [[sampler(0)]]) {
     float2 px = in.pos.xy;
     float2 uv = px / u.size;
+    if (u.kind == 6) {
+        // マスク（形）：a = 形, 反転, 位置X, 位置Y / b = 幅, 高さ, 角度, ぼかし（高さに対する割合）
+        float4 c = tex.sample(s, uv);
+        float2 p = px - float2(0.5 + u.a.z, 0.5 - u.a.w) * u.size;
+        float an = -u.b.z * 3.14159265 / 180.0;
+        p = float2(p.x * cos(an) - p.y * sin(an), p.x * sin(an) + p.y * cos(an));
+        float2 half_ = max(float2(u.b.x, u.b.y) * u.size * 0.5, float2(0.5));
+        float sd;
+        if (u.a.x > 0.5) {
+            sd = (length(p / half_) - 1.0) * min(half_.x, half_.y);
+        } else {
+            float2 q = abs(p) - half_;
+            sd = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0);
+        }
+        float m = maskFrom(sd, u.b.w * u.size.y);
+        if (u.a.y > 0.5) m = 1.0 - m;
+        return c * m;
+    }
+    if (u.kind == 7) {
+        // マスク（自由な形）：a = ぼかし（高さに対する割合）, 反転
+        float4 c = tex.sample(s, uv);
+        int n = min(u.ptCount, 32);
+        if (n < 3) return u.a.y > 0.5 ? float4(0.0) : c;
+        bool inside = false;
+        float d2 = 1e20;
+        for (int i = 0, j = n - 1; i < n; j = i++) {
+            float2 a = (i & 1) ? u.pts[i >> 1].zw : u.pts[i >> 1].xy;
+            float2 b = (j & 1) ? u.pts[j >> 1].zw : u.pts[j >> 1].xy;
+            if (((a.y > px.y) != (b.y > px.y)) && (px.x < (b.x - a.x) * (px.y - a.y) / (b.y - a.y) + a.x)) inside = !inside;
+            float2 e = b - a, w = px - a;
+            float t = saturate(dot(w, e) / max(dot(e, e), 1e-6));
+            float2 d = w - e * t;
+            d2 = min(d2, dot(d, d));
+        }
+        float sd = inside ? -sqrt(d2) : sqrt(d2);
+        float m = maskFrom(sd, u.a.x * u.size.y);
+        if (u.a.y > 0.5) m = 1.0 - m;
+        return c * m;
+    }
     if (u.kind == 4) {
         // ストロボ：a.x = 光り方（0 色で光る / 1 消える / 2 反転）、a.y = 光り具合
         float4 c = tex.sample(s, uv);
@@ -396,6 +448,10 @@ struct EffectUniforms {
     var pal: (SIMD4<Float>, SIMD4<Float>, SIMD4<Float>, SIMD4<Float>,
               SIMD4<Float>, SIMD4<Float>, SIMD4<Float>, SIMD4<Float>) = (.zero, .zero, .zero, .zero, .zero, .zero, .zero, .zero)
     var palCount: Int32 = 0
+    var ptCount: Int32 = 0
+    var pts: (SIMD4<Float>, SIMD4<Float>, SIMD4<Float>, SIMD4<Float>, SIMD4<Float>, SIMD4<Float>, SIMD4<Float>, SIMD4<Float>,
+              SIMD4<Float>, SIMD4<Float>, SIMD4<Float>, SIMD4<Float>, SIMD4<Float>, SIMD4<Float>, SIMD4<Float>, SIMD4<Float>)
+        = (.zero, .zero, .zero, .zero, .zero, .zero, .zero, .zero, .zero, .zero, .zero, .zero, .zero, .zero, .zero, .zero)
 }
 
 struct EchoUniforms {
@@ -512,6 +568,9 @@ final class MetalContext {
             case .screen:   // 下 + 上 × (1 - 下)
                 ca.sourceRGBBlendFactor = .oneMinusDestinationColor
                 ca.destinationRGBBlendFactor = .one
+            case .maskLuma, .maskInvert: // 下 × マスク
+                ca.sourceRGBBlendFactor = .zero
+                ca.destinationRGBBlendFactor = .sourceColor
             case .multiply: // 下 × 上
                 ca.sourceRGBBlendFactor = .zero
                 ca.destinationRGBBlendFactor = .sourceColor
@@ -673,6 +732,19 @@ final class EffectProcessor {
             func at(_ i: Int) -> SIMD4<Float> { i < p.count ? p[i] : p[p.count - 1] }
             u.pal = (at(0), at(1), at(2), at(3), at(4), at(5), at(6), at(7))
             u.palCount = Int32(p.count)
+            if e.kind == .polyMask {
+                // 点はピクセルで渡す（1 つの float4 に 2 点）
+                let sz = SIMD2(Float(input.width), Float(input.height))
+                let pts = e.points.prefix(Effect.maxPoints).map { SIMD2(Float($0.x), Float($0.y)) * sz }
+                var packed = [SIMD4<Float>](repeating: .zero, count: 16)
+                for (i, q) in pts.enumerated() {
+                    if i % 2 == 0 { packed[i / 2].x = q.x; packed[i / 2].y = q.y } else { packed[i / 2].z = q.x; packed[i / 2].w = q.y }
+                }
+                withUnsafeMutableBytes(of: &u.pts) { raw in
+                    packed.withUnsafeBytes { raw.copyMemory(from: $0) }
+                }
+                u.ptCount = Int32(pts.count)
+            }
             enc.setRenderPipelineState(ctx.effectPipeline)
             enc.setFragmentBytes(&u, length: MemoryLayout<EffectUniforms>.stride, index: 0)
             enc.setFragmentTexture(src, index: 0)

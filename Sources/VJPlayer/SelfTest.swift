@@ -317,6 +317,9 @@ enum SelfTest {
             case .add: exp = simd_min(d + s * op, one)
             case .screen: exp = d + s * op * (one - d)
             case .multiply: exp = d * ((1 - op) + s * op)
+            case .maskLuma, .maskInvert:
+                let l = min(max(simd_dot(s, SIMD3(0.2126, 0.7152, 0.0722)), 0), 1)
+                exp = d * (1 - op + op * (mode == .maskLuma ? l : 1 - l))
             case .overdrive: continue
             }
             let err = simd_reduce_max(simd_abs(got - exp))
@@ -694,6 +697,38 @@ enum SelfTest {
         _ = run([group(clip(tex { _, _ in red }, [echo]))], compositor: ec4, now: 400)
         let e6 = run([group(clip(black, [echo]))], compositor: ec4, now: 400.1)(3, 3)
         check(abs(e6.x - 0.631) < 0.02, "エコー：クリップにかけても効く")
+        // マスク（形）：真ん中の四角だけ残る。外は透明（黒地の上で黒）
+        let redT = tex { _, _ in red }
+        func shape(_ v: [Double]) -> Effect { fx(.shapeMask, v) }
+        r = run([group(clip(redT, [shape([0, 0, 0, 0, 0.6, 0.6, 0, 0.02])]))])
+        check(near(r(3, 3), red) && near(r(0, 0), .zero), "マスク（形・四角）：中だけ残って外は消える")
+        r = run([group(clip(redT, [shape([0, 1, 0, 0, 0.6, 0.6, 0, 0.02])]))])
+        check(near(r(3, 3), .zero) && near(r(0, 0), red), "マスク（形）：反転すると中が消える")
+        let rr = run([group(clip(redT, [shape([0, 0, 0, 0, 0.8, 0.8, 0, 0.02])]))])(1, 1)
+        let re = run([group(clip(redT, [shape([1, 0, 0, 0, 0.8, 0.8, 0, 0.02])]))])(1, 1)
+        check(rr.x > 0.9 && re.x < 0.3, String(format: "マスク（形・丸）：四角では見える角が、丸では消える（%.2f → %.2f）", rr.x, re.x))
+        r = run([group(clip(redT, [shape([0, 0, 0.25, 0, 0.3, 1, 0, 0])]))])
+        check(near(r(5, 3), red) && near(r(1, 3), .zero), "マスク（形）：位置 X で右へ動く")
+        r = run([group(clip(redT), [shape([0, 0, 0, 0, 0.5, 2, 0, 0])])])
+        check(near(r(3, 3), red) && near(r(0, 3), .zero), "マスク（形）：レイヤーにかけても効く")
+        // マスク（自由な形）：左半分の四角
+        var poly = Effect(kind: .polyMask)
+        poly.points = [MaskPoint(x: 0, y: 0), MaskPoint(x: 0.5, y: 0), MaskPoint(x: 0.5, y: 1), MaskPoint(x: 0, y: 1)]
+        r = run([group(clip(redT, [poly]))])
+        check(near(r(1, 3), red) && near(r(6, 3), .zero), "マスク（自由な形）：点で囲んだ所だけ残る")
+        var polyInv = poly; polyInv.values[1] = 1
+        r = run([group(clip(redT, [polyInv]))])
+        check(near(r(1, 3), .zero) && near(r(6, 3), red), "マスク（自由な形）：反転すると囲んだ所が消える")
+        var tri = Effect(kind: .polyMask)
+        tri.points = [MaskPoint(x: 0, y: 0), MaskPoint(x: 1, y: 0), MaskPoint(x: 0, y: 1)]
+        r = run([group(clip(redT, [tri]))])
+        check(near(r(1, 1), red) && near(r(6, 6), .zero), "マスク（自由な形）：三角形")
+        let saved = try? JSONDecoder().decode(Effect.self, from: JSONEncoder().encode(tri))
+        check(saved?.points == tri.points, "マスク（自由な形）：点を保存して読み込める")
+        let sqPts = [CGPoint(x: 0, y: 0), CGPoint(x: 10, y: 0), CGPoint(x: 10, y: 10), CGPoint(x: 0, y: 10)]
+        check(PolyMaskOverlay<Engine>.contains(sqPts, CGPoint(x: 5, y: 5)) && !PolyMaskOverlay<Engine>.contains(sqPts, CGPoint(x: 15, y: 5))
+              && PolyMaskOverlay<Engine>.nearestEdge(sqPts, CGPoint(x: 11, y: 5)) == 1,
+              "マスクの編集：中かどうか・クリックした所に近い辺（そこに点を足す）")
         // ストロボ：BPM 120・間隔 1/2 拍（0.25 秒）・光る長さ 50% → 0〜0.125 秒は光る、0.125〜0.25 秒は元の絵
         let stb = Effect(kind: .strobe)
         let clock = BeatClock()
