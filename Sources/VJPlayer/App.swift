@@ -118,6 +118,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let list = v.split(separator: ",").compactMap { Int($0) }
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { list.forEach { Engine.shared.trigger($0) } }
         }
+        // 画面確認用：VJ_MULTI_SELECT=番号,番号 で起動時にそのクリップを複数選択しておく
+        if let v = ProcessInfo.processInfo.environment["VJ_MULTI_SELECT"] {
+            let list = v.split(separator: ",").compactMap { Int($0) }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { list.forEach { Engine.shared.toggleMultiSelect($0) } }
+        }
         // 画面確認用：VJ_HOLD_PAD=番号（1 から）で起動時にそのパッドを押したままにしておく
         if let v = ProcessInfo.processInfo.environment["VJ_HOLD_PAD"], let n = Int(v) {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
@@ -188,6 +193,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if event.keyCode == 53 { // Esc
             if event.isARepeat { return true }
             if shift { Engine.shared.stopAll() } else { Engine.shared.toggleBlackout() }
+            return true
+        }
+        // Delete：⇧クリックで選んだクリップをまとめて削除
+        if (event.keyCode == 51 || event.keyCode == 117) && !Engine.shared.multiSelection.isEmpty {
+            if !event.isARepeat { SelectionMenu.delete(Engine.shared) }
             return true
         }
         // FX パッド：押している間だけ（押しっぱなしの繰り返しは無視）

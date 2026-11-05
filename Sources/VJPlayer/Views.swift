@@ -322,7 +322,7 @@ struct ClipGrid: View {
                 // ⌘ドラッグ中のクリップ名
                 if let s = drag.source, engine.slots.indices.contains(s), let slot = engine.slots[s],
                    let t = drag.target, t != s {
-                    Label(drag.copying ? "複製：" + slot.name : slot.name,
+                    Label(drag.group ? "\(engine.multiSelection.count) 個を移動" : drag.copying ? "複製：" + slot.name : slot.name,
                           systemImage: drag.copying ? "plus.square.on.square" : "film")
                         .font(.system(size: 11, weight: .semibold))
                         .lineLimit(1)
@@ -408,6 +408,8 @@ final class SlotDragState: ObservableObject {
     @Published var target: Int?
     /// ⌥ドラッグ（複製）中か。false なら ⌘ドラッグ（移動）
     @Published var copying = false
+    /// 複数選択したクリップをまとめて動かしている
+    @Published var group = false
     @Published var location: CGPoint = .zero
     var frames: [Int: CGRect] = [:]
 
@@ -621,6 +623,7 @@ struct SlotCell: View {
         let dropHere = drag.source != nil && drag.source != index && drag.target == index
         let moveTarget = dropHere && (!drag.copying || engine.canDuplicate(to: index))
         let badTarget = dropHere && drag.copying && !engine.canDuplicate(to: index)
+        let picked = engine.multiSelection.contains(index)
 
         ZStack {
             if let slot {
@@ -641,6 +644,20 @@ struct SlotCell: View {
                         : (active ? (editing ? Color.orange : Color.green) : Color.gray.opacity(0.3)),
                         lineWidth: active || dropTargeted || moveTarget || badTarget ? 3 : 1)
         )
+        .overlay {
+            // ⇧クリックで選んだクリップ
+            if picked {
+                ZStack(alignment: .topLeading) {
+                    RoundedRectangle(cornerRadius: 6).fill(Color.accentColor.opacity(0.28))
+                    RoundedRectangle(cornerRadius: 6).stroke(Color.accentColor, lineWidth: 3)
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 16))
+                        .foregroundStyle(.white, Color.accentColor)
+                        .padding(4)
+                }
+                .allowsHitTesting(false)
+            }
+        }
         .overlay(alignment: .topTrailing) {
             if liveHere {
                 Text("出力中")
@@ -665,17 +682,25 @@ struct SlotCell: View {
                         pressed = true
                         if slot != nil {
                             let mods = NSEvent.modifierFlags
-                            if mods.contains(.command) {
+                            if mods.contains(.shift) && !mods.contains(.command) && !mods.contains(.option) {
+                                engine.toggleMultiSelect(index)   // ⇧クリック：複数選択に足す・外す（再生しない）
+                            } else if mods.contains(.command) {
                                 drag.copying = false
+                                // 選んだクリップの 1 つなら、選んだもの全部をまとめて動かす
+                                drag.group = engine.multiSelection.count > 1 && engine.multiSelection.contains(index)
+                                if !drag.group { engine.clearMultiSelection() }
                                 drag.source = index
                             } else if mods.contains(.option) {
                                 // 選択して、そのままドラッグすれば複製
+                                engine.clearMultiSelection()
                                 engine.selectClip(index)
                                 drag.copying = true
                                 drag.source = index
                             } else if inNameStrip(v.startLocation) {
+                                engine.clearMultiSelection()
                                 engine.selectClip(index)   // 名前の帯（または ⌥クリック）は選択だけ。出力しない
                             } else {
+                                engine.clearMultiSelection()
                                 engine.pressSlot(index)
                             }
                         }
@@ -688,7 +713,9 @@ struct SlotCell: View {
                 .onEnded { _ in
                     if drag.source == index {
                         if let t = drag.target, t != index {
-                            if drag.copying {
+                            if drag.group {
+                                if !engine.moveSelection(anchor: index, to: t) { NSSound.beep() }
+                            } else if drag.copying {
                                 if engine.duplicateSlot(index, to: t) { engine.selectClip(t) }
                             } else {
                                 engine.moveSlot(index, to: t)
@@ -697,6 +724,7 @@ struct SlotCell: View {
                         drag.source = nil
                         drag.target = nil
                         drag.copying = false
+                        drag.group = false
                     } else if slot == nil {
                         engine.openPanel(for: index)
                     }
@@ -721,6 +749,23 @@ struct SlotCell: View {
             }
         }
         .contextMenu {
+            if picked {
+                let n = engine.multiSelection.count
+                Section("選んだ \(n) 個のクリップ") {
+                    Button("選んだ \(n) 個を削除…", role: .destructive) { SelectionMenu.delete(engine) }
+                    if engine.decks.count > 1 {
+                        Menu("別のデッキの同じ場所へ移動") {
+                            ForEach(Array(engine.decks.enumerated()), id: \.element.id) { d, deck in
+                                if d != engine.deckOf(index) {
+                                    Button(deck.name) { if !engine.moveSelection(toDeck: d) { SelectionMenu.cannotMove() } }
+                                }
+                            }
+                        }
+                    }
+                    Button("選択を解除") { engine.clearMultiSelection() }
+                }
+                Divider()
+            }
             if let slot {
                 Picker("終わったら", selection: Binding(get: { slot.endAction }, set: { slot.endAction = $0 })) {
                     ForEach(EndAction.allCases) { Text($0.label).tag($0) }
@@ -1055,5 +1100,25 @@ struct CornerPinOverlay: View {
             }
             .coordinateSpace(name: "pin")
         }
+    }
+}
+
+/// 複数選択の操作（確認のダイアログ付き）
+enum SelectionMenu {
+    static func delete(_ engine: Engine) {
+        let n = engine.multiSelection.count
+        guard n > 0 else { return }
+        let playing = engine.multiSelection.contains { engine.activeByLayer.contains($0) }
+        guard confirmRemove(title: "選んだ \(n) 個のクリップを削除しますか？",
+                            message: "グリッドから外れます" + (playing ? "（再生中のものは止まります）" : "") + "。") else { return }
+        engine.deleteSelection()
+    }
+
+    static func cannotMove() {
+        NSSound.beep()
+        let a = NSAlert()
+        a.messageText = "移動できません"
+        a.informativeText = "移動先の場所に、選んでいない別のクリップがあります。"
+        a.runModal()
     }
 }

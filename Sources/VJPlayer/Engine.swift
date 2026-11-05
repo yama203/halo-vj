@@ -69,8 +69,11 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
     @Published var currentDeck = 0 {
         didSet {
             if !decks.indices.contains(currentDeck) { currentDeck = max(min(currentDeck, decks.count - 1), 0) }
+            if oldValue != currentDeck && sceneDraft == nil { multiSelection = [] }
         }
     }
+    /// ⇧クリックで選んだ複数のクリップ（スロット番号）。まとめて削除・移動する
+    @Published var multiSelection: Set<Int> = []
 
     /// スロット。番号は「段 × 列数 + 列」
     @Published private(set) var slots: [ClipSlot?] = Array(repeating: nil, count: Engine.defaultLayers * Engine.defaultColumns)
@@ -516,6 +519,7 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
                              layerMap: (Int) -> Int?, columnMap: (Int) -> Int? = { $0 },
                              decks newDecks: [Deck]? = nil, deckMap: (Int) -> Int? = { $0 }) {
         for r in layers.indices { finishCrossfade(r) }
+        multiSelection = []
         let oldColumns = columns
         let oldGrid = max(gridSize, 1)
         let newDecks = newDecks ?? decks

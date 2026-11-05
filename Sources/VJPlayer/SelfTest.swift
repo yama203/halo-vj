@@ -270,6 +270,7 @@ enum SelfTest {
         testSceneEdit(check: check, wait: wait)
         testDecks(check: check, wait: wait)
         testPads(check: check)
+        testMultiSelect(check: check)
 
         // 16. ミュート（クリップ・レイヤー・コンポジション）
         testMute(paths: paths, check: check, wait: wait)
@@ -1040,6 +1041,65 @@ enum SelfTest {
     }
 
     /// シーン：今の状態を保存して、切り替える（すぐ／フェード）
+    /// グリッドの複数選択：⇧クリックで選んで、まとめて削除・移動
+    static func testMultiSelect(check: (Bool, String) -> Void) {
+        let e = Engine(persistent: false)
+        let c = e.columns
+        e.placeGenerator(.solid, at: 0)
+        e.placeGenerator(.noise, at: 1)
+        e.placeGenerator(.stripes, at: c)
+        e.placeGenerator(.grid, at: 3)
+        e.toggleMultiSelect(0); e.toggleMultiSelect(1); e.toggleMultiSelect(c); e.toggleMultiSelect(5)
+        check(e.multiSelection == [0, 1, c], "選択：⇧クリックで足せる（空きの枠は選ばれない）")
+        e.toggleMultiSelect(1)
+        check(e.multiSelection == [0, c], "選択：もう一度で外れる")
+        e.toggleMultiSelect(1)
+        e.trigger(0)
+        // 右へ 1 列ずらす → 3 列目は空いているので OK（4 列目のグリッドとはぶつからない）
+        check(e.moveSelection(anchor: 0, to: 1), "選択：まとめて動かせる")
+        check(e.slots[1]?.generator?.kind == .solid && e.slots[2]?.generator?.kind == .noise
+              && e.slots[c + 1]?.generator?.kind == .stripes && e.slots[0] == nil && e.slots[c] == nil
+              && e.activeByLayer[0] == 1 && e.multiSelection == [1, 2, c + 1],
+              "選択：並びはそのままずれて、再生中のクリップは続き、選択も付いてくる")
+        // もう 1 列右へは、4 列目（3）に選んでいないクリップがあるので動かない
+        check(!e.moveSelection(anchor: 1, to: 2) && e.slots[1]?.generator?.kind == .solid,
+              "選択：行き先に別のクリップがあれば動かさない")
+        let bottom = e.slotIndex(deck: 0, layer: e.layers.count - 1, column: 1)
+        check(!e.moveSelection(anchor: 1, to: bottom), "選択：グリッドからはみ出すなら動かさない")
+        // 別のデッキへ
+        let d2 = e.addDeck()
+        e.showDeck(0)
+        e.toggleMultiSelect(1); e.toggleMultiSelect(2); e.toggleMultiSelect(c + 1)
+        let okMove = e.moveSelection(toDeck: d2)
+        check(okMove && e.slots[e.slotIndex(deck: d2, layer: 0, column: 1)]?.generator?.kind == .solid
+              && e.slots[e.slotIndex(deck: d2, layer: 1, column: 1)]?.generator?.kind == .stripes
+              && e.slots[1] == nil && e.activeByLayer[0] == e.slotIndex(deck: d2, layer: 0, column: 1),
+              "選択：別のデッキの同じ場所へ動かせる（再生中なら続く）")
+        // 削除
+        e.multiSelection = []
+        for i in [e.slotIndex(deck: d2, layer: 0, column: 1), e.slotIndex(deck: d2, layer: 0, column: 2)] { e.toggleMultiSelect(i) }
+        e.deleteSelection()
+        check(e.slots[e.slotIndex(deck: d2, layer: 0, column: 1)] == nil && e.slots[e.slotIndex(deck: d2, layer: 0, column: 2)] == nil
+              && e.activeByLayer[0] == nil && e.multiSelection.isEmpty
+              && e.slots[e.slotIndex(deck: d2, layer: 1, column: 1)] != nil,
+              "選択：まとめて削除（再生中なら止まる。選んでいないものは残る）")
+        // デッキを切り替える・列を足すと選択は外れる
+        e.toggleMultiSelect(3)
+        e.showDeck(d2)
+        check(e.multiSelection.isEmpty, "選択：表示するデッキを変えると外れる")
+        e.showDeck(0)
+        e.toggleMultiSelect(3)
+        e.insertColumn(at: 0)
+        check(e.multiSelection.isEmpty, "選択：グリッドの形を変えると外れる")
+
+        // パッドの並び替え
+        let a = e.pads[0].id, b = e.pads[2].id
+        e.movePad(a, to: 2)
+        check(e.pads[2].id == a && e.pads[1].id == b, "パッド：並び替えられる")
+        e.movePad(a, to: 99)
+        check(e.pads.last?.id == a, "パッド：端より先は端へ")
+    }
+
     /// FX パッド：押している間だけ出力の最後にかかる。シーンとは無関係
     static func testPads(check: (Bool, String) -> Void) {
         let e = Engine(persistent: false)

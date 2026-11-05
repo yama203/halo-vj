@@ -105,6 +105,17 @@ extension Engine {
         scheduleSave()
     }
 
+    /// パッドを並び替える（id のパッドを index 番目へ）
+    func movePad(_ id: UUID, to index: Int) {
+        guard let i = pads.firstIndex(where: { $0.id == id }) else { return }
+        let j = min(max(index, 0), pads.count - 1)
+        guard i != j else { return }
+        let p = pads.remove(at: i)
+        pads.insert(p, at: j)
+        syncRenderState()
+        scheduleSave()
+    }
+
     func removePad(_ id: UUID) {
         guard pads.count > 1 else { return }
         heldPads.removeValue(forKey: id)
@@ -138,9 +149,25 @@ extension Engine {
 
 // MARK: - 画面
 
+/// パッドを ⌘ドラッグで並び替えるときの状態
+final class PadDragState: ObservableObject {
+    static let space = "fxPadBar"
+    @Published var source: UUID?
+    @Published var target: Int?
+    var frames: [UUID: CGRect] = [:]
+}
+
+private struct PadFramesKey: PreferenceKey {
+    static var defaultValue: [UUID: CGRect] = [:]
+    static func reduce(value: inout [UUID: CGRect], nextValue: () -> [UUID: CGRect]) {
+        value.merge(nextValue()) { $1 }
+    }
+}
+
 /// グリッドの下のパッドの列
 struct FXPadBar: View {
     @EnvironmentObject var engine: Engine
+    @StateObject private var drag = PadDragState()
 
     var body: some View {
         HStack(spacing: 8) {
@@ -153,7 +180,7 @@ struct FXPadBar: View {
                     .foregroundStyle(.secondary)
             }
             .frame(width: ClipGrid.headerWidth - 8, alignment: .leading)
-            .help("押している間だけ、出力のいちばん最後にエフェクトがかかる（シーン・コンポジションとは別）。右下の「エフェクト」からパッドへドラッグして登録。右クリックで設定・名前・空にする・削除")
+            .help("押している間だけ、出力のいちばん最後にエフェクトがかかる（シーン・コンポジションとは別）。右下の「エフェクト」からパッドへドラッグして登録。⌘ドラッグで並び替え。右クリックで設定・名前・キー・空にする・削除")
             ScrollView(.horizontal) {
                 HStack(spacing: 6) {
                     ForEach(engine.pads) { p in
@@ -170,14 +197,18 @@ struct FXPadBar: View {
                     }
                 }
                 .padding(.vertical, 2)
+                .coordinateSpace(name: PadDragState.space)
+                .onPreferenceChange(PadFramesKey.self) { drag.frames = $0 }
             }
             .scrollIndicators(.never)
+            .environmentObject(drag)
         }
     }
 }
 
 struct FXPadButton: View {
     @EnvironmentObject var engine: Engine
+    @EnvironmentObject var drag: PadDragState
     @ObservedObject var pad: FXPad
     let held: Bool
     @State private var pressing = false
@@ -219,17 +250,40 @@ struct FXPadButton: View {
         .overlay(RoundedRectangle(cornerRadius: 6)
             .stroke(dropTargeted ? Color.purple : Color.purple.opacity(held ? 1 : 0.4),
                     style: StrokeStyle(lineWidth: dropTargeted ? 3 : 1, dash: empty && !dropTargeted ? [4, 3] : [])))
+        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.accentColor, lineWidth: 3)
+            .opacity(moveTarget ? 1 : 0).allowsHitTesting(false))
+        .opacity(drag.source == pad.id ? 0.4 : 1)
+        .background(GeometryReader { g in
+            Color.clear.preference(key: PadFramesKey.self, value: [pad.id: g.frame(in: .named(PadDragState.space))])
+        })
         .contentShape(Rectangle())
-        // 押した瞬間に効き、離すと消える
-        .gesture(DragGesture(minimumDistance: 0)
-            .onChanged { _ in
-                guard !pressing else { return }
-                pressing = true
-                if empty { showSettings = true } else { engine.padDown(pad.id) }
+        // 押した瞬間に効き、離すと消える。⌘ドラッグは並び替え
+        .gesture(DragGesture(minimumDistance: 0, coordinateSpace: .named(PadDragState.space))
+            .onChanged { v in
+                if !pressing {
+                    pressing = true
+                    if NSEvent.modifierFlags.contains(.command) {
+                        drag.source = pad.id
+                    } else if empty {
+                        showSettings = true
+                    } else {
+                        engine.padDown(pad.id)
+                    }
+                }
+                if drag.source == pad.id {
+                    let id = drag.frames.first { $0.value.contains(v.location) }?.key
+                    drag.target = id.flatMap { id in engine.pads.firstIndex { $0.id == id } }
+                }
             }
             .onEnded { _ in
                 pressing = false
-                engine.padUp(pad.id)
+                if drag.source == pad.id {
+                    if let t = drag.target { engine.movePad(pad.id, to: t) }
+                    drag.source = nil
+                    drag.target = nil
+                } else {
+                    engine.padUp(pad.id)
+                }
             })
         .onDrop(of: EffectDrop.types, isTargeted: $dropTargeted) { providers in
             EffectDrop.handle(providers) { k in pad.addEffect(k) }
@@ -260,9 +314,23 @@ struct FXPadButton: View {
             Button("空にする") { pad.effects = [] }
                 .disabled(empty)
             Divider()
+            Button("左へ移動") { if let i = index { engine.movePad(pad.id, to: i - 1) } }
+                .disabled(index == 0)
+            Button("右へ移動") { if let i = index { engine.movePad(pad.id, to: i + 1) } }
+                .disabled(index == engine.pads.count - 1)
+            Divider()
             Button("このパッドを削除", role: .destructive) { engine.removePad(pad.id) }
                 .disabled(engine.pads.count <= 1)
         }
+    }
+}
+
+extension FXPadButton {
+    private var index: Int? { engine.pads.firstIndex { $0.id == pad.id } }
+    /// ⌘ドラッグで、ここへ動かそうとしている
+    private var moveTarget: Bool {
+        guard let s = drag.source, s != pad.id, let t = drag.target else { return false }
+        return engine.pads.indices.contains(t) && engine.pads[t].id == pad.id
     }
 }
 

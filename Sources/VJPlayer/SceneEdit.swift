@@ -87,6 +87,7 @@ extension Engine {
     /// デッキのタブを押した
     func showDeck(_ d: Int) {
         guard decks.indices.contains(d) else { return }
+        if shownDeck != d { multiSelection = [] }
         if let s = sceneDraft { s.shownDeck = d } else { currentDeck = d }
     }
 
