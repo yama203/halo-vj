@@ -25,46 +25,86 @@ struct SectionTitle: View {
 
 struct ContentView: View {
     @EnvironmentObject var engine: Engine
-    @State private var editCorners = false
+    @ObservedObject private var layout = LayoutManager.shared
+    /// 境目をドラッグし始めたときの値
+    @State private var dragStart: CGFloat?
 
     var body: some View {
         VStack(spacing: 0) {
-            TopBar(editCorners: $editCorners)
+            TopBar(editCorners: $layout.editCorners)
             Divider()
+            if layout.state.dockMode {
+                DockRootView()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
             GeometryReader { g in
-                // グリッドの高さは横幅から決める（サムネイルが縦長にならないように）。残りは下のパネルへ
-                // 段が多くて入りきらないときはグリッドをスクロール
-                let gridWidth = g.size.width - 24 - 12 - UI.sideWidth
+                let st = layout.state
+                // 境目の位置（ドラッグで変えられる。別ウィンドウにしたものは場所を取らない）
+                let showMonitor = !layout.isDetached(.monitor)
+                let monitorW = showMonitor ? min(max(CGFloat(st.monitorWidth), 220), max(g.size.width * 0.6, 220)) : 0
+                let gridWidth = g.size.width - 24 - (showMonitor ? 12 + monitorW : 0)
                 let cell = ClipGrid.cellSize(forWidth: gridWidth, columns: engine.columns)
                 let gridHeight = ClipGrid.contentHeight(cell: cell.height, layers: engine.layerCount)
-                let monitorHeight = (UI.sideWidth / max(engine.outputAspect, 0.1)) + 24
-                let padHeight: CGFloat = 58
-                let topHeight = min(max(gridHeight, monitorHeight) + 24, max(g.size.height - 370 - 1 - padHeight, 200))
-                let bottomHeight = g.size.height - topHeight - padHeight - 1
+                let monitorHeight = showMonitor ? (monitorW / max(engine.outputAspect, 0.1)) + 24 : 0
+                let padHeight: CGFloat = layout.isDetached(.pads) ? 0 : 58
+                let handle: CGFloat = 8
+                let maxTop = max(g.size.height - padHeight - handle - 160, 150)
+                // グリッドの高さ：おまかせなら中身に合わせる（下のパネルは 370 は残す）
+                let autoTop = min(max(gridHeight, monitorHeight) + 24, max(g.size.height - 370 - handle - padHeight, 200))
+                let topHeight = st.topHeight.map { min(max(CGFloat($0), 150), maxTop) } ?? autoTop
+                let bottomHeight = g.size.height - topHeight - padHeight - handle
+                let showSide = !layout.attachedTabs.isEmpty
+                let sideW = showSide ? min(max(CGFloat(st.sideWidth), 300), max(g.size.width * 0.6, 300)) : 0
                 VStack(spacing: 0) {
-                    HStack(alignment: .top, spacing: 12) {
+                    HStack(alignment: .top, spacing: 0) {
                         ClipGrid(size: CGSize(width: gridWidth, height: topHeight - 24))
                             .frame(width: gridWidth, height: topHeight - 24, alignment: .topLeading)
-                        OutputMonitor(editCorners: editCorners)
-                            .frame(width: UI.sideWidth)
+                        if showMonitor {
+                            SplitHandle(axis: .vertical, onDrag: { dx in
+                                let s = dragStart ?? monitorW
+                                dragStart = s
+                                layout.state.monitorWidth = Double(min(max(s - dx, 220), g.size.width * 0.6))
+                            }, onEnd: { dragStart = nil }, onDoubleClick: { layout.state.monitorWidth = Double(UI.sideWidth) })
+                            .frame(width: 12, height: topHeight - 24)
+                            OutputMonitor()
+                                .frame(width: monitorW)
+                        }
                     }
                     .padding(12)
                     .frame(height: topHeight, alignment: .top)
                     // 押している間だけ効くエフェクトのパッド
-                    FXPadBar()
-                        .padding(.horizontal, 12)
-                        .frame(height: padHeight, alignment: .top)
-                    Divider()
-                    HStack(alignment: .top, spacing: 12) {
+                    if padHeight > 0 {
+                        FXPadBar()
+                            .padding(.horizontal, 12)
+                            .frame(height: padHeight, alignment: .top)
+                    }
+                    // 上下の境目（ドラッグでグリッドの高さ。ダブルクリックでおまかせ）
+                    SplitHandle(axis: .horizontal, onDrag: { dy in
+                        let s = dragStart ?? topHeight
+                        dragStart = s
+                        layout.state.topHeight = Double(min(max(s + dy, 150), maxTop))
+                    }, onEnd: { dragStart = nil }, onDoubleClick: { layout.state.topHeight = nil })
+                    .frame(height: handle)
+                    .overlay(Divider())
+                    HStack(alignment: .top, spacing: 0) {
                         ParameterPanel(previewHeight: min(max(bottomHeight - 100, 176), 420))
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        SidePanel()
-                            .frame(width: UI.sideWidth)
-                            .frame(maxHeight: .infinity)
+                        if showSide {
+                            SplitHandle(axis: .vertical, onDrag: { dx in
+                                let s = dragStart ?? sideW
+                                dragStart = s
+                                layout.state.sideWidth = Double(min(max(s - dx, 300), g.size.width * 0.6))
+                            }, onEnd: { dragStart = nil }, onDoubleClick: { layout.state.sideWidth = Double(UI.sideWidth) })
+                            .frame(width: 12)
+                            SidePanel()
+                                .frame(width: sideW)
+                                .frame(maxHeight: .infinity)
+                        }
                     }
                     .padding(12)
-                    .frame(height: bottomHeight)
+                    .frame(height: max(bottomHeight, 0))
                 }
+            }
             }
             Divider()
             StatusBar()
@@ -82,7 +122,8 @@ struct ContentView: View {
 struct OutputMonitor: View {
     @EnvironmentObject var engine: Engine
     @ObservedObject var output = OutputController.shared
-    let editCorners: Bool
+    @ObservedObject private var layout = LayoutManager.shared
+    private var editCorners: Bool { layout.editCorners }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -98,6 +139,10 @@ struct OutputMonitor: View {
                 EffectIcons(effects: engine.effects, size: 11)
                 Spacer(minLength: 0)
                 AudioMuteButton(muted: $engine.masterAudioMuted)
+                // 自由レイアウトでは区画のタブの横にある
+                if !layout.isDetached(.monitor) && !layout.state.dockMode {
+                    DetachButton(panel: .monitor)
+                }
                 if editCorners {
                     Text("四隅の黄色い点をドラッグ")
                         .font(.system(size: 11, weight: .semibold))
@@ -994,20 +1039,25 @@ struct SlotContent: View {
 struct SidePanel: View {
     enum Tab: String { case live, scenes, effects, generators, sources }
     @AppStorage("sidePanelTab") private var tab = Tab.live
+    @ObservedObject private var layout = LayoutManager.shared
 
     var body: some View {
+        // 別ウィンドウにしたタブは、ここには出さない
+        let tabs = layout.attachedTabs
+        let shown = tabs.contains(tab) ? tab : (tabs.first ?? .live)
         VStack(alignment: .leading, spacing: 10) {
-            Picker("", selection: $tab) {
-                Text("ライブ").tag(Tab.live)
-                Text("シーン").tag(Tab.scenes)
-                Text("エフェクト").tag(Tab.effects)
-                Text("ジェネレーター").tag(Tab.generators)
-                Text("ソース").tag(Tab.sources)
+            HStack(spacing: 6) {
+                Picker("", selection: Binding(get: { shown }, set: { tab = $0 })) {
+                    ForEach(tabs, id: \.self) { t in
+                        Text(PanelID.tabs.first { $0.tab == t }?.title ?? "").tag(t)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .controlSize(.large)
+                if let p = PanelID.tabs.first(where: { $0.tab == shown }) { DetachButton(panel: p) }
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .controlSize(.large)
-            switch tab {
+            switch shown {
             case .live: LivePanel()
             case .scenes: ScenesPanel()
             case .effects: EffectBrowser()
@@ -1017,6 +1067,20 @@ struct SidePanel: View {
         }
         .padding(12)
         .background(RoundedRectangle(cornerRadius: 8).fill(UI.panelBackground))
+    }
+}
+
+/// パネルを別ウィンドウに出すボタン
+struct DetachButton: View {
+    let panel: PanelID
+    var body: some View {
+        Button {
+            LayoutManager.shared.detach(panel)
+        } label: {
+            Image(systemName: "macwindow.on.rectangle").font(.system(size: 11))
+        }
+        .controlSize(.small)
+        .help("「\(panel.title)」を別ウィンドウに出す（常に手前にもできる。閉じるとここに戻る）")
     }
 }
 

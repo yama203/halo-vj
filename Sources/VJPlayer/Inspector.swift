@@ -182,31 +182,67 @@ struct ValueDrag: NSViewRepresentable {
 struct ParameterPanel: View {
     @EnvironmentObject var engine: Engine
     var previewHeight: CGFloat = 176
+    /// 枠（余白と背景）を付けるか。自由レイアウトの区画の中では付けない
+    var framed = true
+    /// 出すもの（いつもは全部。自由レイアウトではプレビューだけ・設定だけにもできる）
+    var part = Part.all
     /// プレビューの幅（右端の縦の線をドラッグで変える。0 = おまかせ：エフェクトが横に並ぶ大きさ）
     @AppStorage("inspectorPreviewWidth") private var previewWidthSetting = 0.0
     /// ドラッグを始めたときの幅
     @State private var dragStartWidth: CGFloat?
 
     var body: some View {
-        // シーンの編集中は、そのシーンのレイヤー・コンポジション
-        let layer = engine.viewLayer(engine.selectedLayer)
-        let draft = engine.sceneDraft
-        let clipIndex = engine.inspectedIndex.flatMap { engine.slots[$0] != nil ? $0 : nil }
-        let clip = clipIndex.flatMap { engine.slots[$0] }
-
         VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 10) {
-                Picker("", selection: $engine.inspectorTab) {
-                    Text("コンポジション").tag(Engine.InspectorTab.composition)
-                    Text("レイヤー \(layer.name)").tag(Engine.InspectorTab.layer)
-                    Text(clip.map { "クリップ：\($0.name)" } ?? "クリップ").tag(Engine.InspectorTab.clip)
+            header
+            GeometryReader { geo in
+                switch part {
+                case .all:
+                    allParts(geo.size)
+                case .preview:
+                    // プレビューだけ：区画いっぱいに（縦横比はそのまま）
+                    let a = max(engine.outputAspect, 0.1)
+                    let w = min(geo.size.width, geo.size.height * a)
+                    preview
+                        .frame(width: w, height: w / a)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                case .settings:
+                    // 設定だけ：区画の幅いっぱいに（2 列が入れば横に並べる。1 列も入らなければ横にもスクロール）
+                    settings(twoCol: geo.size.width >= SideBySide<EmptyView, EmptyView>.twoColumnWidth,
+                             sideways: geo.size.width < UI.paramsWidth + 12)
+                        .frame(width: geo.size.width, alignment: .topLeading)
                 }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .controlSize(.large)
-                .frame(maxWidth: 560)
-                Spacer(minLength: 0)
-                // タブごとの操作
+            }
+        }
+        .padding(framed ? 12 : 0)
+        .frame(maxHeight: .infinity, alignment: .top)
+        .background(RoundedRectangle(cornerRadius: 8).fill(framed ? UI.panelBackground : Color.clear))
+    }
+
+    /// 自由レイアウトで、プレビューと設定を別々の区画に置くとき
+    enum Part { case all, preview, settings }
+
+    // シーンの編集中は、そのシーンのレイヤー・コンポジション
+    private var layer: Layer { engine.viewLayer(engine.selectedLayer) }
+    private var clipIndex: Int? { engine.inspectedIndex.flatMap { engine.slots[$0] != nil ? $0 : nil } }
+    private var clip: ClipSlot? { clipIndex.flatMap { engine.slots[$0] } }
+
+    /// 上の段：コンポジション・レイヤー・クリップの切り替えと、タブごとの操作
+    @ViewBuilder private var header: some View {
+        let layer = self.layer, clip = self.clip, draft = engine.sceneDraft
+        HStack(spacing: 10) {
+            Picker("", selection: $engine.inspectorTab) {
+                Text(part == .preview ? "コンポ" : "コンポジション").tag(Engine.InspectorTab.composition)
+                Text("レイヤー \(layer.name)").tag(Engine.InspectorTab.layer)
+                Text(clip.map { part == .preview ? "クリップ" : "クリップ：\($0.name)" } ?? "クリップ").tag(Engine.InspectorTab.clip)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .controlSize(part == .preview ? .regular : .large)
+            .frame(minWidth: 0, maxWidth: 560)
+            .layoutPriority(1)
+            Spacer(minLength: 0)
+            // タブごとの操作（プレビューだけの区画には出さない）
+            if part != .preview {
                 switch engine.inspectorTab {
                 case .composition:
                     if let draft {
@@ -223,50 +259,67 @@ struct ParameterPanel: View {
                     if let clip { ClipActions(slot: clip) }
                 }
             }
+        }
+    }
 
-            GeometryReader { geo in
-            let w = previewWidth(available: geo.size.width)
-            // プレビューの残りにパラメーター 2 列（左：設定、右：エフェクト）が入れば横に並べる。入らなければエフェクトは下に
-            let twoCol = geo.size.width - w - Self.handleWidth >= SideBySide<EmptyView, EmptyView>.twoColumnWidth
-            HStack(alignment: .top, spacing: 0) {
-                ZStack(alignment: .topLeading) {
-                    MetalPreview(kind: previewKind)
-                        .id(engine.inspectorTab)
-                    // 自由な形のマスクの点の編集
-                    switch engine.inspectorTab {
-                    case .composition:
-                        if let draft { PolyMaskOverlay(holder: draft) } else { PolyMaskOverlay(holder: engine) }
-                    case .layer: PolyMaskOverlay(holder: layer)
-                    case .clip:
-                        if let clip {
-                            PolyMaskOverlay(holder: clip, transform: ClipTransform(
-                                x: Float(clip.posX), y: Float(clip.posY), scale: Float(clip.scale),
-                                rotation: Float(clip.rotation * .pi / 180)))
-                        }
-                    }
-                    Text(previewCaption(clip: clip, clipIndex: clipIndex))
-                        .font(.system(size: 10, weight: .semibold))
-                        .padding(.horizontal, 6).padding(.vertical, 2)
-                        .background(Color.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 4))
-                        .padding(5)
-                }
+    /// プレビューと設定を横に並べる（いつもの形）
+    @ViewBuilder private func allParts(_ size: CGSize) -> some View {
+        let w = previewWidth(available: size.width)
+        // プレビューの残りにパラメーター 2 列（左：設定、右：エフェクト）が入れば横に並べる。入らなければエフェクトは下に
+        let twoCol = size.width - w - Self.handleWidth >= SideBySide<EmptyView, EmptyView>.twoColumnWidth
+        HStack(alignment: .top, spacing: 0) {
+            preview
                 .frame(width: w, height: w / max(engine.outputAspect, 0.1))
-                .overlay(Rectangle().stroke(Color.gray.opacity(0.35)))
 
-                // プレビューの大きさを変えるつまみ（ドラッグ。ダブルクリックでおまかせに戻す）
-                PreviewResizeHandle(height: w / max(engine.outputAspect, 0.1), isCustom: previewWidthSetting > 0)
-                    .gesture(DragGesture(minimumDistance: 1)
-                        .onChanged { v in
-                            let start = dragStartWidth ?? w
-                            dragStartWidth = start
-                            previewWidthSetting = Double(min(max(start + v.translation.width, Self.minPreviewWidth),
-                                                             maxPreviewWidth(available: geo.size.width)))
-                        }
-                        .onEnded { _ in dragStartWidth = nil })
-                    .onTapGesture(count: 2) { previewWidthSetting = 0 }
+            // プレビューの大きさを変えるつまみ（ドラッグ。ダブルクリックでおまかせに戻す）
+            PreviewResizeHandle(height: w / max(engine.outputAspect, 0.1), isCustom: previewWidthSetting > 0)
+                .gesture(DragGesture(minimumDistance: 1)
+                    .onChanged { v in
+                        let start = dragStartWidth ?? w
+                        dragStartWidth = start
+                        previewWidthSetting = Double(min(max(start + v.translation.width, Self.minPreviewWidth),
+                                                         maxPreviewWidth(available: size.width)))
+                    }
+                    .onEnded { _ in dragStartWidth = nil })
+                .onTapGesture(count: 2) { previewWidthSetting = 0 }
 
-                ScrollView(.vertical) {
-                VStack(alignment: .leading, spacing: 0) {
+            settings(twoCol: twoCol)
+                .frame(width: twoCol ? SideBySide<EmptyView, EmptyView>.twoColumnWidth : UI.paramsWidth, alignment: .topLeading)
+            Spacer(minLength: 0)
+        }
+    }
+
+    /// プレビュー（自由な形のマスクの点の編集と、説明付き）
+    @ViewBuilder private var preview: some View {
+        let layer = self.layer, clip = self.clip, draft = engine.sceneDraft
+        ZStack(alignment: .topLeading) {
+            MetalPreview(kind: previewKind)
+                .id(engine.inspectorTab)
+            switch engine.inspectorTab {
+            case .composition:
+                if let draft { PolyMaskOverlay(holder: draft) } else { PolyMaskOverlay(holder: engine) }
+            case .layer: PolyMaskOverlay(holder: layer)
+            case .clip:
+                if let clip {
+                    PolyMaskOverlay(holder: clip, transform: ClipTransform(
+                        x: Float(clip.posX), y: Float(clip.posY), scale: Float(clip.scale),
+                        rotation: Float(clip.rotation * .pi / 180)))
+                }
+            }
+            Text(previewCaption(clip: clip, clipIndex: clipIndex))
+                .font(.system(size: 10, weight: .semibold))
+                .padding(.horizontal, 6).padding(.vertical, 2)
+                .background(Color.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 4))
+                .padding(5)
+        }
+        .overlay(Rectangle().stroke(Color.gray.opacity(0.35)))
+    }
+
+    /// 設定（タブごとの数値とエフェクト。縦にスクロール）
+    @ViewBuilder private func settings(twoCol: Bool, sideways: Bool = false) -> some View {
+        let layer = self.layer, clip = self.clip, clipIndex = self.clipIndex, draft = engine.sceneDraft
+        ScrollView(sideways ? [.vertical, .horizontal] : .vertical) {
+            VStack(alignment: .leading, spacing: 0) {
                 switch engine.inspectorTab {
                 case .composition:
                     if let draft {
@@ -287,19 +340,11 @@ struct ParameterPanel: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
-                }
-                .frame(alignment: .topLeading)
-                }
-                .scrollIndicators(.automatic)
-                .frame(width: twoCol ? SideBySide<EmptyView, EmptyView>.twoColumnWidth : UI.paramsWidth, alignment: .topLeading)
-                .environment(\.paramsTwoColumn, twoCol)
-                Spacer(minLength: 0)
             }
-            }
+            .frame(alignment: .topLeading)
         }
-        .padding(12)
-        .frame(maxHeight: .infinity, alignment: .top)
-        .background(RoundedRectangle(cornerRadius: 8).fill(UI.panelBackground))
+        .scrollIndicators(.automatic)
+        .environment(\.paramsTwoColumn, twoCol)
     }
 
     static let handleWidth: CGFloat = 16

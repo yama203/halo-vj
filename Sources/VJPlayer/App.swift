@@ -88,6 +88,9 @@ struct VJPlayerApp: App {
                 Button("別名で保存…") { ProjectMenu.saveAs() }
                     .keyboardShortcut("s", modifiers: [.command, .shift])
             }
+            CommandMenu("レイアウト") {
+                LayoutMenu(layout: LayoutManager.shared)
+            }
             CommandMenu("出力") {
                 Button("出力を閉じる／元に戻す") { OutputController.shared.toggle() }
                     .keyboardShortcut("f", modifiers: [.command, .shift])
@@ -123,6 +126,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let list = v.split(separator: ",").compactMap { Int($0) }
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { list.forEach { Engine.shared.toggleMultiSelect($0) } }
         }
+        // 画面確認用：VJ_DOCK_DRAG=パネル名（grid など）で、自由レイアウトのタブをドラッグ中の見た目にしておく
+        if let v = ProcessInfo.processInfo.environment["VJ_DOCK_DRAG"], let p = DockPanel(rawValue: v) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { DockDragState.shared.panel = p }
+        }
         // 画面確認用：VJ_HOLD_PAD=番号（1 から）で起動時にそのパッドを押したままにしておく
         if let v = ProcessInfo.processInfo.environment["VJ_HOLD_PAD"], let n = Int(v) {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
@@ -149,6 +156,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
         }
+
+        // 前回別ウィンドウにしていたパネルを開く（メインのウィンドウができてから）
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { LayoutManager.shared.syncWindows() }
 
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp]) { event in
             Self.handleKey(event) ? nil : event

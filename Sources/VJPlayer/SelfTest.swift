@@ -272,6 +272,89 @@ enum SelfTest {
         testPads(check: check)
         testMultiSelect(check: check)
         testMoveLayer(check: check)
+        do {
+            // レイアウト：保存して読み戻せる（古い保存データの無い項目は既定値）
+            var l = LayoutState()
+            l.topHeight = 640; l.monitorWidth = 360; l.detached = [.live, .pads]; l.floating = [.live]
+            l.frames["live"] = NSStringFromRect(NSRect(x: 10, y: 20, width: 300, height: 400))
+            let back = (try? JSONEncoder().encode(l)).flatMap { try? JSONDecoder().decode(LayoutState.self, from: $0) }
+            check(back == l, "レイアウト：境目・別ウィンドウ・常に手前・場所を保存して戻せる")
+            let auto = try? JSONDecoder().decode(LayoutState.self, from: Data("{}".utf8))
+            check(auto?.topHeight == nil && auto?.detached.isEmpty == true, "レイアウト：何も無ければおまかせ・全部メインのウィンドウ")
+        }
+        do {
+            // 自由レイアウト：区画の木の操作
+            let std = DockNode.standard
+            check(Set(std.panels) == Set(DockPanel.allCases) && std.panels.count == DockPanel.allCases.count,
+                  "自由レイアウト：最初の並べ方に全部のパネルが 1 回ずつある")
+            func tabsID(of p: DockPanel, in n: DockNode) -> UUID? {
+                switch n {
+                case .tabs(let id, let ps, _): return ps.contains(p) ? id : nil
+                case .split(_, _, _, let a, let b): return tabsID(of: p, in: a) ?? tabsID(of: p, in: b)
+                }
+            }
+            // モニターをパラメーターの左へ → 元の区画（モニターだけ）は閉じる
+            let paramsID = tabsID(of: .params, in: std)!
+            let m1 = std.moving(.monitor, to: paramsID, zone: .left)
+            check(m1.panels.count == DockPanel.allCases.count && tabsID(of: .monitor, in: m1) != tabsID(of: .params, in: m1),
+                  "自由レイアウト：端に置くと区画が分かれる（パネルは減りも増えもしない）")
+            if case .split(_, _, _, let a, _)? = { () -> DockNode? in
+                func parent(_ n: DockNode) -> DockNode? {
+                    if case .split(_, _, _, let x, let y) = n {
+                        if case .tabs(_, let ps, _) = y, ps == [.params] { if case .tabs(_, let qs, _) = x, qs == [.monitor] { return n } }
+                        return parent(x) ?? parent(y)
+                    }
+                    return nil
+                }
+                return parent(m1)
+            }() {
+                check(a.panels == [.monitor], "自由レイアウト：左に置くと左側に来る")
+            } else {
+                check(false, "自由レイアウト：左に置くと左側に来る")
+            }
+            // シーンをグリッドの区画の真ん中へ → タブになる
+            let gridID = tabsID(of: .grid, in: m1)!
+            let m2 = m1.moving(.scenes, to: gridID, zone: .center)
+            check(m2.find(gridID).map { $0.panels == [.grid, .scenes] } == true, "自由レイアウト：真ん中に置くとタブになる")
+            // 自分だけの区画の真ん中に落としても何も変わらない
+            let padsID = tabsID(of: .pads, in: m2)!
+            check(m2.moving(.pads, to: padsID, zone: .center) == m2, "自由レイアウト：自分の区画に戻しても変わらない")
+            // 別ウィンドウにしたものは表示から消え、空の区画は閉じる
+            let pr = m2.pruned([.pads, .monitor])
+            check(pr.map { !$0.panels.contains(.pads) && !$0.panels.contains(.monitor) && $0.panels.count == DockPanel.allCases.count - 2 } == true,
+                  "自由レイアウト：別ウィンドウのパネルは除いて表示する")
+            // 保存して戻す・壊れたもの（重なり・抜け）は直す
+            let back = (try? JSONEncoder().encode(m2)).flatMap { try? JSONDecoder().decode(DockNode.self, from: $0) }
+            check(back == m2, "自由レイアウト：保存して戻せる")
+            let broken = DockNode.split(id: UUID(), axis: .horizontal, ratio: 0.5,
+                                        first: .tabs(id: UUID(), panels: [.grid, .grid], selected: 1),
+                                        second: .tabs(id: UUID(), panels: [.grid], selected: 0)).normalized()
+            check(Set(broken.panels) == Set(DockPanel.allCases) && broken.panels.count == DockPanel.allCases.count,
+                  "自由レイアウト：重なり・抜けのある並べ方は直してから使う")
+            // 画面の端：グリッドを左端いっぱい、FX パッドを下いっぱい
+            let e1 = m2.movingToEdge(.grid, .left).movingToEdge(.pads, .bottom)
+            if case .split(_, .vertical, _, let rest, .tabs(_, let bottom, _)) = e1,
+               case .split(_, .horizontal, _, .tabs(_, let left, _), _) = rest {
+                check(bottom == [.pads] && left == [.grid] && e1.panels.count == DockPanel.allCases.count,
+                      "自由レイアウト：画面の端に置くと、その辺いっぱいになる")
+            } else {
+                check(false, "自由レイアウト：画面の端に置くと、その辺いっぱいになる")
+            }
+            // 境目に差し込む：左右に分かれた所（グリッド｜右側）の間に、プレビューを縦いっぱいで差し込む
+            let base = DockNode.split(id: UUID(), axis: .horizontal, ratio: 0.6,
+                                      first: .tabs(id: UUID(), panels: [.grid], selected: 0),
+                                      second: .split(id: UUID(), axis: .vertical, ratio: 0.5,
+                                                     first: .tabs(id: UUID(), panels: [.monitor], selected: 0),
+                                                     second: .tabs(id: UUID(), panels: [.preview, .live], selected: 0)))
+            guard case .split(let rootID, _, _, _, _) = base else { return }
+            let ins = base.movingToBorder(.preview, rootID)
+            if case .split(_, .horizontal, _, .tabs(_, let l, _), .split(_, .horizontal, _, .tabs(_, let mid, _), let right)) = ins {
+                check(l == [.grid] && mid == [.preview] && !right.panels.contains(.preview) && right.panels.contains(.live),
+                      "自由レイアウト：境目に落とすと、そこに縦いっぱいの列が増える")
+            } else {
+                check(false, "自由レイアウト：境目に落とすと、そこに縦いっぱいの列が増える")
+            }
+        }
         testStillImages(check: check, wait: wait)
         testSources(dir: URL(fileURLWithPath: paths[0]).deletingLastPathComponent(), check: check, wait: wait)
 

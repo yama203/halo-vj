@@ -180,6 +180,11 @@ struct FXPadBar: View {
                     .foregroundStyle(.secondary)
             }
             .frame(width: ClipGrid.leftWidth - 8, alignment: .leading)
+            .contextMenu {
+                Button(LayoutManager.shared.isDetached(.pads) ? "メインのウィンドウに戻す" : "別ウィンドウに出す") {
+                    LayoutManager.shared.toggleDetached(.pads)
+                }
+            }
             .help("押している間だけ、出力のいちばん最後にエフェクトがかかる（シーン・コンポジションとは別）。右下の「エフェクト」からパッドへドラッグして登録。⌘ドラッグで並び替え。右クリックで設定・名前・キー・空にする・削除")
             ScrollView(.horizontal) {
                 HStack(spacing: 6) {
