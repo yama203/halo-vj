@@ -151,6 +151,9 @@ final class ClipSlot: ObservableObject, Identifiable, Animatable, EffectHolder {
     private var _jumpGeneration = 0
     /// 映像がもう切り替わった予定の時刻（lock の中で触る）。映像が先に飛んだら、取り消されても音声は必ず追いかける
     private var _appliedJumpHost = -1.0
+    /// 音声がもう飛んだ（飛ぶ予約を済ませた）予定の時刻（lock の中で触る）。
+    /// 映像が飛ぶ前にその予定を取り消したら、音声を映像の位置に戻すのに使う
+    private var _audioJumpHost = -1.0
     /// 予定を出し直したら増やす（古い予定の音声処理を無効にする）
     private var jumpToken = 0
 
@@ -186,10 +189,12 @@ final class ClipSlot: ObservableObject, Identifiable, Animatable, EffectHolder {
             AudioClip.queue.asyncAfter(deadline: at) { [weak self] in
                 guard let self else { return }
                 // 取り消されていなければ鳴らす（映像の切り替えが先に済んでいても鳴らす）
-                let (valid, r) = self.lock.withLock {
+                let (valid, r) = self.lock.withLock { () -> (Bool, Double) in
                     // 止めた・スクラブした後は鳴らさない
-                    (self._playing && (self._jumpGeneration == generation || self._appliedJumpHost == host),
-                     self._pendingJump?.host == host ? self._pendingJump!.rate : self._clock.rate)
+                    let ok = self._playing && (self._jumpGeneration == generation || self._appliedJumpHost == host)
+                    // 「音声は飛んだ」と記録する（この後で取り消されたら cancelJump が音声を戻す）
+                    if ok { self._audioJumpHost = host }
+                    return (ok, self._pendingJump?.host == host ? self._pendingJump!.rate : self._clock.rate)
                 }
                 guard valid else { return }
                 // 音声キューが遅れて拍の頭を過ぎていたら、その分先の位置から鳴らして映像に合わせる
@@ -210,13 +215,17 @@ final class ClipSlot: ObservableObject, Identifiable, Animatable, EffectHolder {
 
     private func cancelJump() {
         jumpToken += 1
-        let old = lock.withLock { () -> FrameStream? in
+        let (old, audioJumped) = lock.withLock { () -> (FrameStream?, Bool) in
             let s = _pendingJump?.stream
+            // 音声はもう飛んだのに、映像はまだ飛んでいない（拍の頭の直前に取り消した）
+            let jumped = _pendingJump.map { $0.host == _audioJumpHost } ?? false
             _pendingJump = nil
             _jumpGeneration += 1
-            return s
+            return (s, jumped)
         }
         old?.cancel()
+        // 映像は今の位置のまま進むので、先に飛んでしまった音声を映像の位置に戻す
+        if audioJumped { resyncAudioToVideo() }
     }
 
     /// 時刻が来ていれば、予約していた位置に切り替える（描画スレッドとメインの両方から呼ばれる）
@@ -987,25 +996,31 @@ final class ClipSlot: ObservableObject, Identifiable, Animatable, EffectHolder {
     private func audioEngineRestarted() {
         let rate = effectiveSpeed
         if isPlaying {
-            // 映像の時計に合わせて、続きの位置から鳴らし直す
-            let host = CACurrentMediaTime() + Self.startMargin
-            let pos = clock.position(at: host)
-            let reverse = isReversing
-            audioDo { audio in
-                audio.connect()
-                audio.rate = rate
-                if reverse {
-                    if audio.scheduleReversed(from: pos) { audio.play(atHostSeconds: host) }
-                } else {
-                    audio.schedule(from: pos)
-                    audio.play(atHostSeconds: host)
-                }
-            }
+            audioDo { $0.connect() }
+            resyncAudioToVideo()
         } else {
             audioDo { audio in
                 audio.connect()
                 audio.rate = rate
                 audio.schedule(from: self.inPoint)
+            }
+        }
+    }
+
+    /// 映像の時計に合わせて、音声を続きの位置から鳴らし直す（再生中のとき）
+    private func resyncAudioToVideo() {
+        guard isPlaying else { return }
+        let rate = effectiveSpeed
+        let host = CACurrentMediaTime() + Self.startMargin
+        let pos = clock.position(at: host)
+        let reverse = isReversing
+        audioDo { audio in
+            audio.rate = rate
+            if reverse {
+                if audio.scheduleReversed(from: pos) { audio.play(atHostSeconds: host) }
+            } else {
+                audio.schedule(from: pos)
+                audio.play(atHostSeconds: host)
             }
         }
     }

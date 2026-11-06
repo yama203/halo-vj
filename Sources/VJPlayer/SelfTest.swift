@@ -2206,7 +2206,12 @@ enum SelfTest {
         check(jumps.count >= 3 && jumps.count <= 5 && maxOff < 25 && distinct >= 3,
               String(format: "ランダムジャンプ：2.3秒で %d 回、拍の頭からのずれ 最大 %.0f ms、飛び先 %d か所",
                      jumps.count, maxOff, distinct))
-        // 次のジャンプと測定が重ならないよう、ここで止めてから（今の位置のまま再生は続く）測る
+        // 止めてから（今の位置のまま再生は続く）測る。わざと「音声はもう次の拍の頭へ飛ぶ予約を済ませたが、
+        // 映像はまだ飛んでいない」瞬間（拍の頭の 20ms 前）に止める。ここで止めても音声は映像に合わせ直される
+        let bc = e.beatClock, spb = 60 / bc.bpm
+        var nextBeat = bc.anchorHost + (floor(bc.beat(at: CACurrentMediaTime())) + 1 - bc.anchorBeat) * spb
+        if nextBeat - CACurrentMediaTime() < 0.1 { nextBeat += spb }
+        while CACurrentMediaTime() < nextBeat - 0.02 { wait(0.001) }
         s.jumpBeats = 0
         wait(0.2)
         if s.hasAudio {
