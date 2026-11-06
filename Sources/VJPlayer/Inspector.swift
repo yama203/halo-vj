@@ -6,6 +6,8 @@ import SwiftUI
 /// - ダブルクリック / 右クリックで初期値に戻す
 final class ValueDragNSView: NSView {
     var label = ""
+    /// 文字の代わりに出す記号（SF Symbols の名前）。狭い所（レイヤー欄）用
+    var icon: String?
     var value: Double = 0 { didSet { if oldValue != value { needsDisplay = true } } }
     var range: ClosedRange<Double> = 0...1
     var perPoint = 0.005
@@ -110,11 +112,21 @@ final class ValueDragNSView: NSView {
             .foregroundColor: NSColor(white: 0.65, alpha: 1),
         ]
         let valueAttrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .semibold),
+            .font: NSFont.monospacedDigitSystemFont(ofSize: icon != nil && r.height < 24 ? 11 : 13, weight: .semibold),
             .foregroundColor: animating ? NSColor.white : changed ? NSColor.systemOrange : NSColor.white,
         ]
-        let ls = (label as NSString).size(withAttributes: labelAttrs)
-        (label as NSString).draw(at: NSPoint(x: r.minX + 8, y: r.midY - ls.height / 2), withAttributes: labelAttrs)
+        var ls = (label as NSString).size(withAttributes: labelAttrs)
+        let small = r.height < 24
+        if let icon, let img = NSImage(systemSymbolName: icon, accessibilityDescription: label)?
+            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: small ? 9 : 11, weight: .semibold)
+                .applying(NSImage.SymbolConfiguration(hierarchicalColor: NSColor(white: 0.7, alpha: 1)))) {
+            // 記号だけ（文字は出さない）
+            let s = img.size
+            img.draw(in: NSRect(x: r.minX + (small ? 6 : 8), y: r.midY - s.height / 2, width: s.width, height: s.height))
+            ls = NSSize(width: s.width, height: s.height)
+        } else {
+            (label as NSString).draw(at: NSPoint(x: r.minX + 8, y: r.midY - ls.height / 2), withAttributes: labelAttrs)
+        }
         if animating && !badge.isEmpty {
             let badgeAttrs: [NSAttributedString.Key: Any] = [
                 .font: NSFont.systemFont(ofSize: 10, weight: .semibold),
@@ -126,7 +138,8 @@ final class ValueDragNSView: NSView {
         }
         let text = format(shown)
         let vs = (text as NSString).size(withAttributes: valueAttrs)
-        (text as NSString).draw(at: NSPoint(x: r.maxX - 8 - vs.width, y: r.midY - vs.height / 2), withAttributes: valueAttrs)
+        (text as NSString).draw(at: NSPoint(x: r.maxX - (icon != nil && r.height < 24 ? 6 : 8) - vs.width,
+                                            y: r.midY - vs.height / 2), withAttributes: valueAttrs)
     }
 }
 
@@ -140,6 +153,7 @@ struct ValueDrag: NSViewRepresentable {
     var format: (Double) -> String
     var live: (() -> Double)? = nil
     var badge = ""
+    var icon: String? = nil
 
     func makeNSView(context: Context) -> ValueDragNSView {
         let v = ValueDragNSView()
@@ -155,6 +169,7 @@ struct ValueDrag: NSViewRepresentable {
 
     private func apply(_ v: ValueDragNSView) {
         v.label = label
+        v.icon = icon
         v.range = range
         v.perPoint = perPoint
         v.defaultValue = defaultValue
@@ -162,7 +177,8 @@ struct ValueDrag: NSViewRepresentable {
         v.format = format
         v.badge = badge
         v.live = live
-        v.toolTip = live != nil ? "アニメーション中（右のボタンで設定）" : "左右ドラッグで調整 / Shift で微調整 / ダブルクリック・右クリックで初期値"
+        v.toolTip = (icon != nil ? label + "\n" : "")
+            + (live != nil ? "アニメーション中（右のボタンで設定）" : "左右ドラッグで調整 / Shift で微調整 / ダブルクリック・右クリックで初期値")
         if v.value != value { v.value = value }
         v.needsDisplay = true
     }

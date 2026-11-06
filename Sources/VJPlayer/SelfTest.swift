@@ -604,6 +604,21 @@ enum SelfTest {
         e.stopLayer(1)
         check(e.activeByLayer[1] == nil && e.frame(layer: 1) == nil && !e.slots[c]!.isPlaying && e.slots[1]!.isPlaying,
               "レイヤー単位で停止できる")
+        // 列番号を押す：その列のクリップを全レイヤーいっぺんに。空き枠のレイヤーは止まる
+        do {
+            let sel = e.selectedLayer
+            let col0 = (0..<2).map { e.slots[e.slotIndex(deck: e.shownDeck, layer: $0, column: 0)] != nil }
+            e.pressColumn(0)
+            let ok0 = (0..<2).allSatisfy { r in
+                col0[r] ? e.activeByLayer[r] == e.slotIndex(deck: e.shownDeck, layer: r, column: 0) : e.activeByLayer[r] == nil
+            }
+            check(ok0 && e.columnIsLive(0) && e.selectedLayer == sel,
+                  "列番号を押すと、その列のクリップが全レイヤーいっぺんに出る（空き枠のレイヤーは止まる。選択は変えない）")
+            e.pressColumn(1)
+            check(!e.columnIsLive(0) || !col0.contains(true), "別の列を押すと、前の列は出ている列ではなくなる")
+            e.stopLayer(0); e.stopLayer(1)
+            e.trigger(1)
+        }
         // 再生中のクリップを別のレイヤーへ移動（L1 の 2 列目 → L2 の 3 列目）
         let moved = e.slots[1]
         e.moveSlot(1, to: c + 2)

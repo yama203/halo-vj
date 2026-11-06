@@ -108,6 +108,33 @@ extension Engine {
         if sceneDraft != nil { setScenePlaying(i) } else { trigger(i) }
     }
 
+    /// 列番号を押した：その列のクリップを全レイヤーいっぺんに出す（Resolume の列の再生）。
+    /// その列が空き枠のレイヤーは止める（空き枠を押したときと同じ）。シーンの編集中はシーンの中身を変える
+    func pressColumn(_ c: Int) {
+        guard c >= 0, c < columns else { return }
+        for r in layers.indices {
+            let i = slotIndex(deck: shownDeck, layer: r, column: c)
+            if slots.indices.contains(i), slots[i] != nil {
+                if sceneDraft != nil { setScenePlaying(i) } else { trigger(i, select: false) }
+            } else {
+                viewStop(r)
+            }
+        }
+    }
+
+    /// その列が今出ている（クリップのある所がみんな再生中）か
+    func columnIsLive(_ c: Int) -> Bool {
+        guard c >= 0, c < columns else { return false }
+        var any = false
+        for r in layers.indices {
+            let i = slotIndex(deck: shownDeck, layer: r, column: c)
+            guard slots.indices.contains(i), slots[i] != nil else { continue }
+            any = true
+            if viewPlaying(r) != i { return false }
+        }
+        return any
+    }
+
     /// レイヤーの停止ボタン：編集中はシーンのそのレイヤーを「なし」にする
     func viewStop(_ r: Int) {
         if let d = sceneDraft {

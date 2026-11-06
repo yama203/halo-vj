@@ -430,6 +430,39 @@ struct ClipGrid: View {
     }
 }
 
+/// 列番号。押すとその列のクリップを全レイヤーいっぺんに出す。出ている列は明るく
+struct ColumnButton: View {
+    @EnvironmentObject var engine: Engine
+    let column: Int
+    let cellWidth: CGFloat
+    @State private var hovering = false
+
+    var body: some View {
+        let live = engine.columnIsLive(column)
+        Button {
+            engine.pressColumn(column)
+        } label: {
+            HStack(spacing: 4) {
+                if hovering || live {
+                    Image(systemName: "play.fill").font(.system(size: 8, weight: .bold))
+                }
+                Text("\(column + 1)")
+                    .font(.system(size: 12, weight: .semibold).monospacedDigit())
+            }
+            .foregroundStyle(live ? Color.white : (hovering ? Color.primary : Color.secondary))
+            .frame(width: cellWidth, height: ClipGrid.columnBarHeight)
+            .background(RoundedRectangle(cornerRadius: 4)
+                .fill(live ? Color.green.opacity(0.45) : Color.white.opacity(hovering ? 0.12 : 0.05)))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .help(engine.sceneDraft != nil
+              ? "この列のクリップを、編集中のシーンでいっぺんに流す（空き枠のレイヤーは何も流さない）"
+              : "この列のクリップを全レイヤーいっぺんに出す（空き枠のレイヤーは止まる）。右クリックで列を足す・消す")
+    }
+}
+
 /// グリッド上の列番号の帯。右クリックで列を足す・消す。右端の＋で列を足す
 struct ColumnBar: View {
     @EnvironmentObject var engine: Engine
@@ -439,12 +472,7 @@ struct ColumnBar: View {
         HStack(spacing: ClipGrid.spacing) {
             Color.clear.frame(width: ClipGrid.leftWidth)
             ForEach(0..<engine.columns, id: \.self) { c in
-                Text("\(c + 1)")
-                    .font(.system(size: 12, weight: .semibold).monospacedDigit())
-                    .foregroundStyle(.secondary)
-                    .frame(width: cellWidth, height: ClipGrid.columnBarHeight)
-                    .background(RoundedRectangle(cornerRadius: 4).fill(Color.white.opacity(0.05)))
-                    .contentShape(Rectangle())
+                ColumnButton(column: c, cellWidth: cellWidth)
                     .contextMenu {
                         Button("左に列を追加") { engine.insertColumn(at: c) }
                             .disabled(engine.columns >= Engine.maxColumns)
@@ -578,9 +606,9 @@ struct LayerHeader: View {
                 .help(engine.sceneDraft != nil ? "このシーンではこのレイヤーに何も流さない" : "このレイヤーを停止")
             }
             // 不透明度：左右ドラッグ（クリックだけでは変わらない）、ダブルクリックで 100%
-            ValueDrag(label: "不透明度", value: $layer.opacity, range: 0...1, perPoint: 0.006,
+            ValueDrag(label: "レイヤーの不透明度", value: $layer.opacity, range: 0...1, perPoint: 0.006,
                       defaultValue: 1, showsBar: true, format: { String(format: "%.0f%%", $0 * 100) },
-                      live: layerOpacityLive)
+                      live: layerOpacityLive, icon: "circle.lefthalf.filled")
                 .frame(height: gridSize == .small ? 18 : (gridSize == .medium ? 22 : 28))
             Spacer(minLength: 0)
             // 小さい表示では、下の段（重ね方・名前）は省く
