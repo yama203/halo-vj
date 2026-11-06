@@ -274,6 +274,7 @@ enum SelfTest {
         testMultiSelect(check: check)
         testMoveLayer(check: check)
         testEffectClips(check: check)
+        testSolo(check: check)
         testCues(check: check, wait: wait)
         do {
             // レイアウト：保存して読み戻せる（古い保存データの無い項目は既定値）
@@ -1332,6 +1333,34 @@ enum SelfTest {
         for _ in 0..<40 where got == nil { wait(0.1) }
         check((got?.frames.count ?? 0) == SourceThumbs.frameCount && (got?.duration ?? 0) > 1,
               "ソース：なぞって見る用のコマと長さを作れる")
+    }
+
+    /// ソロ：ソロのレイヤーだけを出す（映像と音）。確認用で保存しない
+    static func testSolo(check: (Bool, String) -> Void) {
+        let e = Engine(persistent: false)
+        let c = e.columns
+        e.placeGenerator(.solid, at: 0)
+        e.placeGenerator(.noise, at: c)
+        e.placeGenerator(.stripes, at: 2 * c)
+        e.trigger(0); e.trigger(c); e.trigger(2 * c)
+        func shown() -> Set<Int> { _ = e.updateFrame(); return Set(e.layerGroups().map(\.key)) }
+        check(shown() == [0, 1, 2], "ソロ：はじめは全部出る")
+        e.layers[1].solo = true
+        check(shown() == [1] && !e.layers[0].audible && e.layers[1].audible && e.layers[0].soloHidden,
+              "ソロ：ソロのレイヤーだけが出る（ほかは映像も音も隠れる）")
+        e.layers[2].solo = true
+        check(shown() == [1, 2], "ソロ：いくつでもソロにできる")
+        e.insertLayer(at: 0)
+        check(e.layers[0].soloHidden && shown() == [2, 3], "ソロ：レイヤーを足しても、ソロでないものは隠れたまま")
+        e.clearSolo()
+        check(shown() == [1, 2, 3] && e.layers.allSatisfy { !$0.soloHidden }, "ソロ：全部外すと元に戻る")
+        e.layers[1].solo = true
+        let e2 = Engine(persistent: false)
+        e2.apply(e.makeState(relativeTo: nil), baseDir: nil)
+        check(e2.layers.allSatisfy { !$0.solo }, "ソロ：保存しない（確認用）")
+        e.layers[1].blend = .add
+        _ = e.updateFrame()
+        check(e.layerGroups().first { $0.key == 1 }?.blend == .add, "レイヤー欄から重ね方を変えると、出力に効く")
     }
 
     /// 調整レイヤーの枠：エフェクトのクリップを置いて、押すとそのエフェクトが下の絵全体にかかる

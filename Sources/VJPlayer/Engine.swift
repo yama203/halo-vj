@@ -424,6 +424,20 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
             guard let self, let layer else { return }
             self.applyVolume(layer: layer.index)
         }
+        layer.onSoloChanged = { [weak self] in self?.updateSolo() }
+    }
+
+    /// ソロ：どれかのレイヤーがソロなら、ソロでないレイヤーを一時的に隠す（映像と音）
+    func updateSolo() {
+        let any = layers.contains { $0.solo }
+        for l in layers { l.soloHidden = any && !l.solo }
+        for r in layers.indices { applyVolume(layer: r) }
+        syncRenderState()
+    }
+
+    /// ソロを全部外す
+    func clearSolo() {
+        for l in layers where l.solo { l.solo = false }
     }
 
     // MARK: - レイヤー・列の増減
@@ -650,6 +664,9 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
         }
         inspectedIndex = newInspected
         selectedLayer = min(max(newSelected, 0), layers.count - 1)
+        // ソロの隠れ方を、今のレイヤーで決め直す
+        let anySolo = layers.contains { $0.solo }
+        for l in layers { l.soloHidden = anySolo && !l.solo }
         syncRenderState()
         scheduleSave()
     }
@@ -981,7 +998,7 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
                                               outgoing: out,
                                               outgoingTransform: out?.animTransform ?? AnimTransform(),
                                               opacityAnim: l.anims[.opacity].flatMap { $0.isOn ? $0 : nil },
-                                              muted: l.muted,
+                                              muted: l.muted || l.soloHidden,
                                               isAdjustment: l.isAdjustment,
                                               blendFX: l.blendFX,
                                               clipMuted: slot?.muted ?? false,

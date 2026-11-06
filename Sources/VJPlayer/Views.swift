@@ -543,14 +543,15 @@ struct LayerHeader: View {
                     .fixedSize()
                     .onTapGesture(count: 2) { renameLayer() }
                     .help("ダブルクリックで名前を付ける")
-                if layer.isAdjustment {
-                    Image(systemName: "camera.filters").font(.system(size: 11)).foregroundStyle(.teal)
-                        .help("調整レイヤー")
-                }
                 if layer.volume == 0 || layer.audioMuted {
                     Image(systemName: "speaker.slash.fill").font(.system(size: 11)).foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 0)
+                // ソロ（出力のレイヤーに。シーンの編集中も同じ）
+                if engine.layers.indices.contains(layer.index) {
+                    SoloButton(layer: engine.layers[layer.index])
+                        .layoutPriority(1)
+                }
                 MuteButton(muted: $layer.muted, what: layer.name, compact: true)
                     .layoutPriority(1)
                 Button {
@@ -559,7 +560,7 @@ struct LayerHeader: View {
                     Image(systemName: "stop.fill").font(.system(size: 11))
                         .frame(width: 18, height: 16)
                 }
-                .controlSize(.regular)
+                .controlSize(.small)
                 .disabled(playing == nil)
                 .help(engine.sceneDraft != nil ? "このシーンではこのレイヤーに何も流さない" : "このレイヤーを停止")
             }
@@ -570,14 +571,8 @@ struct LayerHeader: View {
                 .frame(height: 28)
             Spacer(minLength: 0)
             HStack(spacing: 4) {
-                if layer.blend != .normal {
-                    Text(layer.blend.label)
-                        .font(.system(size: 10, weight: .semibold))
-                        .lineLimit(1)
-                        .fixedSize()
-                        .padding(.horizontal, 5).padding(.vertical, 2)
-                        .background(Color.purple.opacity(0.45), in: RoundedRectangle(cornerRadius: 3))
-                }
+                // 重ね方：押すとその場で選べる
+                if !layer.isAdjustment { BlendMenuButton(layer: layer) }
                 if !layer.isAdjustment { EffectIcons(effects: layer.effects, max: 3) }
                 if let a = engine.viewPlaying(layer.index), engine.deckOf(a) != engine.shownDeck,
                    engine.decks.indices.contains(engine.deckOf(a)) {
@@ -602,6 +597,8 @@ struct LayerHeader: View {
         }
         .padding(8)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        // ほかのレイヤーのソロで隠れているときは薄く
+        .modifier(SoloDim(layer: engine.layers.indices.contains(layer.index) ? engine.layers[layer.index] : layer))
         .background(RoundedRectangle(cornerRadius: 6)
             .fill(headerFill(selected: selected)))
         .overlay(RoundedRectangle(cornerRadius: 6)
@@ -1390,5 +1387,57 @@ struct LayerVolumeStrip: View {
                 .help("\(layer.name)の音量 \(Int((layer.volume * 100).rounded()))%（上下ドラッグ・⇧で微調整・ダブルクリックで 100%）")
             }
         }
+    }
+}
+
+/// レイヤー欄のソロボタン（S）。ソロのレイヤーだけが出る（映像と音。確認用で保存しない）
+struct SoloButton: View {
+    @ObservedObject var layer: Layer
+    var body: some View {
+        Button {
+            layer.solo.toggle()
+        } label: {
+            Text("S")
+                .font(.system(size: 11, weight: .heavy))
+                .foregroundStyle(layer.solo ? Color.black : Color.secondary)
+                .frame(width: 18, height: 16)
+        }
+        .buttonStyle(.bordered)
+        .tint(layer.solo ? Color.yellow : nil)
+        .background(RoundedRectangle(cornerRadius: 5).fill(layer.solo ? Color.yellow : Color.clear))
+        .controlSize(.small)
+        .help(layer.solo ? "\(layer.name) のソロを外す" : "\(layer.name) をソロにする（ソロのレイヤーだけが出る。いくつでも。確認用で保存しない）")
+    }
+}
+
+/// レイヤー欄の重ね方のボタン。押すと選べる（通常以外は紫）
+struct BlendMenuButton: View {
+    @ObservedObject var layer: Layer
+    var body: some View {
+        Menu {
+            ForEach(BlendMode.allCases) { b in
+                Button((layer.blend == b ? "✓ " : "") + b.label) { layer.blend = b }
+            }
+        } label: {
+            Text(layer.blend.shortLabel)
+                .font(.system(size: 10, weight: .semibold))
+                .lineLimit(1)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .foregroundStyle(layer.blend == .normal ? Color.secondary : Color.white)
+        .padding(.horizontal, 5).padding(.vertical, 2)
+        .background(RoundedRectangle(cornerRadius: 3)
+            .fill(layer.blend == .normal ? Color.white.opacity(0.08) : Color.purple.opacity(0.55)))
+        .help("重ね方：" + layer.blend.label + "（押して選ぶ）")
+    }
+}
+
+/// ほかのレイヤーのソロで隠れているレイヤーを薄く見せる
+struct SoloDim: ViewModifier {
+    @ObservedObject var layer: Layer
+    func body(content: Content) -> some View {
+        content.opacity(layer.soloHidden ? 0.4 : 1)
     }
 }

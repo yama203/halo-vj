@@ -984,7 +984,7 @@ struct MuteButton: View {
                 button.buttonStyle(.bordered)
             }
         }
-        .controlSize(.regular)
+        .controlSize(compact ? .small : .regular)
         .help(muted ? "\(what)のミュートを解除" : "\(what)をミュート（再生は続けたまま、映像と音を出さない）")
     }
 

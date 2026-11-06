@@ -23,6 +23,16 @@ enum BlendMode: Int, CaseIterable, Codable, Identifiable {
         }
     }
 
+    /// レイヤー欄のボタン用の短い名前
+    var shortLabel: String {
+        switch self {
+        case .overdrive: "OD加算"
+        case .maskLuma: "マスク"
+        case .maskInvert: "反転マスク"
+        default: label
+        }
+    }
+
     /// マスクとして使う重ね方か（このレイヤー自体は見えず、下の絵を見せる・隠す）
     var isMask: Bool { self == .maskLuma || self == .maskInvert }
 
@@ -123,7 +133,13 @@ final class Layer: ObservableObject, Identifiable, Animatable, EffectHolder {
         }
     }
     /// 音を出すか（ミュート・音だけのミュート・調整レイヤーでは出さない）
-    var audible: Bool { !muted && !audioMuted && !isAdjustment }
+    var audible: Bool { !muted && !audioMuted && !isAdjustment && !soloHidden }
+
+    /// ソロ：ソロのレイヤーだけを出す（確認用。保存しない）
+    @Published var solo = false { didSet { if oldValue != solo { onSoloChanged?() } } }
+    /// ほかのレイヤーがソロなので、一時的に隠れている（Engine が入れる）
+    @Published var soloHidden = false
+    var onSoloChanged: (() -> Void)?
     /// ミュート：再生は続けたまま、このレイヤーの映像と音を出さない
     @Published var muted = false {
         didSet {
