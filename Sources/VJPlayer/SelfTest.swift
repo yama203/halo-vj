@@ -1338,6 +1338,35 @@ enum SelfTest {
         e.updateCue(e.cues[1].id) { $0.fade = 0 }
         e.layers[0].opacity = 1
         e.fireCue(0)
+        // 並べ替え（つまみのドラッグ・上へ／下へ）：id のキューを index 番目の前へ
+        do {
+            let ids = e.cues.map(\.id)
+            e.moveCue(ids[2], before: 0)
+            check(e.cues.map(\.id) == [ids[2], ids[0], ids[1]], "キュー：最後の暗転を一番上へドラッグで動かせる")
+            e.moveCue(ids[2], before: 3)
+            check(e.cues.map(\.id) == ids, "キュー：一番下へ（最後の後ろ）も動かせる")
+            e.moveCue(ids[0], before: 1)
+            check(e.cues.map(\.id) == ids, "キュー：自分の直後へ落としても変わらない")
+            e.insertCue(.scene(sa.id), at: 1)
+            check(e.cues.count == 4 && e.cues[1].kind == .scene(sa.id), "キュー：シーンを一覧の途中へ落とすと、そこに入る")
+            e.removeCue(e.cues[1].id)
+            check(e.cueFadeText(e.cues[0]).contains("カット") && e.cueFadeText(Cue(kind: .scene(sa.id))).contains("シーンの設定"),
+                  "キュー：フェードを決めていなければ、元の設定（シーン・レイヤー）の実際の時間を出す")
+        }
+        // 暗転にフェード：だんだん薄くなってから止まる
+        do {
+            e.trigger(0)
+            let i = e.cues.firstIndex { $0.kind == .stopAll }!
+            e.updateCue(e.cues[i].id) { $0.fade = 0.3 }
+            e.fireCue(i)
+            wait(0.15)
+            let mid = e.layers[0].opacity, on = e.activeByLayer[0] != nil
+            wait(0.3)
+            check(on && mid < 0.9 && e.activeByLayer.allSatisfy { $0 == nil } && abs(e.layers[0].opacity - 1) < 1e-9,
+                  "キュー（暗転・フェード 0.3 秒）：だんだん暗くなってから止まる")
+            e.updateCue(e.cues[i].id) { $0.fade = nil }
+            e.fireCue(0)
+        }
         // 並べ替え・削除で「今」が付いてくる
         e.moveCue(from: IndexSet(integer: 0), to: 3)
         check(e.currentCue == 2 && e.cueTitle(e.cues[2]).contains("シーン"), "キュー：並べ替えても「今」の印は同じキューに付く")

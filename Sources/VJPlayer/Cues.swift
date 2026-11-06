@@ -23,8 +23,11 @@ struct Cue: Codable, Identifiable, Equatable {
 
     static let fadeChoices: [Double?] = [nil, 0, 0.5, 1, 2, 3, 5, 8]
     static func fadeLabel(_ f: Double?) -> String {
-        guard let f else { return "設定どおり" }
-        return f <= 0 ? "カット" : String(format: f < 1 ? "%.1f秒" : "%.0f秒", f)
+        guard let f else { return "元の設定" }
+        return seconds(f)
+    }
+    static func seconds(_ f: Double) -> String {
+        f <= 0 ? "カット" : String(format: f < 1 ? "%.1f秒" : "%.0f秒", f)
     }
 }
 
@@ -75,9 +78,40 @@ extension Engine {
                 fadeOutAndStop(others, duration: c.fade ?? layers[layer].fadeTime)
             }
         case .stopAll:
+            // フェードがあれば、だんだん暗くしてから止める
             finishCueFade()
-            stopAll()
+            fadeOutAndStop(layers.indices.filter { activeByLayer[$0] != nil }, duration: c.fade ?? 0)
         }
+    }
+
+    /// キューのフェードの表示。時間を決めていなければ、元の設定（シーン・レイヤー）の実際の時間
+    func cueFadeText(_ c: Cue) -> String {
+        if let f = c.fade { return Cue.seconds(f) }
+        switch c.kind {
+        case .scene(let id):
+            return "シーンの設定（" + Cue.seconds(scenes.first { $0.id == id }?.fade ?? 0) + "）"
+        case .clip(_, let layer, _):
+            return "レイヤーの設定（" + Cue.seconds(layers.indices.contains(layer) ? layers[layer].fadeTime : 0) + "）"
+        case .stopAll:
+            return "カット"
+        }
+    }
+
+    /// フェードの選択肢の「元の設定」の名前
+    func cueDefaultFadeName(_ c: Cue) -> String {
+        switch c.kind {
+        case .scene: "シーンに付けたフェード時間"
+        case .clip: "レイヤーの切り替えフェード時間"
+        case .stopAll: "カット（すぐ暗転）"
+        }
+    }
+
+    /// キューを id のものを index 番目の前へ動かす（index = 個数なら最後へ）
+    func moveCue(_ id: UUID, before index: Int) {
+        guard let i = cues.firstIndex(where: { $0.id == id }) else { return }
+        // 自分の前・自分の直後の前へは動かしても変わらない
+        guard index != i && index != i + 1 else { return }
+        moveCue(from: IndexSet(integer: i), to: min(max(index, 0), cues.count))
     }
 
     /// レイヤーを duration 秒で薄くしてから止める（止めたら不透明度は元に戻す）
@@ -152,6 +186,13 @@ extension Engine {
     func addCue(_ kind: Cue.Kind, after i: Int? = nil) {
         let c = Cue(kind: kind)
         if let i, cues.indices.contains(i) { cues.insert(c, at: i + 1) } else { cues.append(c) }
+    }
+
+    /// キューを index 番目に入れる
+    func insertCue(_ kind: Cue.Kind, at index: Int) {
+        let i = min(max(index, 0), cues.count)
+        cues.insert(Cue(kind: kind), at: i)
+        if let c = currentCue, c >= i { currentCue = c + 1 }
     }
 
     /// クリップの場所をキューにする
@@ -288,14 +329,16 @@ struct CuePanel: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                List {
-                    ForEach(Array(engine.cues.enumerated()), id: \.element.id) { i, c in
-                        CueRow(index: i, cue: c)
+                ScrollView(.vertical) {
+                    VStack(spacing: 2) {
+                        ForEach(Array(engine.cues.enumerated()), id: \.element.id) { i, c in
+                            CueRow(index: i, cue: c)
+                        }
+                        // いちばん下：ここへ落とすと最後へ
+                        CueEndDrop(count: engine.cues.count)
                     }
-                    .onMove { engine.moveCue(from: $0, to: $1) }
+                    .padding(.bottom, 8)
                 }
-                .listStyle(.plain)
-                .scrollContentBackground(.hidden)
             }
         }
     }
@@ -327,15 +370,21 @@ private struct CueRow: View {
     @EnvironmentObject var engine: Engine
     let index: Int
     let cue: Cue
+    @State private var dropTargeted = false
 
     var body: some View {
         let now = engine.currentCue == index
         let next = engine.nextCue == index
         HStack(spacing: 8) {
+            // つまみ：ドラッグで並べ替え（行のどこをつかんでもよい）
+            Image(systemName: "line.3.horizontal")
+                .font(.system(size: 11))
+                .foregroundStyle(.tertiary)
+                .frame(width: 14)
             Text("\(index + 1)")
                 .font(.system(size: 12, weight: .bold).monospacedDigit())
-                .frame(width: 24, alignment: .trailing)
-            Image(systemName: engine.cueIcon(cue)).font(.system(size: 11)).foregroundStyle(.secondary).frame(width: 16)
+                .frame(width: 22, alignment: .trailing)
+            CueThumb(cue: cue)
             VStack(alignment: .leading, spacing: 1) {
                 Text(engine.cueTitle(cue)).font(.system(size: 12, weight: .semibold)).lineLimit(1)
                 if !cue.note.isEmpty {
@@ -343,9 +392,10 @@ private struct CueRow: View {
                 }
             }
             Spacer(minLength: 0)
-            Text(Cue.fadeLabel(cue.fade))
+            Text(engine.cueFadeText(cue))
                 .font(.system(size: 10, weight: .semibold).monospacedDigit())
                 .foregroundStyle(cue.fade == nil ? Color.secondary : Color.teal)
+                .help(cue.fade == nil ? "フェード：" + engine.cueDefaultFadeName(cue) + "を使う（右クリックで変えられる）" : "フェード（右クリックで変えられる）")
         }
         .padding(.vertical, 3)
         .padding(.horizontal, 4)
@@ -354,15 +404,27 @@ private struct CueRow: View {
         .overlay(alignment: .leading) {
             if now { Rectangle().fill(Color.green).frame(width: 3) }
         }
+        // 上に落とすと、この行の前に入る（青い線）
+        .overlay(alignment: .top) {
+            Rectangle().fill(Color.accentColor).frame(height: 3).offset(y: -2)
+                .opacity(dropTargeted ? 1 : 0).allowsHitTesting(false)
+        }
         .contentShape(Rectangle())
         .onTapGesture(count: 2) { engine.fireCue(index) }
+        .onDrag { NSItemProvider(object: ("halovj-cue:" + cue.id.uuidString) as NSString) }
+        .onDrop(of: [.plainText], isTargeted: $dropTargeted) { CueDrop.handle($0, engine: engine, at: index) }
         .contextMenu {
             Button("このキューを出す") { engine.fireCue(index) }
-            Menu("フェード（\(Cue.fadeLabel(cue.fade))）") {
+            Menu("フェード（\(engine.cueFadeText(cue))）") {
                 ForEach(Cue.fadeChoices, id: \.self) { f in
-                    Button((cue.fade == f ? "✓ " : "") + Cue.fadeLabel(f)) { engine.updateCue(cue.id) { $0.fade = f } }
+                    let name = f == nil ? engine.cueDefaultFadeName(cue) + "に合わせる" : Cue.fadeLabel(f)
+                    Button((cue.fade == f ? "✓ " : "") + name) { engine.updateCue(cue.id) { $0.fade = f } }
                 }
             }
+            Button("上へ") { engine.moveCue(cue.id, before: index - 1) }
+                .disabled(index == 0)
+            Button("下へ") { engine.moveCue(cue.id, before: index + 2) }
+                .disabled(index >= engine.cues.count - 1)
             if case .clip = cue.kind {
                 Toggle("ほかのレイヤーはそのまま（このレイヤーだけ差し替え）", isOn: Binding(
                     get: { cue.keepOthers ?? false },
@@ -377,6 +439,104 @@ private struct CueRow: View {
             Button("削除", role: .destructive) { engine.removeCue(cue.id) }
         }
         .help("ダブルクリックでこのキューを出す。ドラッグで並べ替え。右クリックでフェード・メモ・削除")
+    }
+}
+
+/// キューの小さなサムネイル（シーン = 保存したときの絵、クリップ = クリップの絵、暗転 = 黒）。左下に種類の印
+private struct CueThumb: View {
+    @EnvironmentObject var engine: Engine
+    let cue: Cue
+
+    var body: some View {
+        ZStack(alignment: .bottomLeading) {
+            Color.black
+            if let slot = clipSlot {
+                // クリップの絵は読み込みが後から終わるので、クリップを見張る
+                CueClipThumb(slot: slot)
+            } else if let img = sceneImage {
+                Image(nsImage: img).resizable().aspectRatio(contentMode: .fill)
+            } else if cue.kind != .stopAll {
+                // 絵が無い（サムネイルの無いシーン・見つからないもの）→ 種類の印を大きく
+                Image(systemName: missing ? "questionmark" : engine.cueIcon(cue))
+                    .font(.system(size: 11)).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            Image(systemName: engine.cueIcon(cue))
+                .font(.system(size: 7, weight: .bold))
+                .foregroundStyle(.white)
+                .padding(2)
+                .background(Color.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 2))
+                .padding(1)
+        }
+        .frame(width: 48, height: 27)
+        .clipShape(RoundedRectangle(cornerRadius: 3))
+        .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color.gray.opacity(0.35)))
+    }
+
+    private var sceneImage: NSImage? {
+        guard case .scene(let id) = cue.kind else { return nil }
+        return engine.scenes.first { $0.id == id }?.thumbnail.flatMap { NSImage(data: $0) }
+    }
+
+    private var clipSlot: ClipSlot? {
+        guard case .clip(let deck, let layer, let column) = cue.kind,
+              let i = engine.cueSlotIndex(deck: deck, layer: layer, column: column) else { return nil }
+        return engine.slots[i]
+    }
+
+    /// 指しているシーン・クリップが見つからない
+    private var missing: Bool {
+        switch cue.kind {
+        case .scene(let id): !engine.scenes.contains { $0.id == id }
+        case .clip: clipSlot == nil
+        case .stopAll: false
+        }
+    }
+}
+
+private struct CueClipThumb: View {
+    @ObservedObject var slot: ClipSlot
+    var body: some View {
+        if let img = slot.thumbnail {
+            Image(nsImage: img).resizable().aspectRatio(contentMode: .fill)
+        } else {
+            Image(systemName: "film").font(.system(size: 11)).foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+}
+
+/// 一覧のいちばん下：ここへ落とすと最後へ
+private struct CueEndDrop: View {
+    @EnvironmentObject var engine: Engine
+    let count: Int
+    @State private var targeted = false
+    var body: some View {
+        Rectangle().fill(Color.clear)
+            .frame(height: 36)
+            .overlay(alignment: .top) {
+                Rectangle().fill(Color.accentColor).frame(height: 3).opacity(targeted ? 1 : 0)
+            }
+            .contentShape(Rectangle())
+            .onDrop(of: [.plainText], isTargeted: $targeted) { CueDrop.handle($0, engine: engine, at: count) }
+    }
+}
+
+/// 一覧の行へのドロップ：キュー（並べ替え）かシーン（その位置に足す）
+enum CueDrop {
+    static func handle(_ providers: [NSItemProvider], engine: Engine, at index: Int) -> Bool {
+        guard let p = providers.first(where: { $0.canLoadObject(ofClass: NSString.self) }) else { return false }
+        _ = p.loadObject(ofClass: NSString.self) { obj, _ in
+            guard let s = obj as? String else { return }
+            DispatchQueue.main.async {
+                if s.hasPrefix("halovj-cue:"), let id = UUID(uuidString: String(s.dropFirst("halovj-cue:".count))) {
+                    engine.moveCue(id, before: index)
+                } else if s.hasPrefix("halovj-scene:"), let id = UUID(uuidString: String(s.dropFirst("halovj-scene:".count))) {
+                    engine.insertCue(.scene(id), at: index)
+                }
+            }
+        }
+        return true
     }
 }
 
