@@ -290,7 +290,7 @@ enum SelfTest {
             let std = DockNode.standard
             check(Set(std.panels) == Set(DockPanel.allCases) && std.panels.count == DockPanel.allCases.count,
                   "自由レイアウト：最初の並べ方に全部のパネルが 1 回ずつある")
-            for (name, tpl) in [("ポン出し", DockNode.cuePlayback), ("クラブ VJ", DockNode.clubVJ)] {
+            for (name, tpl) in [("Show", DockNode.cuePlayback), ("VJ", DockNode.clubVJ)] {
                 check(Set(tpl.panels) == Set(DockPanel.allCases) && tpl.panels.count == DockPanel.allCases.count,
                       "おすすめのレイアウト（\(name)）：全部のパネルが 1 回ずつある")
             }
@@ -298,17 +298,17 @@ enum SelfTest {
             do {
                 let lm = LayoutManager(persist: false)
                 lm.state.monitorWidth = 333                         // まだワークスペースを選んでいない並べ方
-                lm.switchWorkspace("ポン出し")
-                check(lm.state.workspace == "ポン出し" && lm.state.dockMode && lm.state.dock.map { Set($0.panels) == Set(DockPanel.allCases) } == true
+                lm.switchWorkspace("Show")
+                check(lm.state.workspace == "Show" && lm.state.dockMode && lm.state.dock.map { Set($0.panels) == Set(DockPanel.allCases) } == true
                       && lm.workspaceNames.contains("前の並べ方"),
                       "ワークスペース：切り替えられる（選ぶ前の並べ方は「前の並べ方」として残る）")
                 lm.state.dock = lm.state.dock?.movingToEdge(.monitor, .left)   // ポン出しをいじる
                 let edited = lm.state.dock
-                lm.switchWorkspace("クラブ VJ")
-                check(lm.state.workspace == "クラブ VJ", "ワークスペース：別のワークスペースへ")
-                lm.switchWorkspace("ポン出し")
+                lm.switchWorkspace("VJ")
+                check(lm.state.workspace == "VJ", "ワークスペース：別のワークスペースへ")
+                lm.switchWorkspace("Show")
                 check(lm.state.dock == edited, "ワークスペース：戻ると、いじった形のまま")
-                lm.resetWorkspace("ポン出し")
+                lm.resetWorkspace("Show")
                 check(lm.state.dock.map { Set($0.panels) == Set(DockPanel.allCases) } == true && lm.state.dock != edited,
                       "ワークスペース：最初の形に戻せる")
                 lm.savePreset("本番A")
@@ -316,7 +316,7 @@ enum SelfTest {
                 lm.switchWorkspace("前の並べ方")
                 check(lm.state.monitorWidth == 333 && !lm.state.dockMode, "ワークスペース：「前の並べ方」に戻れる")
             }
-            for (name, tpl) in [("ポン出し", DockNode.cuePlayback), ("クラブ VJ", DockNode.clubVJ)] {
+            for (name, tpl) in [("Show", DockNode.cuePlayback), ("VJ", DockNode.clubVJ)] {
                 if case .split(_, .vertical, _, _, .tabs(_, let bottom, _)) = tpl {
                     check(bottom == [.pads], "おすすめのレイアウト（\(name)）：FX パッドが下いっぱい")
                 } else {
