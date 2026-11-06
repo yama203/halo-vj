@@ -1037,7 +1037,7 @@ struct SlotContent: View {
             VStack(spacing: 2) {
                 HStack(spacing: 4) {
                     if slot.isImage { Image(systemName: "photo").font(.system(size: 10)) }
-                    if slot.endAction != .hold && !slot.isImage { Image(systemName: slot.endAction.icon).font(.system(size: 10)) }
+                    if slot.endAction != .hold && !slot.isImage { EndActionIcon(action: slot.endAction, size: 10) }
                     if slot.hasInOut && !slot.isImage { Image(systemName: "scissors").font(.system(size: 10)) }
                     if slot.audioMuted { Image(systemName: "speaker.slash.fill").font(.system(size: 10)).foregroundStyle(.red) }
                     if slot.jumpBeats > 0 && !slot.isImage { Image(systemName: "die.face.5").font(.system(size: 10)).foregroundStyle(.purple) }
@@ -1181,7 +1181,7 @@ struct PlayingClipInfo: View {
                 Text(slot.name).font(.system(size: 15, weight: .semibold)).lineLimit(1)
                 Spacer(minLength: 0)
                 if slot.endAction != .hold {
-                    Image(systemName: slot.endAction.icon).font(.system(size: 11)).foregroundStyle(.secondary)
+                    EndActionIcon(action: slot.endAction, size: 11).foregroundStyle(.secondary)
                         .help("終わったら：" + slot.endAction.label)
                 }
                 if slot.syncMode == .bpm {

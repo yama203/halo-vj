@@ -73,7 +73,11 @@ extension Engine {
         case .clip(let deck, let layer, let column):
             guard let idx = cueSlotIndex(deck: deck, layer: layer, column: column) else { NSSound.beep(); return }
             finishCueFade()
+            let wasEmpty = activeByLayer[layer] == nil
+            let T = c.fade ?? layers[layer].fadeTime
             trigger(idx, fadeTime: c.fade, select: false)
+            // レイヤーが空だった（クロスフェードの相手がいない）→ 不透明度でだんだん出す
+            if wasEmpty && T > 0 { fadeInLayer(layer, duration: T) }
             // 「終わったら」の上書き（クリップの設定は変えない。普通に出し直すと外れる）
             slots[idx]?.endActionOverride = c.endAction
             if c.onlyThisClip {
@@ -139,8 +143,37 @@ extension Engine {
         cueFadeTimer = timer
     }
 
-    /// 消している途中のレイヤーを、すぐ止めて不透明度を元に戻す
+    /// 空だったレイヤーを、不透明度 0 から元の値まで duration 秒で上げる
+    func fadeInLayer(_ r: Int, duration T: Double) {
+        guard layers.indices.contains(r) else { return }
+        let target = cueFadeInLayers[r] ?? layers[r].opacity
+        cueFadeInLayers[r] = target
+        layers[r].opacity = 0
+        let t0 = CACurrentMediaTime()
+        cueFadeInTimer?.invalidate()
+        let timer = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            let p = min((CACurrentMediaTime() - t0) / T, 1)
+            let k = p * p * (3 - 2 * p)
+            for (i, o) in self.cueFadeInLayers where self.layers.indices.contains(i) { self.layers[i].opacity = o * k }
+            if p >= 1 { self.finishCueFadeIn() }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        cueFadeInTimer = timer
+    }
+
+    /// だんだん出している途中のレイヤーを、すぐ元の不透明度にする
+    func finishCueFadeIn() {
+        cueFadeInTimer?.invalidate()
+        cueFadeInTimer = nil
+        let rs = cueFadeInLayers
+        cueFadeInLayers = [:]
+        for (r, o) in rs where layers.indices.contains(r) { layers[r].opacity = o }
+    }
+
+    /// 消している途中のレイヤーを、すぐ止めて不透明度を元に戻す（だんだん出している途中のものは出し切る）
     func finishCueFade() {
+        finishCueFadeIn()
         cueFadeTimer?.invalidate()
         cueFadeTimer = nil
         let rs = cueFadeLayers
@@ -151,8 +184,12 @@ extension Engine {
         }
     }
 
-    /// そのレイヤーを消すのをやめる（出し直したとき）
+    /// そのレイヤーを消すのをやめる（出し直したとき。だんだん出している途中なら出し切る）
     func cancelCueFade(layer r: Int) {
+        if let o = cueFadeInLayers.removeValue(forKey: r) {
+            if layers.indices.contains(r) { layers[r].opacity = o }
+            if cueFadeInLayers.isEmpty { cueFadeInTimer?.invalidate(); cueFadeInTimer = nil }
+        }
         guard let o = cueFadeLayers.removeValue(forKey: r) else { return }
         if layers.indices.contains(r) { layers[r].opacity = o }
         if cueFadeLayers.isEmpty { cueFadeTimer?.invalidate(); cueFadeTimer = nil }
@@ -400,10 +437,9 @@ private struct CueRow: View {
                 }
             }
             Spacer(minLength: 0)
-            Text(engine.cueFadeText(cue))
-                .font(.system(size: 10, weight: .semibold).monospacedDigit())
-                .foregroundStyle(cue.fade == nil ? Color.secondary : Color.teal)
-                .help(cue.fade == nil ? "フェード：" + engine.cueDefaultFadeName(cue) + "を使う（右クリックで変えられる）" : "フェード（右クリックで変えられる）")
+            // その場で変えられる：「終わったら」（クリップのキュー）とフェード
+            if case .clip = cue.kind { CueEndActionButton(cue: cue) }
+            CueFadeButton(cue: cue)
         }
         .padding(.vertical, 3)
         .padding(.horizontal, 4)
@@ -437,7 +473,7 @@ private struct CueRow: View {
                 Toggle("ほかのレイヤーはそのまま（このレイヤーだけ差し替え）", isOn: Binding(
                     get: { cue.keepOthers ?? false },
                     set: { v in engine.updateCue(cue.id) { $0.keepOthers = v ? true : nil } }))
-                CueEndActionMenu(cue: cue)
+                Menu("終わったら（" + (cue.endAction?.label ?? "クリップの設定") + "）") { CueEndActionMenu(cue: cue) }
             }
             Button("メモを書く…") {
                 if let n = askText(title: "キュー \(index + 1) のメモ（きっかけなど）", initial: cue.note) {
@@ -536,14 +572,64 @@ private struct CueModeIcons: View {
                     .foregroundStyle(.orange)
                     .help("L\(layer + 1) だけ差し替える（ほかのレイヤーはそのまま）")
                 }
-                if let ea = cue.endAction {
-                    Image(systemName: ea.icon)
-                        .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(.teal)
-                        .help("終わったら：" + ea.label + "（このキューで出したときだけ）")
-                }
             }
         }
+    }
+}
+
+/// 行の右のフェードの表示。押すと時間を選べる
+private struct CueFadeButton: View {
+    @EnvironmentObject var engine: Engine
+    let cue: Cue
+    var body: some View {
+        Menu {
+            ForEach(Cue.fadeChoices, id: \.self) { f in
+                let name = f == nil ? engine.cueDefaultFadeName(cue) + "に合わせる" : Cue.fadeLabel(f)
+                Button((cue.fade == f ? "✓ " : "") + name) { engine.updateCue(cue.id) { $0.fade = f } }
+            }
+        } label: {
+            HStack(spacing: 3) {
+                Image(systemName: "timer").font(.system(size: 9))
+                Text(engine.cueFadeText(cue)).font(.system(size: 10, weight: .semibold).monospacedDigit())
+            }
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .foregroundStyle(cue.fade == nil ? Color.secondary : Color.teal)
+        .tint(cue.fade == nil ? Color.secondary : Color.teal)
+        .padding(.horizontal, 6)
+        .frame(height: 20)
+        .background(RoundedRectangle(cornerRadius: 4).fill(Color.white.opacity(0.08)))
+        .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.white.opacity(0.12)))
+        .help("フェード：押して選ぶ" + (cue.fade == nil ? "（今は" + engine.cueDefaultFadeName(cue) + "）" : ""))
+    }
+}
+
+/// 行の中の「終わったら」のボタン（クリップのキュー）。押すと選べる
+private struct CueEndActionButton: View {
+    @EnvironmentObject var engine: Engine
+    let cue: Cue
+    var body: some View {
+        Menu {
+            CueEndActionMenu(cue: cue)
+        } label: {
+            EndActionIcon(action: cue.endAction ?? clipEnd ?? .loop, size: 10)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .foregroundStyle(cue.endAction == nil ? Color.secondary : Color.teal)
+        .tint(cue.endAction == nil ? Color.secondary : Color.teal)
+        .padding(.horizontal, 6)
+        .frame(height: 20)
+        .background(RoundedRectangle(cornerRadius: 4).fill(Color.white.opacity(0.08)))
+        .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.white.opacity(0.12)))
+        .help("終わったら：" + (cue.endAction.map { $0.label + "（このキューで上書き）" } ?? "クリップの設定（" + (clipEnd?.label ?? "") + "）") + "。押して選ぶ")
+    }
+    private var clipEnd: EndAction? {
+        guard case .clip(let d, let l, let c) = cue.kind, let i = engine.cueSlotIndex(deck: d, layer: l, column: c) else { return nil }
+        return engine.slots[i]?.endAction
     }
 }
 
@@ -554,14 +640,12 @@ private struct CueEndActionMenu: View {
 
     var body: some View {
         let own = clipEndAction
-        Menu("終わったら（" + (cue.endAction?.label ?? "クリップの設定") + "）") {
-            Button((cue.endAction == nil ? "✓ " : "") + "クリップの設定のまま" + (own.map { "（" + $0.label + "）" } ?? "")) {
-                engine.updateCue(cue.id) { $0.endAction = nil }
-            }
-            Divider()
-            ForEach(EndAction.allCases) { ea in
-                Button((cue.endAction == ea ? "✓ " : "") + ea.label) { engine.updateCue(cue.id) { $0.endAction = ea } }
-            }
+        Button((cue.endAction == nil ? "✓ " : "") + "クリップの設定のまま" + (own.map { "（" + $0.label + "）" } ?? "")) {
+            engine.updateCue(cue.id) { $0.endAction = nil }
+        }
+        Divider()
+        ForEach(EndAction.allCases) { ea in
+            Button((cue.endAction == ea ? "✓ " : "") + ea.label) { engine.updateCue(cue.id) { $0.endAction = ea } }
         }
     }
 
@@ -617,4 +701,18 @@ func askText(title: String, initial: String) -> String? {
     alert.window.initialFirstResponder = field
     guard alert.runModal() == .alertFirstButtonReturn else { return nil }
     return field.stringValue.trimmingCharacters(in: .whitespaces)
+}
+
+/// 「終わったら」のアイコン（最後で停止 = →|、ブラックアウト = →|B）
+struct EndActionIcon: View {
+    let action: EndAction
+    var size: CGFloat = 10
+    var body: some View {
+        HStack(spacing: 0) {
+            Image(systemName: action.icon).font(.system(size: size, weight: .semibold))
+            if action == .blackout {
+                Text("B").font(.system(size: size * 0.85, weight: .heavy))
+            }
+        }
+    }
 }

@@ -1343,6 +1343,17 @@ enum SelfTest {
         wait(0.3)
         check(midOp < 0.75 && midOp > 0.05 && stillOn && e.activeByLayer[0] == nil && abs(e.layers[0].opacity - 0.8) < 1e-9,
               String(format: "キュー（クリップだけ・フェード）：ほかのレイヤーは薄くなって（%.2f）から止まり、不透明度は元に戻る", midOp))
+        // 空のレイヤーにクリップを出す（ほかのキューから飛んだとき）：だんだん出てくる
+        e.stopAll()
+        e.layers[1].opacity = 0.9
+        e.fireCue(1)
+        wait(0.15)
+        let inMid = e.layers[1].opacity
+        wait(0.3)
+        check(e.activeByLayer[1] == c + 2 && inMid > 0.05 && inMid < 0.85 && abs(e.layers[1].opacity - 0.9) < 1e-9,
+              String(format: "キュー（クリップ・フェード）：レイヤーが空でも、だんだん出てくる（途中 %.2f → 0.90）", inMid))
+        e.layers[1].opacity = 1
+        e.trigger(0)
         // 消している途中に手で出し直したら、消すのをやめる
         e.trigger(0)
         e.fireCue(1)

@@ -69,11 +69,12 @@ enum EndAction: Int, CaseIterable, Codable, Identifiable {
         switch self {
         case .loop: "repeat"
         case .pingpong: "arrow.left.arrow.right"
-        case .hold: "pause.fill"
-        case .blackout: "moon.fill"
+        case .hold: "arrow.right.to.line"
+        case .blackout: "arrow.right.to.line"
         }
     }
 }
+
 
 /// 1つのクリップ。
 /// - 先頭からデコード済みの「待機ストリーム」を常に1本持っておき、トリガーで差し替えて即座に再生する

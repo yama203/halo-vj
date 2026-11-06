@@ -177,6 +177,9 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
     /// キュー（クリップだけ）でほかのレイヤーを消している途中：消す段と、元の不透明度
     var cueFadeTimer: Timer?
     var cueFadeLayers: [Int: Double] = [:]
+    /// キューで空のレイヤーにクリップを出したとき、だんだん出している途中：段と、戻す不透明度
+    var cueFadeInTimer: Timer?
+    var cueFadeInLayers: [Int: Double] = [:]
 
     @Published var masterOpacity = 1.0 {
         didSet { syncRenderState(); scheduleSave() }
