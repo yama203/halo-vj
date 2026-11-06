@@ -12,6 +12,20 @@ enum Main {
             SelfTest.odPreview(path: args[i + 1], values: Array(vals.prefix(8)), time: vals.count > 8 ? vals[8] : 10)
             exit(0)
         }
+        if let i = args.firstIndex(of: "--text-preview"), args.count > i + 1 {
+            // 開発用：テキストのジェネレーターの見た目を 1 枚に並べて書き出す  VJPlayer --text-preview out.png [時刻]
+            let t = args.count > i + 2 ? Double(args[i + 2]) ?? 1.3 : 1.3
+            SelfTest.textPreview(path: args[i + 1], time: t)
+            exit(0)
+        }
+        if let i = args.firstIndex(of: "--gen-preview"), args.count > i + 2, let k = EffectKind(rawValue: args[i + 1]) {
+            // 開発用：ジェネレーターを 1 枚書き出す  VJPlayer --gen-preview phyllotaxis out.png [秒] [値 値 …] [--random 0.8]
+            let rest = Array(args.dropFirst(i + 3))
+            let nums = rest.prefix { $0 != "--random" }.compactMap(Double.init)
+            let rnd = rest.firstIndex(of: "--random").flatMap { rest.count > $0 + 1 ? Double(rest[$0 + 1]) : nil }
+            SelfTest.genPreview(kind: k, path: args[i + 2], time: nums.first ?? 8, values: Array(nums.dropFirst()), random: rnd)
+            exit(0)
+        }
         if let i = args.firstIndex(of: "--od-bench") {
             // 開発用：オーバードライブ加算の GPU 時間を測る  VJPlayer --od-bench [幅 高さ]
             let n = args.dropFirst(i + 1).compactMap(Int.init)
@@ -128,6 +142,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let v = ProcessInfo.processInfo.environment["VJ_TRIGGER"] {
             let list = v.split(separator: ",").compactMap { Int($0) }
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { list.forEach { Engine.shared.trigger($0) } }
+        }
+        // 画面確認用：VJ_OUTPUT=window で出力ウィンドウ（テスト用）を開く。VJ_FORMAT=幅x高さ[@fps][:fit|fill|stretch] で
+        // 2.5 秒後に解像度を変える（開いたウィンドウと縦横比が違うときの見え方の確認）
+        let env = ProcessInfo.processInfo.environment
+        if env["VJ_OUTPUT"] == "window" {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { OutputController.shared.target = .window }
+        }
+        if let v = env["VJ_FORMAT"] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+                var f = OutputFormat()
+                let parts = v.split(separator: ":")
+                let head = parts.first.map(String.init) ?? ""
+                let sizeFps = head.split(separator: "@")
+                let wh = sizeFps.first?.split(separator: "x").compactMap { Int($0) } ?? []
+                if wh.count == 2 { f.width = wh[0]; f.height = wh[1] }
+                if sizeFps.count > 1 { f.fps = Double(sizeFps[1]) ?? 0 }
+                if parts.count > 1 { f.fit = ["fit": .fit, "fill": .fill, "stretch": .stretch][String(parts[1])] ?? .fit }
+                Engine.shared.outputFormat = f
+            }
         }
         // 画面確認用：VJ_PRINT_MENUS=1 で、メニューバーの項目の名前を書き出す（日本語になっているかの確認）
         if ProcessInfo.processInfo.environment["VJ_PRINT_MENUS"] != nil {

@@ -9,7 +9,7 @@ import QuartzCore
 enum EffectKind: String, Codable, CaseIterable, Identifiable {
     case mirror, colorize, levels, posterize, invert, posterizeTime, strobe, echo, shapeMask, polyMask
     /// ジェネレーター（動画の代わりにクリップとして置く絵）。エフェクト一覧には出さない
-    case solid, gradient, stripes, grid, noise, shapes
+    case solid, gradient, stripes, grid, noise, shapes, text, clock, phyllotaxis
     /// 特殊合成（レイヤーの重ね方）の値。エフェクト一覧には出さない
     case overdrive
     var id: String { rawValue }
@@ -28,14 +28,17 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
 
     /// ジェネレーターか（クリップとして置く。エフェクトとしては並べない）
     var isGenerator: Bool { Self.generators.contains(self) }
-    static let generators: [EffectKind] = [.solid, .gradient, .stripes, .grid, .noise, .shapes]
+    static let generators: [EffectKind] = [.solid, .gradient, .stripes, .grid, .noise, .shapes, .phyllotaxis, .text, .clock]
+    /// 文字を描くジェネレーター（テキスト・時計。描き方は同じ）
+    var isText: Bool { self == .text || self == .clock }
     /// 色を 1 つ使うジェネレーター（「色」を出す）
-    var usesColor: Bool { [.solid, .stripes, .grid, .noise, .shapes].contains(self) }
+    var usesColor: Bool { [.solid, .stripes, .grid, .noise, .shapes, .text, .clock, .phyllotaxis].contains(self) }
     /// 「速さ」の値の番号。シェーダーには速さ × 経過時間（動いた量）を渡す
     var speedIndex: Int? {
         switch self {
         case .gradient, .stripes, .grid: 3
-        case .noise: 2
+        case .noise, .text, .clock: 2
+        case .phyllotaxis: 6
         default: nil
         }
     }
@@ -58,6 +61,9 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
         case .grid: "チェッカー・格子"
         case .noise: "ノイズ"
         case .shapes: "図形"
+        case .text: "テキスト"
+        case .clock: "時計・カウントダウン"
+        case .phyllotaxis: "フィロタキシス（ひまわり）"
         case .overdrive: "オーバードライブ加算"
         }
     }
@@ -69,7 +75,7 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
         case .colorize, .levels, .posterize, .invert: .color
         case .posterizeTime, .strobe, .echo: .time
         case .shapeMask, .polyMask: .mask
-        case .solid, .gradient, .stripes, .grid, .noise, .shapes: .generator
+        case .solid, .gradient, .stripes, .grid, .noise, .shapes, .text, .clock, .phyllotaxis: .generator
         case .overdrive: .blend
         }
     }
@@ -92,6 +98,9 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
         case .grid: "checkerboard.rectangle"
         case .noise: "aqi.medium"
         case .shapes: "circle.circle"
+        case .text: "textformat"
+        case .clock: "clock"
+        case .phyllotaxis: "sun.max.circle"
         case .overdrive: "sun.max"
         }
     }
@@ -124,6 +133,8 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
         case .noise: 12
         case .shapes: 13
         case .invert: 14
+        case .text, .clock: 15
+        case .phyllotaxis: 16
         case .posterizeTime, .overdrive: -1
         }
     }
@@ -239,6 +250,67 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
                 EffectParam(label: "ぼかし", range: 0...0.3, defaultValue: 0.005, perPoint: 0.0005,
                             format: EffectParam.percent),
             ]
+        case .phyllotaxis:
+            // Resolume 用に作った FFGL のジェネレーター（Phyllotaxis）と同じ値。粒は黄金角ずつ回りながら中心から生まれて外へ広がる
+            return [
+                EffectParam(label: "生まれる速さ", range: 2...80, defaultValue: 20, perPoint: 0.05,
+                            format: { String(format: "%.1f 個/秒", $0) }, animRange: 10...40),
+                EffectParam(label: "広がる速さ", range: 0.05...1.5, defaultValue: 0.2, perPoint: 0.001,
+                            format: { String(format: "%.3f", $0) }, animRange: 0.1...0.4),
+                EffectParam(label: "粒の大きさ", range: 0.003...0.05, defaultValue: 0.012, perPoint: 0.0001,
+                            format: { String(format: "%.1f%%", $0 * 100) }, animRange: 0.006...0.02),
+                EffectParam(label: "育つ時間", range: 0...3, defaultValue: 0.3, perPoint: 0.005,
+                            format: { String(format: "%.2f 秒", $0) }),
+                EffectParam(label: "外ほど大きく", range: 0...3, defaultValue: 1, perPoint: 0.005,
+                            format: { String(format: "%.2f", $0) }, animRange: 0...2),
+                EffectParam(label: "光のにじみ", range: 0...2, defaultValue: 0.5, perPoint: 0.003,
+                            format: EffectParam.percent, animRange: 0...1),
+                EffectParam(label: "回転", range: -1...1, defaultValue: 0, perPoint: 0.002,
+                            format: { String(format: "%+.3f 回/秒", $0) }, animRange: -0.2...0.2),
+                EffectParam(label: "線の長さ", range: 0...0.3, defaultValue: 0, perPoint: 0.0005,
+                            format: EffectParam.percent, animRange: 0...0.15),
+                EffectParam(label: "色のばらつき", range: 0...1, defaultValue: 0, format: EffectParam.percent),
+            ]
+        case .clock:
+            // 0〜11 はテキストと同じ（描き方は共通）。12 から時計の設定。終わったときの文字は Effect.text
+            func n(_ label: String, _ r: ClosedRange<Double>, _ d: Double, _ unit: String) -> EffectParam {
+                EffectParam(label: label, range: r, defaultValue: d, perPoint: 0.05, step: 1,
+                            format: { String(format: "%.0f ", $0) + unit })
+            }
+            return EffectKind.text.params + [
+                EffectParam(label: "モード", range: 0...Double(ClockText.modes.count - 1), defaultValue: 1,
+                            choices: ClockText.modes),
+                EffectParam(label: "表示", range: 0...Double(ClockText.formats.count - 1), defaultValue: 0,
+                            choices: ClockText.formats),
+                EffectParam(label: "秒より細かく", range: 0...2, defaultValue: 0, choices: ["なし", "1/10", "1/100"]),
+                n("目標の時", 0...23, 0, "時"), n("目標の分", 0...59, 0, "分"), n("目標の秒", 0...59, 0, "秒"),
+                n("タイマーの分", 0...999, 10, "分"), n("タイマーの秒", 0...59, 0, "秒"),
+                EffectParam(label: "最後の 10 秒を弾ませる", range: 0...1, defaultValue: 1, isToggle: true),
+            ]
+        case .text:
+            // 文字は Effect.text。0〜5 はシェーダーで、6 以降は文字を描くとき（CPU）に使う
+            return [
+                EffectParam(label: "動き", range: 0...5, defaultValue: 0, choices: TextLook.motions),
+                EffectParam(label: "大きさ", range: 0.02...1.5, defaultValue: 0.22, perPoint: 0.002,
+                            format: EffectParam.percent, animRange: 0.1...0.4),
+                EffectParam(label: "速さ", range: -4...4, defaultValue: 0.4, perPoint: 0.005,
+                            format: { String(format: "%+.2f /秒", $0) }, animRange: -1...1),
+                EffectParam(label: "波", range: 0...1, defaultValue: 0, format: EffectParam.percent),
+                EffectParam(label: "グリッチ", range: 0...1, defaultValue: 0, format: EffectParam.percent),
+                EffectParam(label: "塗り", range: 0...1, defaultValue: 0, choices: ["色", "パレット"]),
+                EffectParam(label: "フォント", range: 0...Double(TextLook.fonts.count - 1), defaultValue: 0,
+                            choices: TextLook.fonts.map(\.label)),
+                EffectParam(label: "字間", range: -0.2...1, defaultValue: 0.04, perPoint: 0.002,
+                            format: { String(format: "%.0f%%", $0 * 100) }),
+                EffectParam(label: "行の切り替え", range: 0...4, defaultValue: 0,
+                            choices: TextLook.switchBeats.map { $0 == 0 ? "全部の行" : ParamAnim.beatsLabel($0) }),
+                EffectParam(label: "縁取りだけ", range: 0...1, defaultValue: 0, isToggle: true),
+                // 流す・敷き詰めるときの、となりの文字とのすき間（1 行の高さが 1）
+                EffectParam(label: "横の間隔", range: -0.5...6, defaultValue: 1, perPoint: 0.005,
+                            format: { String(format: "%.2f 行", $0) }, animRange: 0.2...2),
+                EffectParam(label: "縦の間隔", range: -0.5...6, defaultValue: 0.5, perPoint: 0.005,
+                            format: { String(format: "%.2f 行", $0) }, animRange: 0...1.5),
+            ]
         case .shapeMask:
             // 四角・丸で切り抜く。位置・大きさは絵の幅・高さに対する割合
             return [
@@ -310,6 +382,9 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
         case .grid: "チェッカー・格子・ドット（すき間は透明）"
         case .noise: "なめらかに動くノイズか、砂嵐"
         case .shapes: "円・リング・四角・枠・三角。数を増やすと並ぶ（まわりは透明）"
+        case .phyllotaxis: "ひまわりの種のように、粒が黄金角（137.5°）ずつ回りながら中心から生まれて外へ広がる。線の長さで棒に、色のばらつきでカラフルに（まわりは透明）"
+        case .clock: "今の時刻・決めた時刻までのカウントダウン・タイマー・ストップウォッチを出す。0 になったら好きな文字を出せる（まわりは透明）"
+        case .text: "文字を出す。流す・敷き詰める・1 文字ずつ・拍で弾む。行ごとに拍で切り替えも（まわりは透明）"
         case .shapeMask: "四角・丸の形で切り抜く（外は透明）。位置や大きさを動かせる。反転すると中を隠す"
         case .polyMask: "プレビューの上で点を置いて描いた形で切り抜く。建物や物に合わせるのに"
         case .echo: "動いた跡が残像になって残る。レイヤーかコンポジションにかけると、位置や回転の動きも跡になる"
@@ -424,6 +499,8 @@ struct Effect: Codable, Identifiable, Equatable {
     /// 自由な形のマスクの点（絵の左上が 0,0、右下が 1,1）
     var points: [MaskPoint] = MaskPoint.defaultShape
     static let maxPoints = 32
+    /// テキストのジェネレーターの文字（改行で行を分ける）
+    var text = TextLook.defaultText
     static let maxPalette = 8
     /// 値のアニメーション（キーは値の番号。不透明度は "mix"）
     var anims: [String: ParamAnim] = [:]
@@ -477,7 +554,24 @@ struct Effect: Codable, Identifiable, Equatable {
         values = kind.params.map(\.defaultValue)
         if kind == .strobe || kind.usesColor { color = .white }
         if kind == .gradient { palette = PalettePreset.all[3].colors }
+        // 文字は暗い色だと沈むので、明るい色だけのパレット
+        if kind == .phyllotaxis { color = RGB.hsb(0.11, 0.55, 1) }
+        if kind == .clock { text = ClockText.defaultFinish; values[1] = 0.3; values[6] = 4 }
+        if kind.isText { palette = [PalettePreset.hex(0x6A00FF), PalettePreset.hex(0xFF00C8), PalettePreset.hex(0x00F0FF)] }
     }
+
+    /// 設定を最初の状態に戻したもの（オン／オフ・文字・自由な形の点はそのまま。描いた形や打った文字は中身なので残す）
+    var reset: Effect {
+        var e = Effect(kind: kind)
+        e.id = id
+        e.enabled = enabled
+        e.text = text
+        e.points = points
+        return e
+    }
+
+    /// 最初の状態のままか（リセットしても変わらない）
+    var isDefault: Bool { reset == self }
 
     /// ストロボの t の時点の光り具合（0 = 元の絵、1 = いっぱいに光る／消える）
     func strobeLevel(at t: Double, beat: BeatClock, origin: Double) -> Double {
@@ -495,7 +589,7 @@ struct Effect: Codable, Identifiable, Equatable {
         return value(5, at: t, beat: beat, origin: origin) * (1 - decay * f / duty)
     }
 
-    enum CodingKeys: String, CodingKey { case id, kind, enabled, values, color, palette, anims, points, mix }
+    enum CodingKeys: String, CodingKey { case id, kind, enabled, values, color, palette, anims, points, mix, text }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -514,6 +608,7 @@ struct Effect: Codable, Identifiable, Equatable {
         anims = try c.decodeIfPresent([String: ParamAnim].self, forKey: .anims) ?? [:]
         points = try c.decodeIfPresent([MaskPoint].self, forKey: .points) ?? MaskPoint.defaultShape
         mix = try c.decodeIfPresent(Double.self, forKey: .mix) ?? 1
+        text = try c.decodeIfPresent(String.self, forKey: .text) ?? TextLook.defaultText
         // 値が足りない（あとから値が増えた）ときは初期値で埋める
         while values.count < kind.params.count { values.append(kind.params[values.count].defaultValue) }
         // 以前の「かかり具合」（反転・カラーライズ）は、エフェクトの不透明度に引き継ぐ（同じ働きなので 1 つにまとめた）

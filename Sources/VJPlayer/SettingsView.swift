@@ -6,6 +6,9 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
+            Section("出力の解像度・フレームレート") {
+                OutputFormatControls()
+            }
             Section("ブラックアウト") {
                 SecondsSlider(label: "暗くなるまで", value: $engine.blackoutFadeOut)
                 SecondsSlider(label: "解除して戻るまで", value: $engine.blackoutFadeIn)

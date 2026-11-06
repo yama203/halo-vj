@@ -170,21 +170,142 @@ static float3 pureHue(float h) {
     return saturate(k - 1.0);
 }
 
-static float4 effectBody(VOut in, constant EffectUniforms& u, texture2d<float> tex, sampler s);
+static float4 effectBody(VOut in, constant EffectUniforms& u, texture2d<float> tex, texture2d<float> aux, sampler s);
+static bool isGenerator(int k) { return (k >= 8 && k <= 13) || k == 15 || k == 16; }
 
 fragment float4 feffect(VOut in [[stage_in]],
                         constant EffectUniforms& u [[buffer(0)]],
                         texture2d<float> tex [[texture(0)]],
+                        texture2d<float> aux [[texture(1)]],
                         sampler s [[sampler(0)]]) {
-    float4 r = effectBody(in, u, tex, s);
+    float4 r = effectBody(in, u, tex, aux, s);
     // 不透明度：元の絵とエフェクトをかけた絵を混ぜる（ジェネレーターは元の絵が無いのでそのまま）
-    if (u.mixAmt >= 0.999 || (u.kind >= 8 && u.kind <= 13)) return r;
+    if (u.mixAmt >= 0.999 || isGenerator(u.kind)) return r;
     return mix(tex.sample(s, in.pos.xy / u.size), r, saturate(u.mixAmt));
 }
 
-static float4 effectBody(VOut in, constant EffectUniforms& u, texture2d<float> tex, sampler s) {
+static float pmod(float x, float m) { return x - m * floor(x / m); }
+
+// テキスト：文字のテクスチャ（白）の不透明度。q は文字のかたまりの中心が 0、高さ H・幅 W（画面の高さが 1）
+static float textCover(texture2d<float> aux, float2 q, float W, float H, float lod) {
+    constexpr sampler ts(filter::linear, mip_filter::linear, address::clamp_to_zero);
+    float2 uv = q / float2(W, H) + 0.5;
+    if (any(uv < 0.0) || any(uv > 1.0)) return 0.0;
+    return aux.sample(ts, uv, level(lod)).a;
+}
+
+static float4 effectBody(VOut in, constant EffectUniforms& u, texture2d<float> tex, texture2d<float> aux, sampler s) {
     float2 px = in.pos.xy;
     float2 uv = px / u.size;
+    if (u.kind == 16) {
+        // フィロタキシス（Resolume 用の FFGL ジェネレーター Phyllotaxis をそのまま移したもの）
+        // a = 生まれる速さ, 広がる速さ, 粒の大きさ, 育つ時間 / b = 外ほど大きく, 光のにじみ, 回った量（回転 × 秒）, 線の長さ
+        // pts[0] = 経過秒, 色のばらつき
+        const float GOLDEN_ANGLE = 2.39996323;
+        float2 uv2 = (px - 0.5 * u.size) / u.size.y;
+        uv2.y = -uv2.y;   // 元（OpenGL）と同じく上が +
+        float time = u.pts[0].x, colorRandom = u.pts[0].y;
+        float birthRate = max(u.a.x, 0.001), moveSpeed = u.a.y, dotRadius = u.a.z, growTime = u.a.w;
+        float sizeGrowth = u.b.x, glowAmt = u.b.y, lineLength = u.b.w;
+        float currentBirth = time * birthRate;
+        float baseRot = u.b.z * 6.28318;
+        float aa = 1.5 / max(u.size.y, 1.0);
+        float3 colorSum = float3(0.0);
+        int maxDots = min(int(ceil(birthRate / max(moveSpeed, 0.0001))) + 2, 2048);
+        for (int j = 0; j < maxDots; j++) {
+            float fi = floor(currentBirth) - float(j);
+            if (fi < 0.0) break;
+            float age = (currentBirth - fi) / birthRate;
+            float r = age * moveSpeed;
+            if (r > 1.0) break;
+            float angle = fi * GOLDEN_ANGLE + baseRot;
+            float2 dirOut = float2(cos(angle), sin(angle));
+            float2 pos = r * dirOut;
+            float sz = dotRadius * (1.0 + r * sizeGrowth);
+            float2 delta = uv2 - pos;
+            if (abs(delta.x) > sz * 5.0 + lineLength || abs(delta.y) > sz * 5.0 + lineLength) continue;
+            float sizeT = smoothstep(0.0, growTime, age);
+            if (sizeT < 0.001) continue;
+            sz *= sizeT;
+            float fade = sizeT * (1.0 - smoothstep(0.6, 0.95, r));
+            // 頭から後ろへ伸びる棒との距離（長さ 0 なら円）
+            float len = min(lineLength, r);
+            float2 seg = -dirOut * len;
+            float segL2 = dot(seg, seg);
+            float h = segL2 > 1e-12 ? clamp(dot(uv2 - pos, seg) / segL2, 0.0, 1.0) : 0.0;
+            float d = length(uv2 - (pos + seg * h));
+            float core = (1.0 - smoothstep(sz - aa, sz + aa, d)) * fade;
+            float halo = exp(-d * d / (sz * sz * 2.5)) * glowAmt * fade;
+            // 粒ごとの色（生まれた番号から決める。時間では変わらない）
+            float3 p3 = fract(float3(fi * 12.9898) * float3(0.1031, 0.1030, 0.0973));
+            p3 += dot(p3, p3.yzx + 33.33);
+            float hue = fract((p3.x + p3.y) * p3.z);
+            float3 pColor = mix(u.color.rgb, hsv2rgb(float3(hue, 0.75, 1.0)), colorRandom);
+            colorSum += pColor * (core + halo);
+        }
+        float3 c = saturate(colorSum);
+        // まわりは透明（明るさをそのまま不透明度に。色は不透明度が掛かった形）
+        return float4(c, max(max(c.r, c.g), c.b));
+    }
+    if (u.kind == 15) {
+        // テキスト：a = 動き, 大きさ（1 行の高さ）, 動いた量, 波 / b.x = グリッチ, b.y = 塗り
+        // pts[0] = テクスチャの横/縦, テクスチャが何行ぶんか, 弾み, 経過秒
+        // pts[1] = テクスチャの高さ（px）, 横の間隔, 縦の間隔（1 行の高さが 1）
+        float2 p = (px - 0.5 * u.size) / u.size.y;
+        float texA = u.pts[0].x, texLines = max(u.pts[0].y, 1.0), punch = u.pts[0].z, t = u.pts[0].w;
+        int m = int(u.a.x + 0.5);
+        float lineH = u.a.y * (m == 5 ? punch : 1.0);
+        float H = lineH * texLines, W = H * texA;
+        if (H <= 1e-5) return float4(0.0);
+        // 時計：流さないときに画面の幅からはみ出す文字（終わったときの文字など）は、幅に収まるように縮める
+        float aspect = u.size.x / u.size.y;
+        if (u.pts[1].w > 0.5 && m != 1 && m != 2 && m != 3 && W - lineH * 0.6 > aspect * 0.94) {
+            float k = aspect * 0.94 / (W - lineH * 0.6);
+            lineH *= k; H *= k; W *= k;
+        }
+        float lod = max(log2(u.pts[1].x / max(H * u.size.y, 1.0)), 0.0);
+        float moved = u.a.z;
+        // 波：横の位置で上下に揺らす
+        p.y += u.a.w * lineH * 0.35 * sin(p.x / max(lineH, 0.02) * 1.6 - t * 4.0);
+        // グリッチ：横の帯がときどきずれて、色が分かれる
+        float g = u.b.x, split = 0.0;
+        if (g > 0.001) {
+            float tt = floor(t * 14.0);
+            float row = floor(p.y * 28.0);
+            if (ghash(float2(row, tt)) < g * 0.45) p.x += (ghash(float2(row * 1.7, tt + 3.1)) - 0.5) * 0.25 * g;
+            if (ghash(float2(tt, 5.3)) < g) split = g * 0.015 * (0.4 + ghash(float2(tt, 8.1)));
+        }
+        // 動き：q を文字のかたまりの中の位置に
+        float2 q = p;
+        // 間隔は文字の余白（テクスチャのまわり）のぶんを引いて、すき間そのものの大きさにする
+        // （余白は上下左右とも 1 行の高さの 0.3。TextLook.pad と同じ）
+        float pad2 = lineH * 0.6;
+        float gapX = lineH * u.pts[1].y - pad2, gapY = lineH * u.pts[1].z - pad2;
+        if (m == 1) {
+            float P = max(W + gapX, lineH * 0.05);
+            q.x = pmod(p.x + moved + 0.5 * P, P) - 0.5 * P;
+        } else if (m == 2) {
+            float P = max(H + gapY, lineH * 0.05);
+            q.y = pmod(p.y + moved + 0.5 * P, P) - 0.5 * P;
+        } else if (m == 3) {
+            // 敷き詰め：行ごとに逆向きに流れる
+            float Py = max(H + gapY, lineH * 0.05), Px = max(W + gapX, lineH * 0.05);
+            float row = floor((p.y + 0.5 * Py) / Py);
+            q.y = pmod(p.y + 0.5 * Py, Py) - 0.5 * Py;
+            float dir = fmod(abs(row), 2.0) < 0.5 ? 1.0 : -1.0;
+            q.x = pmod(p.x + moved * dir + row * W * 0.37 + 0.5 * Px, Px) - 0.5 * Px;
+        }
+        float3 k;
+        if (split > 0.0) {
+            k = float3(textCover(aux, q + float2(split, 0.0), W, H, lod), textCover(aux, q, W, H, lod),
+                       textCover(aux, q - float2(split, 0.0), W, H, lod));
+        } else {
+            k = float3(textCover(aux, q, W, H, lod));
+        }
+        float a = max(max(k.r, k.g), k.b);
+        float3 col = u.b.y > 0.5 ? gpal(u.pal, u.palCount, saturate(q.x / W + 0.5)) : u.color.rgb;
+        return float4(col * k, a);
+    }
     if (u.kind >= 8 && u.kind <= 13) {
         // 縦の長さを 1 とした、中心が 0 の座標（y は下が +）
         float2 p = (px - 0.5 * u.size) / u.size.y;
@@ -791,6 +912,8 @@ final class EffectProcessor {
     private let ctx = MetalContext.shared
     private var pools: [String: [MTLTexture]] = [:]
     var storageMode: MTLStorageMode = .private
+    /// テキストのジェネレーターの文字のテクスチャ
+    private let texts = TextRasterCache()
 
     private func textures(_ key: String, width w: Int, height h: Int) -> [MTLTexture] {
         if let p = pools[key], p[0].width == w, p[0].height == h { return p }
@@ -895,6 +1018,24 @@ final class EffectProcessor {
                 src = dst
                 continue
             }
+            // テキスト：文字のテクスチャ（描き直すときはミップマップ作りを先に積むので、描画の前に用意する）
+            var text: (TextRasterCache.Raster, TextFrame)?
+            if e.kind.isText {
+                let f = TextFrame.at(e, t: now, beat: stack.beat, origin: stack.origin)
+                guard let r = texts.raster(e, frame: f, outHeight: input.height, cb: cb) else {
+                    // 文字が空：透明な絵
+                    let dst = pool[i % 2]
+                    let rpd = MTLRenderPassDescriptor()
+                    rpd.colorAttachments[0].texture = dst
+                    rpd.colorAttachments[0].loadAction = .clear
+                    rpd.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
+                    rpd.colorAttachments[0].storeAction = .store
+                    cb.makeRenderCommandEncoder(descriptor: rpd)?.endEncoding()
+                    src = dst
+                    continue
+                }
+                text = (r, f)
+            }
             let dst = pool[i % 2]
             let rpd = MTLRenderPassDescriptor()
             rpd.colorAttachments[0].texture = dst
@@ -925,9 +1066,22 @@ final class EffectProcessor {
                 }
                 u.ptCount = Int32(pts.count)
             }
+            if e.kind == .phyllotaxis {
+                // 経過秒（粒の生まれた数はこれ × 生まれる速さ）と色のばらつき
+                let el = Float(max(now - stack.origin, 0).truncatingRemainder(dividingBy: 100_000))
+                u.pts.0 = SIMD4(el, Float(e.value(8, at: now, beat: stack.beat, origin: stack.origin)), 0, 0)
+            }
+            if let (r, f) = text {
+                let el = Float(max(now - stack.origin, 0).truncatingRemainder(dividingBy: 1000))
+                u.pts.0 = SIMD4(r.aspect, r.lines, Float(f.punch), el)
+                u.pts.1 = SIMD4(Float(r.texture.height), Float(e.value(10, at: now, beat: stack.beat, origin: stack.origin)),
+                                Float(e.value(11, at: now, beat: stack.beat, origin: stack.origin)),
+                                e.kind == .clock ? 1 : 0)
+            }
             enc.setRenderPipelineState(ctx.effectPipeline)
             enc.setFragmentBytes(&u, length: MemoryLayout<EffectUniforms>.stride, index: 0)
             enc.setFragmentTexture(src, index: 0)
+            enc.setFragmentTexture(text?.0.texture ?? ctx.dummyTexture, index: 1)
             enc.setFragmentSamplerState(ctx.sampler, index: 0)
             enc.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
             enc.endEncoding()
@@ -1374,8 +1528,18 @@ final class RenderLoop {
         }
     }
 
+    /// フレームレートを落とすときのコマの選び方（描画スレッドだけが触る）
+    private var gate = FrameGate()
+
     private func tick() {
         let now = CACurrentMediaTime()
+        // フレームレートを決めていれば、その回数だけ描く（間のコマは前の絵のまま）
+        let fps = engine.targetFPS()
+        if fps > 0 {
+            var period = link.map { CVDisplayLinkGetActualOutputVideoRefreshPeriod($0) } ?? 0
+            if !(period > 0.001 && period < 0.1) { period = 1.0 / 60 }
+            if !gate.shouldRender(now: now, fps: fps, halfPeriod: period / 2) { return }
+        }
         let updated = engine.updateFrame()
         let current: [(ObjectIdentifier, CAMetalLayer, TargetKind)] = lock.withLock {
             stats.ticks += 1
@@ -1407,14 +1571,17 @@ final class RenderLoop {
 
         // 出力・コンポジションは中身が同じ。合成は 1 コマに 1 回だけ（縦横比が同じ画面のうち一番大きい大きさで）して、
         // 出力ウィンドウ・出力モニター・コンポジションのプレビューで使い回す（GPU を節約。見え方も必ず同じになる）
+        // 解像度を決めていれば、どの画面にもその大きさで 1 回だけ合成する
+        let fixedSize = params.format.size
+        func sharedKey(_ w: Int, _ h: Int) -> Int { fixedSize == nil ? Self.aspectKey(w, h) : -1 }
         var shared: [Int: (size: (Int, Int), needs: Bool)] = [:]
         for (_, layer, kind) in current where kind == .output || kind == .composition {
             let w = Int(layer.drawableSize.width), h = Int(layer.drawableSize.height)
             guard w > 0, h > 0 else { continue }
-            let key = Self.aspectKey(w, h)
+            let key = sharedKey(w, h)
             let needs = kind == .composition || !params.testPattern
             let old = shared[key]
-            let size = old.map { $0.size.0 * $0.size.1 >= w * h ? $0.size : (w, h) } ?? (w, h)
+            let size = fixedSize ?? (old.map { $0.size.0 * $0.size.1 >= w * h ? $0.size : (w, h) } ?? (w, h))
             shared[key] = (size, (old?.needs ?? false) || needs)
         }
         var sharedTextures: [Int: MTLTexture] = [:]
@@ -1450,13 +1617,18 @@ final class RenderLoop {
         for (id, layer, kind) in current {
             switch kind {
             case .output, .composition:
-                let key = Self.aspectKey(Int(layer.drawableSize.width), Int(layer.drawableSize.height))
-                let tex = sharedTextures[key]
+                let dw = Double(layer.drawableSize.width), dh = Double(layer.drawableSize.height)
+                let tex = sharedTextures[sharedKey(Int(dw), Int(dh))]
+                // 縦横比が違う画面には、合わせ方（収める・いっぱい・引き伸ばす）で置く
+                let fitM = params.format.fitMatrix(screenAspect: dh > 0 ? dw / dh : 1)
                 if kind == .output {
-                    present(layer, texture: params.testPattern ? nil : tex, params: params)
+                    var p = params
+                    p.homographyInverse = params.homographyInverse * fitM
+                    present(layer, texture: params.testPattern ? nil : tex, params: p)
                 } else {
                     var p = plain
                     p.master = params.compMaster
+                    p.homographyInverse = fitM
                     present(layer, texture: tex, params: p)
                 }
             case .layer, .clipPreview, .scenePreview:

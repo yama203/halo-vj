@@ -432,6 +432,7 @@ struct EffectCard: View {
                 .contentShape(Rectangle())
                 .onTapGesture { toggleOpen() }
                 .help(effect.kind.help + "（クリックで開く／閉じる）")
+                resetButton
                 Button(role: .destructive) { remove() } label: { Image(systemName: "trash").frame(width: 18) }
                     .help("このエフェクトを外す")
             }
@@ -442,8 +443,12 @@ struct EffectCard: View {
                 return NSItemProvider(object: (EffectUIState.movePrefix + effect.id.uuidString) as NSString)
             }
             } else {
-                Text(effect.kind.help).font(.system(size: 11)).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                HStack(alignment: .top, spacing: 8) {
+                    Text(effect.kind.help).font(.system(size: 11)).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
+                    resetButton
+                }
             }
             if open || isBlendSettings {
             if effect.hasMix && !isBlendSettings {
@@ -456,6 +461,7 @@ struct EffectCard: View {
                     .help("このエフェクトの不透明度（かかり具合）。0% で元の絵のまま、100% でいっぱいにかかる")
             }
             if effect.kind == .strobe { strobeSwitches }
+            if effect.kind.isText { textControls }
             LazyVGrid(columns: narrow ? [GridItem(.flexible(), alignment: .top)]
                       : [GridItem(.fixed(UI.paramColumnWidth), spacing: 16), GridItem(.fixed(UI.paramColumnWidth), alignment: .top)],
                       alignment: .leading, spacing: 8) {
@@ -499,7 +505,7 @@ struct EffectCard: View {
                 }
             }
             if effect.kind == .polyMask { PolyMaskControls(effect: $effect) }
-            if effect.kind.usesColor {
+            if effect.kind.usesColor && !(effect.kind.isText && effect.value(5) > 0.5) {
                 HStack(spacing: 10) {
                     Text("色").font(.system(size: 12)).foregroundStyle(.secondary)
                     ColorPicker("", selection: colorBinding(\.color), supportsOpacity: false)
@@ -516,7 +522,9 @@ struct EffectCard: View {
                     }
                 }
             }
-            if effect.kind == .gradient { PaletteEditor(palette: $effect.palette) }
+            if effect.kind == .gradient || (effect.kind.isText && effect.value(5) > 0.5) {
+                PaletteEditor(palette: $effect.palette)
+            }
             if effect.kind == .strobe && effect.value(0) < 0.5 {
                 HStack(spacing: 10) {
                     Text("光る色").font(.system(size: 12)).foregroundStyle(.secondary)
@@ -542,12 +550,150 @@ struct EffectCard: View {
     private func shows(_ i: Int) -> Bool {
         // 以前の「かかり具合」は、上の「不透明度」にまとめた
         if i == effect.kind.amountIndex { return false }
+        if effect.kind == .clock {
+            // モード・表示・細かさは上の欄で。目標の時刻はカウントダウン、長さはタイマー、弾みは数えるときだけ
+            let mode = Int(effect.value(12).rounded())
+            if [12, 13, 14].contains(i) { return false }
+            if (15...19).contains(i) { return false }
+            if i == 20 { return mode == 1 || mode == 2 }
+        }
+        if effect.kind.isText {
+            // 動き・フォント・行の切り替えは上の欄で。速さは動くときだけ
+            if [0, 6, 8].contains(i) { return false }
+            let m = Int(effect.value(0).rounded())
+            if i == 2 { return [1, 2, 3, 4].contains(m) }
+            // 間隔は流す・敷き詰めるときだけ（横に流れる → 横、縦に流れる → 縦、敷き詰め → 両方）
+            if i == 10 { return m == 1 || m == 3 }
+            if i == 11 { return m == 2 || m == 3 }
+        }
         if effect.kind == .strobe {
             // 光り方・合わせるもの・間隔は上のスイッチで。秒のときだけ「1 秒の回数」を出す
             if i <= 2 { return false }
             if i == 3 { return effect.value(1) >= 0.5 }
         }
         return !(effect.kind == .colorize && i == 1 && effect.value(0) > 0.5)
+    }
+
+    /// 値・動き・不透明度・色を最初の状態に戻す
+    private var resetButton: some View {
+        Button { effect = effect.reset } label: {
+            Image(systemName: "arrow.counterclockwise").frame(width: 18)
+        }
+        .disabled(effect.isDefault)
+        .help(effect.kind.isGenerator
+              ? "設定を最初の状態に戻す（値・動き・色。文字はそのまま）"
+              : effect.kind == .polyMask ? "設定を最初の状態に戻す（値・動き・不透明度。描いた形はそのまま）"
+              : "設定を最初の状態に戻す（値・動き・不透明度・色）")
+    }
+
+    /// テキストの文字・動き・フォント・行の切り替え
+    private var textControls: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if effect.kind == .clock { clockControls }
+            let mode = Int(effect.value(12).rounded())
+            if effect.kind == .text || mode == 1 || mode == 2 {
+                if effect.kind == .clock {
+                    Text("0 になったら出す文字（空なら 0 のまま）").font(.system(size: 12)).foregroundStyle(.secondary)
+                }
+                TextEditor(text: Binding(get: { effect.text }, set: { var e = effect; e.text = $0; effect = e }))
+                    .font(.system(size: 14, weight: .semibold))
+                    .scrollContentBackground(.hidden)
+                    .padding(4)
+                    .frame(height: effect.kind == .clock ? 44 : 64)
+                    .background(RoundedRectangle(cornerRadius: 5).fill(Color.black.opacity(0.35)))
+                    .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.gray.opacity(0.4)))
+                    .help(effect.kind == .clock ? "カウントダウン・タイマーが 0 になったときに出す文字。改行もできる"
+                          : "出す文字。改行で行を分ける（「行の切り替え」で 1 行ずつ拍に合わせて切り替えられる）")
+            }
+            labeled("動き") {
+                ChoiceButtons(selection: valueBinding(0),
+                              items: TextLook.motions.indices.map { (Double($0), TextLook.motions[$0]) },
+                              columns: narrow ? 2 : 3)
+            }
+            labeled("フォント") {
+                let n = narrow ? 2 : 5
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 3), count: n), spacing: 3) {
+                    ForEach(TextLook.fonts.indices, id: \.self) { i in
+                        let on = Int(effect.value(6).rounded()) == i
+                        Button { valueBinding(6).wrappedValue = Double(i) } label: {
+                            Text(TextLook.fonts[i].label)
+                                .font(Font(TextLook.font(i, size: 13)))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.6)
+                                .foregroundStyle(on ? Color.white : Color.primary.opacity(0.85))
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 28)
+                                .background(RoundedRectangle(cornerRadius: 5)
+                                    .fill(on ? Color.accentColor : Color.white.opacity(0.07)))
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            if effect.kind == .text {
+            labeled("行の切り替え") {
+                ChoiceButtons(selection: valueBinding(8),
+                              items: TextLook.switchBeats.indices.map {
+                                  (Double($0), $0 == 0 ? "全部の行" : ParamAnim.beatsLabel(TextLook.switchBeats[$0]))
+                              })
+                    .help("改行で分けた行を、拍に合わせて 1 行ずつ出す")
+            }
+            }
+        }
+        .opacity(effect.enabled ? 1 : 0.5)
+    }
+
+    /// 時計のモード・表示・秒より細かく
+    private var clockControls: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            labeled("モード") {
+                ChoiceButtons(selection: valueBinding(12),
+                              items: ClockText.modes.indices.map { (Double($0), ClockText.modes[$0]) },
+                              columns: 2, help: { v in
+                                  ["パソコンの時計の今の時刻", "決めた時刻まで（過ぎた日は次の日のその時刻まで。0 のあと 1 時間は終わった表示）",
+                                   "決めた長さを、クリップを出した時から数える", "クリップを出した時から数える"][Int(v)]
+                              })
+            }
+            let mode = Int(effect.value(12).rounded())
+            if mode == 1 {
+                labeled("目標の時刻") { timeFields([(15, "時"), (16, "分"), (17, "秒")]) }
+            } else if mode == 2 {
+                labeled("長さ") { timeFields([(18, "分"), (19, "秒")]) }
+            }
+            labeled("表示") {
+                ChoiceButtons(selection: valueBinding(13),
+                              items: ClockText.formats.indices.map { (Double($0), ClockText.formats[$0]) })
+                    .help("自動：1 時間以上は 時:分:秒、それより短いと 分:秒。カウントダウン・タイマーの最後の 10 秒は数字だけ")
+            }
+            labeled("秒より細かく") {
+                ChoiceButtons(selection: valueBinding(14), items: [(0.0, "なし"), (1.0, "1/10"), (2.0, "1/100")])
+            }
+        }
+    }
+
+    /// 時刻・長さの数字（ドラッグ・ダブルクリックで入力）
+    private func timeFields(_ items: [(Int, String)]) -> some View {
+        HStack(spacing: 6) {
+            ForEach(items, id: \.0) { i, unit in
+                let p = effect.kind.params[i]
+                ValueDrag(label: unit, value: valueBinding(i), range: p.range, perPoint: p.perPoint,
+                          defaultValue: p.defaultValue, format: { String(format: "%02.0f", $0) })
+                    .frame(height: UI.rowHeight)
+            }
+        }
+    }
+
+    /// 左に名前を付けた行（狭いときは名前を上に）
+    @ViewBuilder
+    private func labeled<C: View>(_ label: String, @ViewBuilder _ content: () -> C) -> some View {
+        let row = narrow ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4)) : AnyLayout(HStackLayout(alignment: .top, spacing: 8))
+        row {
+            Text(label).font(.system(size: 12)).foregroundStyle(.secondary)
+                .frame(width: narrow ? nil : 76, alignment: .leading)
+                .padding(.top, narrow ? 0 : 6)
+            content()
+        }
     }
 
     /// ストロボの切り替え（1 クリックで切り替わるスイッチ）

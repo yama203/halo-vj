@@ -208,6 +208,7 @@ struct TopBar: View {
             }
             .frame(width: 280)
             .help("出力を閉じる／元に戻す：⌘⇧F")
+            OutputFormatButton()
 
             Picker("音声", selection: $engine.audioDeviceUID) {
                 Text("システム既定").tag(String?.none)
@@ -773,6 +774,8 @@ struct SlotCell: View {
     @State private var addPressed = false
     /// 名前の帯を押した（そのままドラッグするとキューに足せる）
     @State private var stripPress = false
+    /// マウスが乗っている所（上の絵 = 出す、下の名前の帯 = 選ぶ）
+    @State private var zone: SlotZone?
 
     var body: some View {
         let slot = engine.slots[index]
@@ -788,7 +791,8 @@ struct SlotCell: View {
 
         ZStack {
             if let slot {
-                SlotContent(slot: slot, active: active, selected: engine.inspectedIndex == index)
+                SlotContent(slot: slot, active: active, selected: engine.inspectedIndex == index,
+                            hoverZone: drag.source == nil && !pressed ? (zone ?? Self.debugZones[index]) : nil)
             } else {
                 // 空きの枠：クリックでこのレイヤーを停止（Arena と同じ）。右上の＋でクリップを読み込む
                 RoundedRectangle(cornerRadius: 6)
@@ -846,6 +850,15 @@ struct SlotCell: View {
         })
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
+        .onContinuousHover(coordinateSpace: .local) { phase in
+            switch phase {
+            case .active(let p):
+                let z: SlotZone = p.y >= height - gridSize.stripHeight ? .strip : .top
+                if zone != z { zone = z }
+            case .ended:
+                zone = nil
+            }
+        }
         .help(slot == nil
               ? (adjustmentRow ? "クリックでこのレイヤーのエフェクトを外す。右上の＋でエフェクトのクリップを作る。エフェクト一覧からドラッグでも作れる"
                                : "クリックでこのレイヤーを停止。右上の＋・右クリック・動画のドロップでクリップを入れる")
@@ -1057,10 +1070,27 @@ extension EnvironmentValues {
     }
 }
 
+/// クリップの枠のどこにマウスが乗っているか
+enum SlotZone { case top, strip }
+
+extension SlotCell {
+    /// 画面確認用：VJ_HOVER=番号:top,番号:strip で、その枠にマウスが乗っている見た目にする
+    static let debugZones: [Int: SlotZone] = {
+        var out: [Int: SlotZone] = [:]
+        for item in (ProcessInfo.processInfo.environment["VJ_HOVER"] ?? "").split(separator: ",") {
+            let p = item.split(separator: ":")
+            if p.count == 2, let i = Int(p[0]) { out[i] = p[1] == "strip" ? .strip : .top }
+        }
+        return out
+    }()
+}
+
 struct SlotContent: View {
     @ObservedObject var slot: ClipSlot
     let active: Bool
     let selected: Bool
+    /// マウスが乗っている所（上の絵を押すと出す、名前の帯を押すと選ぶだけ。どちらか分かるように見せる）
+    var hoverZone: SlotZone? = nil
     @Environment(\.gridSize) private var gridSize
     /// 名前の帯の高さ（ここをクリックすると選択のみ）
     static let stripHeight: CGFloat = 26
@@ -1107,6 +1137,22 @@ struct SlotContent: View {
                             .help("ミュート中（右クリックで解除）")
                     }
                 }
+                .overlay {
+                    // 上の絵に乗った：押すと出力に出す（▶）
+                    if hoverZone == .top {
+                        ZStack {
+                            Color.white.opacity(0.1)
+                            Image(systemName: active ? "arrow.counterclockwise" : "play.fill")
+                                .font(.system(size: gridSize == .small ? 12 : 16, weight: .bold))
+                                .foregroundStyle(.white)
+                                .frame(width: gridSize == .small ? 26 : 34, height: gridSize == .small ? 26 : 34)
+                                .background(Circle().fill(Color.black.opacity(0.55)))
+                                .overlay(Circle().stroke(Color.white.opacity(0.7), lineWidth: 1.5))
+                        }
+                        .padding(.bottom, gridSize.stripHeight)
+                        .allowsHitTesting(false)
+                    }
+                }
 
             VStack(spacing: 2) {
                 HStack(spacing: 4) {
@@ -1138,7 +1184,23 @@ struct SlotContent: View {
                 }
             }
             .frame(height: gridSize.stripHeight)
-            .background(selected ? Color.accentColor.opacity(0.9) : Color.black.opacity(0.65))
+            // 名前の帯に乗った：押すと選ぶだけ（出力しない）。帯を明るい灰色にして（選択中の青と見分ける）、上の線で区切る
+            .background(selected ? Color.accentColor.opacity(hoverZone == .strip ? 1 : 0.9)
+                        : (hoverZone == .strip ? Color(white: 0.42).opacity(0.95) : Color.black.opacity(0.65)))
+            .overlay(alignment: .top) {
+                if hoverZone == .strip {
+                    Rectangle().fill(Color.white.opacity(0.8)).frame(height: 1).allowsHitTesting(false)
+                }
+            }
+            .overlay(alignment: .trailing) {
+                if hoverZone == .strip && gridSize != .small {
+                    Image(systemName: "cursorarrow.click")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .padding(.trailing, 5)
+                        .allowsHitTesting(false)
+                }
+            }
             .help("名前の帯をクリック：選択（出力せずにプレビュー・編集）")
         }
         .clipShape(RoundedRectangle(cornerRadius: 6))

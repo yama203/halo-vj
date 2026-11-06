@@ -536,6 +536,15 @@ final class ClipSlot: ObservableObject, Identifiable, Animatable, EffectHolder {
             if !title.isEmpty { return title }
             return effects.isEmpty ? "エフェクト（空）" : effects.map(\.kind.label).joined(separator: "＋")
         }
+        if let g = generator, g.kind == .text {
+            // テキストは最初の行を名前に
+            let first = g.text.split(separator: "\n").first.map { $0.trimmingCharacters(in: .whitespaces) } ?? ""
+            return first.isEmpty ? g.kind.label : "「" + first + "」"
+        }
+        if let g = generator, g.kind == .clock {
+            let i = min(max(Int(g.value(12).rounded()), 0), ClockText.modes.count - 1)
+            return ClockText.modes[i].components(separatedBy: "（").first ?? g.kind.label
+        }
         return generator?.kind.label ?? url.deletingPathExtension().lastPathComponent
     }
 

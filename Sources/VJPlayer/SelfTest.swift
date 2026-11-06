@@ -931,6 +931,180 @@ enum SelfTest {
             check(edge == 0 && mid > 200, "ジェネレーター（図形）：数 1 なら 1 つだけ（端に出ない）")
         }
         check(EffectKind.generators.allSatisfy { GeneratorThumbnail.image(Effect(kind: $0)) != nil }, "ジェネレーター：サムネイルを描ける")
+        // テキスト：文字を CoreText で描いて出す
+        do {
+            let W = 160, H = 90
+            let blankT: MTLTexture = {
+                let td = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: W, height: H, mipmapped: false)
+                td.usage = [.shaderRead]
+                return ctx.device.makeTexture(descriptor: td)!
+            }()
+            let fxp = EffectProcessor(); fxp.storageMode = .shared
+            func alpha(_ e: Effect, now: Double = 1, beat: BeatClock = BeatClock()) -> [UInt8] {
+                let cb = ctx.queue.makeCommandBuffer()!
+                let out = fxp.apply(EffectStack(effects: [e], beat: beat, origin: 0), to: blankT, key: "t", cb: cb, now: now)
+                cb.commit(); cb.waitUntilCompleted()
+                var px = [UInt8](repeating: 0, count: W * H * 4)
+                out.getBytes(&px, bytesPerRow: W * 4, from: MTLRegionMake2D(0, 0, W, H), mipmapLevel: 0)
+                return stride(from: 3, to: px.count, by: 4).map { px[$0] }
+            }
+            func lit(_ a: [UInt8], x0: Int, x1: Int, y0: Int = 0, y1: Int = 90) -> Int {
+                var n = 0
+                for y in y0..<y1 { for x in x0..<x1 where a[y * W + x] > 128 { n += 1 } }
+                return n
+            }
+            var te = Effect(kind: .text); te.text = "HELLO"
+            var a = lit(alpha(te), x0: 0, x1: W)
+            let corner = lit(alpha(te), x0: 0, x1: 10, y0: 0, y1: 10)
+            check(a > 200 && corner == 0, "テキスト：真ん中に文字が出て、まわりは透明（\(a) px）")
+            var empty = te; empty.text = "  \n "
+            check(lit(alpha(empty), x0: 0, x1: W) == 0, "テキスト：文字が空なら透明")
+            let saved = try? JSONDecoder().decode(Effect.self, from: JSONEncoder().encode(te))
+            check(saved?.text == "HELLO", "テキスト：文字を保存して読み込める")
+            let old = try? JSONDecoder().decode(Effect.self, from: Data(#"{"kind":"text"}"#.utf8))
+            check(old?.text == TextLook.defaultText && old?.values.count == EffectKind.text.params.count, "テキスト：値が無くても初期値で読める")
+            // 横に流れる：時間で絵が変わる
+            var scroll = te; scroll.values[0] = 1; scroll.values[2] = 0.5
+            check(alpha(scroll, now: 0) != alpha(scroll, now: 0.3), "テキスト（横に流れる）：時間で流れる")
+            // 敷き詰め：画面の上の方にも文字がある
+            var tile = te; tile.values[0] = 3; tile.values[1] = 0.15
+            a = lit(alpha(tile), x0: 0, x1: W, y0: 0, y1: 20)
+            check(a > 30, "テキスト（敷き詰め）：画面いっぱいに並ぶ（上の端 \(a) px）")
+            // 1 文字ずつ：途中では左の方だけ、全部出たら右まで
+            var type = te; type.values[0] = 4; type.values[2] = 0.25   // 1 秒に 2 文字
+            let f0 = TextFrame.at(type, t: 0.6, beat: BeatClock(), origin: 0), f1 = TextFrame.at(type, t: 2.6, beat: BeatClock(), origin: 0)
+            check(f0.visible == 2 && f1.visible == 5, "テキスト（1 文字ずつ）：時間で文字が増える（\(f0.visible ?? -1) → \(f1.visible ?? -1)）")
+            let part = alpha(type, now: 0.6)
+            check(lit(part, x0: 0, x1: W / 2) > 50 && lit(part, x0: W * 3 / 4, x1: W) == 0,
+                  "テキスト（1 文字ずつ）：まだの文字は出ない（並びは全部出したときと同じ所）")
+            // 行の切り替え：1 拍ごとに次の行（BPM 120 → 0.5 秒ごと）
+            var lines = te; lines.text = "A\nB\n\nC"; lines.values[8] = 1
+            let ls = [0.1, 0.6, 1.1, 1.6].map { TextFrame.at(lines, t: $0, beat: BeatClock(), origin: 0).text }
+            check(ls == ["A", "B", "C", "A"], "テキスト（行の切り替え）：拍ごとに次の行、空の行は飛ばす（\(ls)）")
+            var punch = te; punch.values[0] = 5
+            let p0 = TextFrame.at(punch, t: 0.01, beat: BeatClock(), origin: 0).punch
+            let p1 = TextFrame.at(punch, t: 0.45, beat: BeatClock(), origin: 0).punch
+            check(p0 > 1.2 && p1 < 1.01, String(format: "テキスト（拍で弾む）：拍の頭で大きく、すぐ戻る（%.2f → %.2f）", p0, p1))
+            // 縁取りだけ：塗りより光る所が少ない
+            var outline = te; outline.values[9] = 1; outline.values[1] = 0.5
+            var filled = te; filled.values[1] = 0.5
+            let ao = lit(alpha(outline), x0: 0, x1: W), af = lit(alpha(filled), x0: 0, x1: W)
+            check(ao > 50 && ao < af * 3 / 4, "テキスト（縁取りだけ）：線だけになる（\(ao) / \(af) px）")
+            check(TextLook.fonts.indices.allSatisfy { i -> Bool in
+                var f = te; f.values[6] = Double(i)
+                return lit(alpha(f), x0: 0, x1: W) > 100
+            }, "テキスト：どのフォントでも描ける")
+            // 間隔：広げると、敷き詰めたときに光る所が減る
+            var tight = tile; tight.values[10] = 0; tight.values[11] = 0
+            var loose = tile; loose.values[10] = 3; loose.values[11] = 2
+            let at = lit(alpha(tight), x0: 0, x1: W), al = lit(alpha(loose), x0: 0, x1: W)
+            check(al < at * 2 / 3, "テキスト（敷き詰め）：間隔を広げるとすき間が広がる（\(at) → \(al) px）")
+            var sc0 = scroll; sc0.values[10] = 0
+            var sc1 = scroll; sc1.values[10] = 4
+            check(alpha(sc0) != alpha(sc1), "テキスト（横に流れる）：横の間隔が効く")
+            var changed = te; changed.values[1] = 0.9; changed.mix = 0.3; changed.color = RGB(r: 1, g: 0, b: 0)
+            changed.setAnim(1, { var x = changed.anim(1); x.mode = .beat; return x }()); changed.enabled = false
+            let back = changed.reset
+            check(!changed.isDefault && back.isDefault && back.values == Effect(kind: .text).values && back.anims.isEmpty
+                  && back.mix == 1 && back.color == .white && back.text == "HELLO" && back.id == te.id && !back.enabled,
+                  "リセット：値・動き・不透明度・色は最初に戻り、文字・オン／オフ・id はそのまま")
+            // 時計
+            check(ClockText.string(3725, mode: 2, format: 0, frac: 0) == "01:02:05"
+                  && ClockText.string(65, mode: 2, format: 0, frac: 0) == "01:05"
+                  && ClockText.string(9.3, mode: 2, format: 0, frac: 0) == "10"
+                  && ClockText.string(9.3, mode: 2, format: 0, frac: 1) == "00:09.3"
+                  && ClockText.string(13 * 3600 + 5 * 60 + 7.5, mode: 0, format: 0, frac: 0) == "13:05:07"
+                  && ClockText.string(75.42, mode: 3, format: 0, frac: 2) == "01:15.42"
+                  && ClockText.string(3725, mode: 2, format: 4, frac: 0) == "3725",
+                  "時計：表示（自動は 時:分:秒／分:秒、最後の 10 秒は数字だけ、数えるときは切り上げ）")
+            let cal = Calendar.current
+            func today(_ h: Int, _ m: Int, _ sec: Int) -> Date {
+                var c = cal.dateComponents([.year, .month, .day], from: Date()); c.hour = h; c.minute = m; c.second = sec
+                return cal.date(from: c)!
+            }
+            let ck = Effect(kind: .clock)   // カウントダウン 0:00:00、終わったら HAPPY NEW YEAR
+            let c1 = ClockText.at(ck, wall: today(23, 59, 50), elapsed: 0)
+            let c2 = ClockText.at(ck, wall: today(0, 0, 30), elapsed: 0)
+            let c3 = ClockText.at(ck, wall: today(10, 0, 0), elapsed: 0)
+            check(c1.text == "10" && c2.text == ClockText.defaultFinish && c3.text == "14:00:00",
+                  "時計（カウントダウン）：0 時まで 10 秒 → 「10」、過ぎて 30 秒 → 終わりの文字、昼 → 次の 0 時まで（\(c1.text) / \(c2.text) / \(c3.text)）")
+            check(c1.punch > 1.3 && ClockText.at(ck, wall: today(23, 59, 50).addingTimeInterval(0.5), elapsed: 0).punch < 1.01,
+                  "時計：最後の 10 秒は数字が変わった瞬間に弾む")
+            var timer = ck; timer.values[12] = 2; timer.text = ""
+            check(ClockText.at(timer, wall: Date(), elapsed: 0).text == "10:00"
+                  && ClockText.at(timer, wall: Date(), elapsed: 600.5).text == "0",
+                  "時計（タイマー）：10 分から数えて、0 で止まる（終わりの文字が空なら 0 のまま）")
+            var sw = ck; sw.values[12] = 3
+            check(ClockText.at(sw, wall: Date(), elapsed: 75).text == "01:15", "時計（ストップウォッチ）：出してからの時間")
+            var big = sw; big.values[1] = 0.4
+            check(lit(alpha(big), x0: 0, x1: W) > 200, "時計：数字が描ける")
+            var fin = ck; fin.values[12] = 2; fin.values[18] = 0; fin.values[19] = 0; fin.values[1] = 0.35
+            let fa = alpha(fin)
+            check(lit(fa, x0: 0, x1: W) > 150 && lit(fa, x0: 0, x1: 2) == 0 && lit(fa, x0: W - 2, x1: W) == 0,
+                  "時計：終わったときの長い文字は、画面の幅に収まるように縮める")
+            check(EffectKind.clock.params.count == 21 && Effect(kind: .clock).reset.text == ClockText.defaultFinish,
+                  "時計：値の数・リセットしても終わりの文字は残る")
+            // 1/100 秒：毎コマ描き直しても軽いか（1080p）
+            do {
+                let td = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: 1920, height: 1080, mipmapped: false)
+                td.usage = [.shaderRead]
+                let bigT = ctx.device.makeTexture(descriptor: td)!
+                var hs = sw; hs.values[14] = 2; hs.values[1] = 0.35
+                let p = EffectProcessor()
+                let t0 = CACurrentMediaTime()
+                for k in 0..<60 {
+                    let cb = ctx.queue.makeCommandBuffer()!
+                    _ = p.apply(EffectStack(effects: [hs], origin: 0), to: bigT, key: "b", cb: cb, now: 1 + Double(k) / 60)
+                    cb.commit(); cb.waitUntilCompleted()
+                }
+                let ms = (CACurrentMediaTime() - t0) / 60 * 1000
+                check(ms < 8, String(format: "時計：1/100 秒を毎コマ描き直しても軽い（1 コマ %.2f ms）", ms))
+            }
+            // 出力の解像度・フレームレート
+            do {
+                func renders(_ fps: Double, hz: Double, seconds: Double = 2) -> Int {
+                    var g = FrameGate(), n = 0
+                    let ticks = Int(seconds * hz)
+                    for k in 0..<ticks where g.shouldRender(now: 100 + Double(k) / hz, fps: fps, halfPeriod: 0.5 / hz) { n += 1 }
+                    return n
+                }
+                let r30 = renders(30, hz: 60), r25 = renders(25, hz: 60), r0 = renders(0, hz: 60), r60 = renders(60, hz: 120)
+                let r24 = renders(24, hz: 120), r120 = renders(120, hz: 60)
+                check(r30 == 60 && abs(r25 - 50) <= 1 && r0 == 120 && r60 == 120 && abs(r24 - 48) <= 1 && r120 == 120,
+                      "フレームレート：決めた回数だけ描く（60Hz で 30fps \(r30)/2 秒・25fps \(r25)・120Hz で 60fps \(r60)・24fps \(r24)）")
+                var f = OutputFormat(); f.width = 1920; f.height = 1080
+                func apply(_ m: simd_float3x3, _ x: Float, _ y: Float) -> SIMD2<Float> { let v = m * SIMD3(x, y, 1); return SIMD2(v.x, v.y) / v.z }
+                let fitM = f.fitMatrix(screenAspect: 4.0 / 3)
+                let top = apply(fitM, 0.5, 0.125), mid = apply(fitM, 0.5, 0.5)
+                f.fit = .fill
+                let left = apply(f.fitMatrix(screenAspect: 4.0 / 3), 0, 0.5)
+                f.fit = .stretch
+                check(abs(top.y) < 1e-4 && abs(mid.x - 0.5) < 1e-4 && abs(mid.y - 0.5) < 1e-4 && abs(left.x - 0.125) < 1e-4
+                      && f.fitMatrix(screenAspect: 4.0 / 3) == matrix_identity_float3x3,
+                      "解像度：縦横比が違う出力先には 収める（上下に黒帯）・いっぱい（左右が切れる）・引き伸ばす で置く")
+                let en = Engine(persistent: false)
+                en.screenAspect = 4.0 / 3
+                let autoSize = en.compositionSize
+                en.outputFormat = OutputFormat(width: 1280, height: 720, fps: 30)
+                let saved = try? JSONDecoder().decode(Engine.SavedState.self, from: JSONEncoder().encode(en.makeState(relativeTo: nil)))
+                let en2 = Engine(persistent: false)
+                if let saved { en2.apply(saved, baseDir: nil) }
+                check(autoSize == (1440, 1080) && abs(en.outputAspect - 16.0 / 9) < 1e-6 && en.compositionSize == (1280, 720)
+                      && en.renderParams().format.fps == 30 && en.targetFPS() == 30
+                      && en2.outputFormat == OutputFormat(width: 1280, height: 720, fps: 30),
+                      "解像度・フレームレート：合成の大きさ・縦横比・描画スレッドに渡る値・保存して読み込める")
+            }
+            // フィロタキシス（Resolume 用の FFGL から移したもの）
+            do {
+                let ph = Effect(kind: .phyllotaxis)
+                let a0 = alpha(ph, now: 0), a5 = alpha(ph, now: 5), a6 = alpha(ph, now: 6)
+                let center = lit(a5, x0: 60, x1: 100, y0: 25, y1: 65), all = lit(a5, x0: 0, x1: W)
+                check(lit(a0, x0: 0, x1: W) == 0 && center > 0 && all > 20 && a5 != a6 && ph.values.count == 9,
+                      "フィロタキシス：出したときは空、時間がたつと中心から粒が広がる（\(all) px）")
+            }
+            let slot = ClipSlot(generator: te)
+            check(slot.name == "「HELLO」", "テキスト：クリップの名前は最初の行（\(slot.name)）")
+        }
         // ストロボ：BPM 120・間隔 1/2 拍（0.25 秒）・光る長さ 50% → 0〜0.125 秒は光る、0.125〜0.25 秒は元の絵
         let stb = Effect(kind: .strobe)
         let clock = BeatClock()
@@ -2348,6 +2522,94 @@ enum SelfTest {
         px.withUnsafeBufferPointer { memcpy(rep.bitmapData!, $0.baseAddress!, px.count) }
         try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
         print("書き出しました: \(path)")
+    }
+
+    /// 開発用：テキストのジェネレーターのいろいろな見た目を 1 枚に並べて書き出す
+    ///   VJPlayer --text-preview out.png [時刻]
+    static func textPreview(path: String, time: Double) {
+        let ctx = MetalContext.shared
+        let cw = 640, ch = 360, cols = 3
+        // （文字, 動き, フォント, 塗り, 波, グリッチ, 縁取り, 大きさ）
+        let looks: [(String, Double, Double, Double, Double, Double, Double, Double)] = [
+            ("HALO VJ", 0, 0, 0, 0, 0, 0, 0.22),
+            ("夜明けまで踊れ", 0, 2, 1, 0, 0, 0, 0.18),
+            ("NO SLEEP\nTILL DAWN", 0, 5, 0, 0, 0, 1, 0.2),
+            ("BASS ", 1, 4, 1, 0, 0, 0, 0.3),
+            ("TOKYO TECHNO", 3, 6, 0, 0, 0, 0, 0.12),
+            ("GLITCH", 0, 4, 0, 0, 0.8, 0, 0.3),
+            ("wave", 0, 9, 1, 0.8, 0, 0, 0.3),
+            ("タイプライター", 4, 8, 0, 0, 0, 0, 0.14),
+            ("Didot", 5, 7, 0, 0, 0, 0, 0.3),
+        ]
+        let rows = (looks.count + cols - 1) / cols
+        let W = cw * cols, H = ch * rows
+        var sheet = [UInt8](repeating: 0, count: W * H * 4)
+        let td = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: cw, height: ch, mipmapped: false)
+        td.usage = [.shaderRead]
+        let blank = ctx.device.makeTexture(descriptor: td)!
+        let fxp = EffectProcessor(); fxp.storageMode = .shared
+        for (n, l) in looks.enumerated() {
+            var e = Effect(kind: .text)
+            e.text = l.0
+            e.values[0] = l.1; e.values[6] = l.2; e.values[5] = l.3; e.values[3] = l.4; e.values[4] = l.5
+            e.values[9] = l.6; e.values[1] = l.7
+            if l.3 > 0.5 { e.palette = PalettePreset.all[3].colors }
+            let cb = ctx.queue.makeCommandBuffer()!
+            let out = fxp.apply(EffectStack(effects: [e]), to: blank, key: "p\(n)", cb: cb, now: time)
+            cb.commit(); cb.waitUntilCompleted()
+            var px = [UInt8](repeating: 0, count: cw * ch * 4)
+            out.getBytes(&px, bytesPerRow: cw * 4, from: MTLRegionMake2D(0, 0, cw, ch), mipmapLevel: 0)
+            let ox = (n % cols) * cw, oy = (n / cols) * ch
+            for y in 0..<ch { for x in 0..<cw {
+                let i = (y * cw + x) * 4, j = ((oy + y) * W + ox + x) * 4
+                let a = Double(px[i + 3]) / 255
+                let bg: Double = (x == 0 || y == 0) ? 90 : 22
+                // BGRA（色に不透明度が掛かっている）→ 暗い下地に重ねて RGBA
+                sheet[j] = UInt8(min(Double(px[i + 2]) + bg * (1 - a), 255))
+                sheet[j + 1] = UInt8(min(Double(px[i + 1]) + bg * (1 - a), 255))
+                sheet[j + 2] = UInt8(min(Double(px[i]) + bg * (1 - a), 255))
+                sheet[j + 3] = 255
+            } }
+        }
+        let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: W, pixelsHigh: H, bitsPerSample: 8, samplesPerPixel: 4,
+                                   hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: W * 4, bitsPerPixel: 32)!
+        sheet.withUnsafeBufferPointer { memcpy(rep.bitmapData!, $0.baseAddress!, sheet.count) }
+        try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
+        print("書き出しました: \(path)")
+    }
+
+    /// 開発用：ジェネレーターを 1 枚（1280×720、暗い下地）書き出す。かかった GPU 時間も出す
+    static func genPreview(kind: EffectKind, path: String, time: Double, values: [Double], random: Double?) {
+        let ctx = MetalContext.shared
+        let W = 1280, H = 720
+        let td = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: W, height: H, mipmapped: false)
+        td.usage = [.shaderRead]
+        let blank = ctx.device.makeTexture(descriptor: td)!
+        var e = Effect(kind: kind)
+        for (i, v) in values.enumerated() where i < e.values.count { e.values[i] = v }
+        if let random, e.values.count > 8 { e.values[8] = random }
+        let fxp = EffectProcessor(); fxp.storageMode = .shared
+        var out = blank
+        var ms = 0.0
+        for k in 0..<3 {
+            let cb = ctx.queue.makeCommandBuffer()!
+            out = fxp.apply(EffectStack(effects: [e]), to: blank, key: "g", cb: cb, now: time)
+            cb.commit(); cb.waitUntilCompleted()
+            if k == 2 { ms = (cb.gpuEndTime - cb.gpuStartTime) * 1000 }
+        }
+        var px = [UInt8](repeating: 0, count: W * H * 4)
+        out.getBytes(&px, bytesPerRow: W * 4, from: MTLRegionMake2D(0, 0, W, H), mipmapLevel: 0)
+        for i in stride(from: 0, to: px.count, by: 4) {
+            let a = Double(px[i + 3]) / 255
+            let b = UInt8(min(Double(px[i]) + 14 * (1 - a), 255)), r = UInt8(min(Double(px[i + 2]) + 14 * (1 - a), 255))
+            px[i + 1] = UInt8(min(Double(px[i + 1]) + 14 * (1 - a), 255))
+            px[i] = r; px[i + 2] = b; px[i + 3] = 255
+        }
+        let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: W, pixelsHigh: H, bitsPerSample: 8, samplesPerPixel: 4,
+                                   hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: W * 4, bitsPerPixel: 32)!
+        px.withUnsafeBufferPointer { memcpy(rep.bitmapData!, $0.baseAddress!, px.count) }
+        try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
+        print(String(format: "書き出しました: %@（GPU %.2f ms / 1280×720）", path, ms))
     }
 
     /// 開発用：オーバードライブ加算の GPU 時間を測る（1 コマあたり ms）

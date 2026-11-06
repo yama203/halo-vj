@@ -11,6 +11,8 @@ struct RenderParams {
     var master: Float
     /// コンポジションプレビューに掛ける明るさ（ブラックアウトの影響を受けない）
     var compMaster: Float = 1
+    /// 出力の解像度・フレームレート（解像度を決めていれば、その大きさで合成する）
+    var format = OutputFormat()
 }
 
 /// 表示中の映像フレーム。GPU が描画し終わるまで参照を持ち続けるための入れ物。
@@ -282,8 +284,31 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
             scheduleSave()
         }
     }
-    /// 出力先の縦横比（プレビューの形に使う）
-    @Published var outputAspect: CGFloat = 16.0 / 9.0
+    /// 合成の縦横比（プレビューの形に使う）。解像度を決めていればその縦横比、無ければ出力先の縦横比
+    @Published private(set) var outputAspect: CGFloat = 16.0 / 9.0
+    /// 出力先（ディスプレイ・出力ウィンドウ）の縦横比
+    @Published var screenAspect: CGFloat = 16.0 / 9.0 {
+        didSet { updateOutputAspect() }
+    }
+    /// 出力の解像度・フレームレート（プロジェクトに保存する）
+    @Published var outputFormat = OutputFormat() {
+        didSet {
+            guard outputFormat != oldValue else { return }
+            updateOutputAspect()
+            syncRenderState()
+            scheduleSave()
+        }
+    }
+
+    private func updateOutputAspect() {
+        let a = outputFormat.aspect.map { CGFloat($0) } ?? screenAspect
+        if outputAspect != a { outputAspect = a }
+    }
+
+    /// 合成の大きさ（px）。解像度を決めていなければ、高さ 1080 で出力先の縦横比
+    var compositionSize: (Int, Int) {
+        outputFormat.size ?? (max(Int((1080 * screenAspect).rounded()), 1), 1080)
+    }
 
     private(set) var homographyInverse = matrix_identity_float3x3
 
@@ -343,6 +368,7 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
         var compMuted = false
         /// ジェネレーターを描く大きさ（出力の縦横比で、高さ 1080）
         var generatorSize = (1920, 1080)
+        var format = OutputFormat()
         var selectedLayer = 0
         /// 押しているパッドのエフェクト（出力のいちばん最後に、この順でかける）
         var padStacks: [PadRender] = []
@@ -1025,7 +1051,8 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
         state.beat = beatClock
         state.compEffects = EffectStack(effects: effects, beat: beatClock)
         state.compMuted = compMuted
-        state.generatorSize = (max(Int((1080 * outputAspect).rounded()), 1), 1080)
+        state.generatorSize = compositionSize
+        state.format = outputFormat
         state.previewEffects = EffectStack(effects: inspectedIndex.flatMap { slots[$0]?.effects } ?? [], beat: beatClock,
                                            origin: inspectedIndex.flatMap { slots[$0]?.animOrigin } ?? 0)
         state.selectedLayer = selectedLayer
@@ -1431,6 +1458,9 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
     }
 
     /// コーナーピン・テストパターン・マスター不透明度・ブラックアウト（描画スレッド用）
+    /// 描く回数（1 秒あたり。0 = ディスプレイに合わせる）。描画スレッドから
+    func targetFPS() -> Double { renderLock.withLock { renderState.format.fps } }
+
     func renderParams() -> RenderParams {
         let now = CACurrentMediaTime()
         return renderLock.withLock {
@@ -1441,7 +1471,7 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
             return RenderParams(homographyInverse: renderState.homographyInverse,
                                 testPattern: renderState.testPattern,
                                 master: mm * renderState.blackoutFade.value(at: now),
-                                compMaster: mm)
+                                compMaster: mm, format: renderState.format)
         }
     }
 
@@ -1593,6 +1623,8 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
         var pads: [SavedPad]?
         /// キューリスト
         var cues: [Cue]?
+        /// 出力の解像度・フレームレート（無ければ出力先に合わせる）
+        var outputFormat: OutputFormat?
         /// 自動保存だけ：開いていたプロジェクトと、未保存の変更があったか
         var projectPath: String?
         var projectDirty: Bool?
@@ -1682,7 +1714,8 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
             decks: decks.map { SavedDeck(id: $0.id, name: $0.name) },
             currentDeck: currentDeck,
             pads: savedPads,
-            cues: cues.isEmpty ? nil : cues)
+            cues: cues.isEmpty ? nil : cues,
+            outputFormat: outputFormat == OutputFormat() ? nil : outputFormat)
     }
 
     private func restore() {
@@ -1736,6 +1769,7 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
         activeSceneID = nil
         closeSceneEditor()
         bpm = state.bpm ?? 120
+        outputFormat = state.outputFormat ?? OutputFormat()
         masterSpeed = 1
         corners = state.corners.count == 4 ? state.corners.map { SIMD2($0[0], $0[1]) } : Engine.defaultCorners
         for (layer, saved) in zip(layers, state.layers ?? []) {

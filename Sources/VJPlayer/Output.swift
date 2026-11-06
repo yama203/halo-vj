@@ -79,10 +79,13 @@ final class OutputController: NSObject, ObservableObject, NSWindowDelegate {
                              styleMask: [.titled, .resizable, .closable, .miniaturizable],
                              backing: .buffered, defer: false)
             w.title = "出力"
-            w.contentAspectRatio = NSSize(width: 16, height: 9)
+            // 解像度を決めていればその縦横比、無ければ 16:9
+            let a = engine.outputFormat.aspect ?? 16.0 / 9.0
+            w.setContentSize(NSSize(width: 960, height: (960 / a).rounded()))
+            w.contentAspectRatio = NSSize(width: a, height: 1)
             w.center()
             install(on: w)
-            engine.outputAspect = 16.0 / 9.0
+            engine.screenAspect = a
             RenderLoop.shared.setDisplay(nil)
             w.makeKeyAndOrderFront(nil)
 
@@ -99,7 +102,7 @@ final class OutputController: NSObject, ObservableObject, NSWindowDelegate {
             w.backgroundColor = .black
             w.hasShadow = false
             install(on: w)
-            engine.outputAspect = screen.frame.width / max(screen.frame.height, 1)
+            engine.screenAspect = screen.frame.width / max(screen.frame.height, 1)
             RenderLoop.shared.setDisplay(id)
             w.orderFrontRegardless()
         }
