@@ -62,6 +62,8 @@ struct LayoutState: Codable, Equatable {
     var dockMode = false
     /// 自由レイアウトの区画
     var dock: DockNode?
+    /// 今のワークスペースの名前（nil = まだ選んでいない）
+    var workspace: String?
 
     init() {}
 
@@ -76,6 +78,7 @@ struct LayoutState: Codable, Equatable {
         frames = try c.decodeIfPresent([String: String].self, forKey: .frames) ?? [:]
         dockMode = try c.decodeIfPresent(Bool.self, forKey: .dockMode) ?? false
         dock = (try? c.decodeIfPresent(DockNode.self, forKey: .dock))?.normalized() ?? (dockMode ? DockNode.standard : nil)
+        workspace = try c.decodeIfPresent(String.self, forKey: .workspace)
     }
 }
 
@@ -97,8 +100,16 @@ final class LayoutManager: NSObject, ObservableObject, NSWindowDelegate {
     private let presetsKey = "layoutPresets"
     private let presetNamesKey = "layoutPresetNames"
 
-    override init() {
+    /// persist: false はテスト用（設定を読まず、保存もしない。最初の並べ方から始める）
+    init(persist: Bool = true) {
         let d = UserDefaults.standard
+        readOnly = !persist || ProcessInfo.processInfo.environment["VJ_LAYOUT_JSON"] != nil
+        if !persist {
+            state = LayoutState()
+            presets = [:]
+            super.init()
+            return
+        }
         if let path = ProcessInfo.processInfo.environment["VJ_LAYOUT_JSON"],
            let data = FileManager.default.contents(atPath: path),
            let st = try? JSONDecoder().decode(LayoutState.self, from: data) {
@@ -114,8 +125,8 @@ final class LayoutManager: NSObject, ObservableObject, NSWindowDelegate {
         super.init()
     }
 
-    /// 画面確認用：VJ_LAYOUT_JSON=ファイル で、そのレイアウトで起動する（設定には保存しない）
-    private let readOnly = ProcessInfo.processInfo.environment["VJ_LAYOUT_JSON"] != nil
+    /// 画面確認用：VJ_LAYOUT_JSON=ファイル で、そのレイアウトで起動する（設定には保存しない）。テスト用のものも保存しない
+    private let readOnly: Bool
 
     private func saveState() {
         guard !readOnly else { return }
@@ -218,26 +229,89 @@ final class LayoutManager: NSObject, ObservableObject, NSWindowDelegate {
         state.detached.removeAll { $0 == p }
     }
 
-    // MARK: - 保存したレイアウト
+    // MARK: - ワークスペース（保存したレイアウト）
 
-    /// 今の並べ方を名前を付けて保存する（同じ名前なら上書き）
-    func savePreset(_ name: String) {
-        // 開いているウィンドウの場所を入れてから保存する
-        for (p, w) in windows { state.frames[p.rawValue] = NSStringFromRect(w.frame) }
-        presets[name] = state
-        if !presetNames.contains(name) { presetNames.append(name) }
-        savePresets()
+    /// はじめから用意してあるワークスペース
+    static let builtinWorkspaces = ["いつもの", "ポン出し", "クラブ VJ"]
+
+    static func builtinState(_ name: String) -> LayoutState? {
+        var s = LayoutState()
+        switch name {
+        case "いつもの": break
+        case "ポン出し": s.dockMode = true; s.dock = DockNode.cuePlayback
+        case "クラブ VJ": s.dockMode = true; s.dock = DockNode.clubVJ
+        default: return nil
+        }
+        s.workspace = name
+        return s
     }
 
-    func applyPreset(_ name: String) {
-        guard let s = presets[name] else { return }
-        state = s
+    /// 上のバーに並べるワークスペース（はじめからのもの → 自分で保存したもの）
+    var workspaceNames: [String] { Self.builtinWorkspaces + presetNames.filter { !Self.builtinWorkspaces.contains($0) } }
+
+    /// 今の並べ方（別ウィンドウの場所も入れて）
+    private func snapshot() -> LayoutState {
+        var s = state
+        for (p, w) in windows { s.frames[p.rawValue] = NSStringFromRect(w.frame) }
+        return s
+    }
+
+    /// ワークスペースを切り替える。今のワークスペースの並べ方は覚えておく（戻ると、いじった形のまま）
+    func switchWorkspace(_ name: String) {
+        guard name != state.workspace else { return }
+        if let cur = state.workspace {
+            presets[cur] = snapshot()
+            if !Self.builtinWorkspaces.contains(cur) && !presetNames.contains(cur) { presetNames.append(cur) }
+        } else if !isBuiltinUnchanged(state) {
+            // まだワークスペースを選んでいなかった今の並べ方は、なくさないよう「前の並べ方」として残す
+            var s = snapshot()
+            s.workspace = "前の並べ方"
+            presets["前の並べ方"] = s
+            if !presetNames.contains("前の並べ方") { presetNames.append("前の並べ方") }
+        }
+        guard var next = presets[name] ?? Self.builtinState(name) else { savePresets(); return }
+        next.workspace = name
+        state = next
+        savePresets()
         syncWindows()
     }
 
+    /// はじめからのワークスペースそのままか（「いつもの」で何もいじっていない、など）
+    private func isBuiltinUnchanged(_ s: LayoutState) -> Bool {
+        var a = s; a.workspace = nil; a.frames = [:]
+        return Self.builtinWorkspaces.contains { n in
+            guard var b = Self.builtinState(n) else { return false }
+            b.workspace = nil
+            return a == b
+        }
+    }
+
+    /// 今の並べ方を、名前を付けたワークスペースとして保存して、それに切り替える（同じ名前なら上書き）
+    func savePreset(_ name: String) {
+        var s = snapshot()
+        s.workspace = name
+        presets[name] = s
+        if !Self.builtinWorkspaces.contains(name) && !presetNames.contains(name) { presetNames.append(name) }
+        state.workspace = name
+        savePresets()
+    }
+
+    func applyPreset(_ name: String) { switchWorkspace(name) }
+
+    /// はじめからのワークスペースを最初の形に戻す（今そのワークスペースなら、表示も戻す）
+    func resetWorkspace(_ name: String) {
+        guard let s = Self.builtinState(name) else { return }
+        presets[name] = nil
+        if state.workspace == name { state = s; syncWindows() }
+        savePresets()
+    }
+
+    /// 自分で保存したワークスペースを消す（はじめからのものは最初の形に戻す）
     func deletePreset(_ name: String) {
+        if Self.builtinWorkspaces.contains(name) { resetWorkspace(name); return }
         presets[name] = nil
         presetNames.removeAll { $0 == name }
+        if state.workspace == name { state.workspace = nil }
         savePresets()
     }
 
@@ -347,6 +421,61 @@ struct SplitHandle: View {
     }
 }
 
+/// 上のバーのワークスペースの切り替え（ポン出し・クラブ VJ・自分で保存したもの）
+struct WorkspaceBar: View {
+    @ObservedObject var layout = LayoutManager.shared
+
+    var body: some View {
+        HStack(spacing: 2) {
+            Image(systemName: "rectangle.3.group")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+                .padding(.trailing, 4)
+                .help("ワークスペース：画面の並べ方。切り替えると、いじった形は覚えておく")
+            ForEach(layout.workspaceNames, id: \.self) { n in
+                let on = layout.state.workspace == n
+                Button {
+                    layout.switchWorkspace(n)
+                } label: {
+                    Text(n)
+                        .font(.system(size: 12, weight: on ? .bold : .medium))
+                        .lineLimit(1)
+                        .padding(.horizontal, 10)
+                        .frame(height: 26)
+                        .background(RoundedRectangle(cornerRadius: 6).fill(on ? Color.accentColor : Color.white.opacity(0.07)))
+                        .foregroundStyle(on ? Color.white : Color.primary)
+                }
+                .buttonStyle(.plain)
+                .contextMenu {
+                    if LayoutManager.builtinWorkspaces.contains(n) {
+                        Button("最初の形に戻す") { layout.resetWorkspace(n) }
+                    } else {
+                        Button("削除", role: .destructive) { layout.deletePreset(n) }
+                    }
+                }
+                .help("「\(n)」に切り替え（右クリックで" + (LayoutManager.builtinWorkspaces.contains(n) ? "最初の形に戻す" : "削除") + "）")
+            }
+            Menu {
+                Button("今の並べ方を新しいワークスペースにする…") {
+                    if let n = askName(title: "ワークスペースの名前", initial: "ワークスペース \(layout.presetNames.count + 1)") {
+                        layout.savePreset(n)
+                    }
+                }
+                if let cur = layout.state.workspace, LayoutManager.builtinWorkspaces.contains(cur) {
+                    Button("「\(cur)」を最初の形に戻す") { layout.resetWorkspace(cur) }
+                }
+            } label: {
+                Image(systemName: "plus")
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .padding(.leading, 4)
+            .help("今の並べ方を新しいワークスペースにする")
+        }
+    }
+}
+
 /// メニューバーの「レイアウト」
 struct LayoutMenu: View {
     @ObservedObject var layout: LayoutManager
@@ -361,9 +490,9 @@ struct LayoutMenu: View {
             Button("自由レイアウトを最初の並べ方に戻す") { layout.state.dock = DockNode.standard }
         }
         Menu("おすすめのレイアウト") {
-            Button("ポン出し（グリッド・モニター・ライブ・キュー、下に FX パッド）") { layout.applyTemplate(DockNode.cuePlayback) }
-            Button("クラブ VJ（FX パッドを下いっぱい・ライブとシーンをモニターの下）") { layout.applyTemplate(DockNode.clubVJ) }
-            Button("いつもの並べ方（自由レイアウト）") { layout.applyTemplate(DockNode.standard) }
+            Button("ポン出し（グリッド・キュー・モニター・ライブ、下に FX パッド）") { layout.switchWorkspace("ポン出し") }
+            Button("クラブ VJ（FX パッドを下いっぱい・ライブとシーンをモニターの下）") { layout.switchWorkspace("クラブ VJ") }
+            Button("いつもの並べ方") { layout.switchWorkspace("いつもの") }
         }
         Divider()
         Button("今のレイアウトを保存…") {

@@ -88,12 +88,13 @@ indirect enum DockNode: Codable, Equatable {
     private static func h(_ r: Double, _ a: DockNode, _ b: DockNode) -> DockNode { .split(id: UUID(), axis: .horizontal, ratio: r, first: a, second: b) }
     private static func v(_ r: Double, _ a: DockNode, _ b: DockNode) -> DockNode { .split(id: UUID(), axis: .vertical, ratio: r, first: a, second: b) }
 
-    /// おすすめ：ポン出し用。グリッドとモニターを大きく、右にライブとキューリスト、下いっぱいに FX パッド
+    /// おすすめ：ポン出し用。左にグリッド（シーンはタブ）とプレビュー・パラメーター、
+    /// 右にキューリストと出力モニター・ライブ、下いっぱいに FX パッド
     static var cuePlayback: DockNode {
-        v(0.87,
-          h(0.56,
-            v(0.6, t([.grid]), h(0.4, t([.preview]), t([.params, .effects, .generators, .sources]))),
-            v(0.4, t([.monitor]), v(0.36, t([.live]), t([.cues, .scenes])))),
+        v(0.925,
+          h(0.458,
+            v(0.6, t([.grid, .scenes]), h(0.4, t([.preview]), t([.params, .effects, .generators, .sources]))),
+            h(0.427, t([.cues]), v(0.607, t([.monitor]), t([.live])))),
           t([.pads]))
     }
 

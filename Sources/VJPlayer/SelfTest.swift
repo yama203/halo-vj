@@ -294,6 +294,28 @@ enum SelfTest {
                 check(Set(tpl.panels) == Set(DockPanel.allCases) && tpl.panels.count == DockPanel.allCases.count,
                       "おすすめのレイアウト（\(name)）：全部のパネルが 1 回ずつある")
             }
+            // ワークスペース：切り替え・いじった形を覚える・最初の形に戻す（設定には保存しないもので試す）
+            do {
+                let lm = LayoutManager(persist: false)
+                lm.state.monitorWidth = 333                         // まだワークスペースを選んでいない並べ方
+                lm.switchWorkspace("ポン出し")
+                check(lm.state.workspace == "ポン出し" && lm.state.dockMode && lm.state.dock.map { Set($0.panels) == Set(DockPanel.allCases) } == true
+                      && lm.workspaceNames.contains("前の並べ方"),
+                      "ワークスペース：切り替えられる（選ぶ前の並べ方は「前の並べ方」として残る）")
+                lm.state.dock = lm.state.dock?.movingToEdge(.monitor, .left)   // ポン出しをいじる
+                let edited = lm.state.dock
+                lm.switchWorkspace("クラブ VJ")
+                check(lm.state.workspace == "クラブ VJ", "ワークスペース：別のワークスペースへ")
+                lm.switchWorkspace("ポン出し")
+                check(lm.state.dock == edited, "ワークスペース：戻ると、いじった形のまま")
+                lm.resetWorkspace("ポン出し")
+                check(lm.state.dock.map { Set($0.panels) == Set(DockPanel.allCases) } == true && lm.state.dock != edited,
+                      "ワークスペース：最初の形に戻せる")
+                lm.savePreset("本番A")
+                check(lm.workspaceNames.last == "本番A" && lm.state.workspace == "本番A", "ワークスペース：今の並べ方を新しいワークスペースにできる")
+                lm.switchWorkspace("前の並べ方")
+                check(lm.state.monitorWidth == 333 && !lm.state.dockMode, "ワークスペース：「前の並べ方」に戻れる")
+            }
             for (name, tpl) in [("ポン出し", DockNode.cuePlayback), ("クラブ VJ", DockNode.clubVJ)] {
                 if case .split(_, .vertical, _, _, .tabs(_, let bottom, _)) = tpl {
                     check(bottom == [.pads], "おすすめのレイアウト（\(name)）：FX パッドが下いっぱい")

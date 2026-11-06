@@ -224,6 +224,9 @@ struct TopBar: View {
 
             Spacer()
 
+            WorkspaceBar()
+            Divider().frame(height: 24)
+
             Toggle(isOn: $editCorners) {
                 Label("四隅を調整", systemImage: "skew")
             }
