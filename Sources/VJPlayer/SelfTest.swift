@@ -788,7 +788,7 @@ enum SelfTest {
         // 以前の保存データ（色相・彩度・かかり具合）も読める
         let old = #"{"kind":"colorize","enabled":true,"values":[120,1,0.8]}"#
         let dec = try? JSONDecoder().decode(Effect.self, from: Data(old.utf8))
-        check(dec?.values == [0, 1, 0.8, 0] && abs((dec?.color.g ?? 0) - 1) < 0.001 && (dec?.color.r ?? 1) < 0.001,
+        check(dec?.values == [0, 1, 1, 0] && abs((dec?.mix ?? 0) - 0.8) < 1e-9 && abs((dec?.color.g ?? 0) - 1) < 0.001 && (dec?.color.r ?? 1) < 0.001,
               "以前のカラーライズの設定（色相 120° など）を読み込める")
         // レベル：入力 25%〜75% → 0.375 は 0.25 に。ガンマ 2 で 0.5 → 0.707
         r = run([group(clip(tex { _, _ in SIMD3(repeating: 0.375) }, [fx(.levels, [0.25, 0.75, 1, 0, 1])]))])
@@ -973,6 +973,34 @@ enum SelfTest {
             check(at(40, 0) == at(43, 3) && at(40, 0) != at(44, 0),
                   "ポスタライズ：ドットは 1080p での大きさ（高さ 216 の絵で 20px → 4px ごと）")
         }
+        // エフェクトの不透明度：元の絵との間
+        var half = fx(.invert, [0, 1]); half.mix = 0.5
+        r = run([group(clip(tex { _, _ in red }, [half]))])
+        check(near(r(3, 3), SIMD3(repeating: 0.5), 4.0 / 255), "エフェクトの不透明度 50%：元の絵との間（赤 → 灰色）")
+        var none = fx(.mirror, [1, 0]); none.mix = 0
+        r = run([group(clip(halves, [none, fx(.invert, [0, 1])]))])
+        check(near(r(1, 3), SIMD3(0, 1, 1)) && near(r(6, 3), SIMD3(1, 1, 0)), "エフェクトの不透明度 0%：かからない（次のエフェクトはかかる）")
+        var mixAnim = half; mixAnim.setMixAnim({ var a = ParamAnim(range: 0...1); a.mode = .beat; return a }())
+        let mixData = try? JSONEncoder().encode(half)
+        check(mixData.flatMap { try? JSONDecoder().decode(Effect.self, from: $0) }?.mix == 0.5 && mixAnim.mixAnim.isOn,
+              "エフェクトの不透明度は保存され、動き（BPM など）も付けられる")
+        // 以前の保存（かかり具合が値にあり、不透明度が無い）は、不透明度に引き継ぐ
+        let oldInvert = #"{"kind":"invert","values":[0,0.4]}"#.data(using: .utf8)!
+        let migrated = try? JSONDecoder().decode(Effect.self, from: oldInvert)
+        check(migrated.map { abs($0.mix - 0.4) < 1e-9 && $0.value(1) == 1 } ?? false,
+              "以前の反転の「かかり具合 40%」は、エフェクトの不透明度 40% に引き継ぐ")
+        check(abs((Engine.mixEffects([half], [fx(.invert, [0, 1])], k: 0.5, p: 0.5).first?.mix ?? 0) - 0.75) < 1e-9,
+              "シーンのフェードで、エフェクトの不透明度もなめらかに動く")
+        // クリップのトランスフォームのあとにエフェクト：180° 回したクリップのミラーは、回った絵が映る
+        var turned = clip(halves, [fx(.mirror, [1, 0])])
+        turned.transform = ClipTransform(rotation: .pi)
+        r = run([group(turned)])
+        check(near(r(1, 3), blue) && near(r(6, 3), blue), "クリップのエフェクトは、回したあとの絵にかかる（回転したチェッカーもミラーになる）")
+        var shrunk = clip(tex { _, _ in red }, [fx(.mirror, [1, 0])])
+        shrunk.transform = ClipTransform(x: -0.25, scale: 0.5)
+        r = run([group(clip(tex { _, _ in blue })), { var g = group(shrunk); g.key = 1; return g }()])
+        check(near(r(1, 3), red) && near(r(6, 3), red) && near(r(3, 0), blue),
+              "左に小さく置いたクリップのミラー：右にも映り、周りは下の絵が見える")
         // オフにしたエフェクトはかからない
         var off = fx(.mirror, [1, 0]); off.enabled = false
         r = run([group(clip(halves, [off]))])
@@ -1008,6 +1036,18 @@ enum SelfTest {
         r = run([group(clip(tex { _, _ in grey })), adjust([colorize(hue: 240, weighted: false)], opacity: 0.5)])
         check(near(r(3, 3), SIMD3(0.25, 0.25, 0.5), 4.0 / 255),
               String(format: "調整レイヤーの不透明度 50%%：かかり具合が半分（%.2f, %.2f, %.2f）", r(3, 3).x, r(3, 3).y, r(3, 3).z))
+        // 調整レイヤーのマスク：下の絵全体を切り抜く（外は黒）。並び順に関係なく最後に切り抜く
+        let leftHalf = fx(.shapeMask, [0, 0, -0.25, 0, 0.5, 2, 0, 0])
+        for (name, list) in [("マスクが下", [fx(.invert, [0, 1]), leftHalf]), ("マスクが上", [leftHalf, fx(.invert, [0, 1])]),
+                             ("マスクだけ", [leftHalf])] {
+            r = run([group(clip(tex { _, _ in red })), adjust(list)])
+            let inside = list.count == 1 ? red : SIMD3<Float>(0, 1, 1)
+            check(near(r(1, 3), inside) && near(r(6, 3), .zero),
+                  "調整レイヤーのマスク（\(name)）：下の絵全体を切り抜き、外は黒")
+        }
+        r = run([group(clip(tex { _, _ in red })), adjust([leftHalf], opacity: 0.5)])
+        check(near(r(1, 3), red) && near(r(6, 3), SIMD3(0.5, 0, 0), 4.0 / 255),
+              "調整レイヤーのマスク・不透明度 50%：外は半分の暗さ")
         let ca = Compositor(); ca.storageMode = .shared
         let pa = [fx(.posterizeTime, [2])]
         let a1c = run([group(clip(tex { _, _ in red })), adjust(pa)], compositor: ca, now: 30.1)(3, 3)

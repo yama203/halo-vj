@@ -1169,7 +1169,7 @@ struct ParamColumns<Content: View>: View {
         if w < UI.paramsWidth - 1 {
             VStack(alignment: .leading, spacing: 14) { content }
         } else {
-            ParamColumns { content }
+            HStack(alignment: .top, spacing: 16) { content }
         }
     }
 }

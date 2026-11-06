@@ -14,6 +14,15 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
     case overdrive
     var id: String { rawValue }
 
+    /// エフェクトの不透明度と同じ働きの値（以前の「かかり具合」）の番号。画面には出さない
+    var amountIndex: Int? {
+        switch self {
+        case .colorize: 2
+        case .invert: 1
+        default: nil
+        }
+    }
+
     /// 重ね方の値か（エフェクトとしては並べない）
     var isBlend: Bool { self == .overdrive }
 
@@ -293,7 +302,7 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
         case .mirror: "画面の半分を反対側に折り返す"
         case .colorize: "明るさをもとに、1 色で染める（カラー）か、パレットの色に置き換える（パレット）"
         case .levels: "黒と白の位置・ガンマで明るさとコントラストを整える"
-        case .invert: "ネガのように色を反転する。明るさだけ（色はそのまま）・色だけ（明るさはそのまま）も選べる。かかり具合を動かすと元の絵と行き来する"
+        case .invert: "ネガのように色を反転する。明るさだけ（色はそのまま）・色だけ（明るさはそのまま）も選べる。不透明度を動かすと元の絵と行き来する"
         case .posterize: "色の段数を減らす。ディザとドットを足すと GIF アニメのような見た目に"
         case .solid: "1 色で塗りつぶす。マスク用の白や、色を重ねるのに"
         case .gradient: "パレットの色でグラデーション（直線・円・回転）。速さで流れる"
@@ -416,8 +425,29 @@ struct Effect: Codable, Identifiable, Equatable {
     var points: [MaskPoint] = MaskPoint.defaultShape
     static let maxPoints = 32
     static let maxPalette = 8
-    /// 値のアニメーション（キーは値の番号）
+    /// 値のアニメーション（キーは値の番号。不透明度は "mix"）
     var anims: [String: ParamAnim] = [:]
+    /// エフェクトの不透明度（かかり具合）。0 = 元の絵のまま、1 = いっぱいにかかる
+    var mix: Double = 1
+    static let mixKey = "mix"
+    /// 不透明度を出すエフェクトか（コマの間引き・重ね方の値には無い）
+    var hasMix: Bool { kind != .posterizeTime && !kind.isBlend && !kind.isGenerator }
+
+    var mixAnim: ParamAnim { anims[Self.mixKey] ?? ParamAnim(range: 0...1) }
+
+    mutating func setMixAnim(_ a: ParamAnim) {
+        var a = a
+        if a.isOn && !(anims[Self.mixKey]?.isOn ?? false) { a.start = CACurrentMediaTime() }
+        anims[Self.mixKey] = a
+    }
+
+    /// t の時点の不透明度（アニメーション込み）
+    func mix(at t: Double, beat: BeatClock, origin: Double) -> Double {
+        guard hasMix else { return 1 }
+        let base = min(max(mix, 0), 1)
+        guard let a = anims[Self.mixKey], a.isOn else { return base }
+        return min(max(a.value(base: base, at: t, beat: beat, origin: origin), 0), 1)
+    }
 
     func anim(_ i: Int) -> ParamAnim {
         anims[String(i)] ?? ParamAnim(range: kind.params[i].animRange ?? kind.params[i].range)
@@ -465,7 +495,7 @@ struct Effect: Codable, Identifiable, Equatable {
         return value(5, at: t, beat: beat, origin: origin) * (1 - decay * f / duty)
     }
 
-    enum CodingKeys: String, CodingKey { case id, kind, enabled, values, color, palette, anims, points }
+    enum CodingKeys: String, CodingKey { case id, kind, enabled, values, color, palette, anims, points, mix }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -483,8 +513,15 @@ struct Effect: Codable, Identifiable, Equatable {
         palette = try c.decodeIfPresent([RGB].self, forKey: .palette) ?? PalettePreset.all[1].colors
         anims = try c.decodeIfPresent([String: ParamAnim].self, forKey: .anims) ?? [:]
         points = try c.decodeIfPresent([MaskPoint].self, forKey: .points) ?? MaskPoint.defaultShape
+        mix = try c.decodeIfPresent(Double.self, forKey: .mix) ?? 1
         // 値が足りない（あとから値が増えた）ときは初期値で埋める
         while values.count < kind.params.count { values.append(kind.params[values.count].defaultValue) }
+        // 以前の「かかり具合」（反転・カラーライズ）は、エフェクトの不透明度に引き継ぐ（同じ働きなので 1 つにまとめた）
+        if !c.contains(.mix), let k = kind.amountIndex, values.indices.contains(k) {
+            mix = min(max(values[k], 0), 1)
+            values[k] = 1
+            if let a = anims[String(k)] { anims[Self.mixKey] = a; anims[String(k)] = nil }
+        }
     }
 
     func value(_ i: Int) -> Double {
@@ -527,6 +564,14 @@ struct EffectStack {
             .map { $0.value(0, at: t, beat: beat, origin: origin) }.min()
     }
     var isEmpty: Bool { spatial.isEmpty && posterizeFPS == nil }
+
+    /// マスクを最後に回した並び（調整レイヤー用：マスクは「どこにかけるか」なので、並び順に関係なく全部のあとで切り抜く）
+    var masksLast: EffectStack {
+        var s = self
+        let isMask: (Effect) -> Bool = { $0.kind == .shapeMask || $0.kind == .polyMask }
+        s.effects = effects.filter { !isMask($0) } + effects.filter(isMask)
+        return s
+    }
 
     /// ポスタライズ時間の「今のコマ番号」。同じ番号の間は前の絵を使い回す
     func tick(at t: Double) -> Int64? {

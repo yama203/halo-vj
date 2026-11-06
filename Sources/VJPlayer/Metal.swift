@@ -67,7 +67,7 @@ struct LayerUniforms {
     float3x3 inv;      // 出力のピクセル → クリップの UV（クリップ・レイヤー・コンポジションのトランスフォームを合成した逆行列）
     float opacity;
     int blend;         // 0: 通常, 1: 加算, 2: スクリーン, 3: 乗算
-    int premul;        // 1: 色に不透明度が掛かった絵（レイヤーのエフェクトを通した絵）
+    int premul;        // 1: 色に不透明度が掛かった絵（レイヤーのエフェクトを通した絵）、2: 調整レイヤー（下の絵と置き換える）
 };
 
 fragment float4 flayer(VOut in [[stage_in]],
@@ -86,6 +86,12 @@ fragment float4 flayer(VOut in [[stage_in]],
         if (u.blend == 6) l = 1.0 - l;
         float m = mix(1.0, l, saturate(u.opacity));
         return float4(m, m, m, 1.0);
+    }
+    if (u.premul == 2) {
+        // 調整レイヤー：エフェクトを通した絵で、下の絵を置き換える（不透明度の割合で）。
+        // マスクで透明になった所は黒くなる（下の絵を切り抜く）
+        float k = saturate(u.opacity * cover);
+        return float4(c.rgb * k, k);
     }
     if (u.premul == 1) {
         float cov = saturate(u.opacity * cover);
@@ -109,6 +115,7 @@ struct EffectUniforms {
     int palCount;
     int ptCount;       // 自由な形のマスク：点の数と、点（ピクセル。1 つの float4 に 2 点）
     float4 pts[16];
+    float mixAmt;      // エフェクトの不透明度（0 = 元の絵、1 = いっぱいにかかる）
 };
 
 
@@ -163,10 +170,19 @@ static float3 pureHue(float h) {
     return saturate(k - 1.0);
 }
 
+static float4 effectBody(VOut in, constant EffectUniforms& u, texture2d<float> tex, sampler s);
+
 fragment float4 feffect(VOut in [[stage_in]],
                         constant EffectUniforms& u [[buffer(0)]],
                         texture2d<float> tex [[texture(0)]],
                         sampler s [[sampler(0)]]) {
+    float4 r = effectBody(in, u, tex, s);
+    // 不透明度：元の絵とエフェクトをかけた絵を混ぜる（ジェネレーターは元の絵が無いのでそのまま）
+    if (u.mixAmt >= 0.999 || (u.kind >= 8 && u.kind <= 13)) return r;
+    return mix(tex.sample(s, in.pos.xy / u.size), r, saturate(u.mixAmt));
+}
+
+static float4 effectBody(VOut in, constant EffectUniforms& u, texture2d<float> tex, sampler s) {
     float2 px = in.pos.xy;
     float2 uv = px / u.size;
     if (u.kind >= 8 && u.kind <= 13) {
@@ -378,6 +394,7 @@ struct EchoUniforms {
     float zoom;        // 前の絵の拡大率（このコマの分）
     float hue;         // 前の絵の色相ずれ（このコマの分、0〜1）
     float amount;      // 残像の濃さ
+    float mixAmt;      // エフェクトの不透明度（残像そのものは保ったまま、出す絵だけ混ぜる）
 };
 
 struct EchoOut {
@@ -403,7 +420,7 @@ fragment EchoOut fecho(VOut in [[stage_in]], constant EchoUniforms& u [[buffer(0
     float4 r = echoMix(u, c, h);
     EchoOut o;
     o.hist = r;
-    o.out = r;
+    o.out = mix(c, r, saturate(u.mixAmt));
     return o;
 }
 
@@ -577,6 +594,7 @@ struct EffectUniforms {
     var pts: (SIMD4<Float>, SIMD4<Float>, SIMD4<Float>, SIMD4<Float>, SIMD4<Float>, SIMD4<Float>, SIMD4<Float>, SIMD4<Float>,
               SIMD4<Float>, SIMD4<Float>, SIMD4<Float>, SIMD4<Float>, SIMD4<Float>, SIMD4<Float>, SIMD4<Float>, SIMD4<Float>)
         = (.zero, .zero, .zero, .zero, .zero, .zero, .zero, .zero, .zero, .zero, .zero, .zero, .zero, .zero, .zero, .zero)
+    var mixAmt: Float = 1
 }
 
 struct EchoUniforms {
@@ -585,9 +603,13 @@ struct EchoUniforms {
     var zoom: Float
     var hue: Float
     var amount: Float
+    var mixAmt: Float = 1
 }
 
 extension ClipTransform {
+    /// 動かしていない（位置・スケール・角度が初期値）
+    var isPlain: Bool { x == 0 && y == 0 && scale == 1 && rotation == 0 }
+
     /// 出力（w x h ピクセル）の中心を基準に、移動・回転・拡大する行列（ピクセル → ピクセル）
     func matrix(width w: Float, height h: Float) -> simd_float3x3 {
         let c = SIMD2(w / 2, h / 2)
@@ -614,10 +636,12 @@ struct LayerDraw {
     var compTransform = ClipTransform()
     /// GPU が使い終わるまで保持しておく映像フレーム
     let holder: FrameHolder?
-    /// クリップのエフェクト（トランスフォームの前にかける）
+    /// クリップのエフェクト（クリップのトランスフォームのあとにかける）
     var effects = EffectStack()
     /// エフェクト用の作業テクスチャを使い分ける番号
     var effectKey = 0
+    /// texture が「色に不透明度が掛かった」絵か（トランスフォームしてからエフェクトを通した絵）
+    var premul = false
 }
 
 /// 1 レイヤーぶんの描画（クロスフェード中はクリップ 2 つ）
@@ -834,7 +858,14 @@ final class EffectProcessor {
         let pool = textures(key, width: input.width, height: input.height)
         guard pool.count == 2 else { return input }
         var src = input
-        for (i, e) in effects.enumerated() {
+        // 作業テクスチャは交互に使う（かからないエフェクトを飛ばしても、読む絵と書く絵が同じにならないように数える）
+        var pass = 0
+        for e in effects {
+            let mixAmt = Float(e.mix(at: now, beat: stack.beat, origin: stack.origin))
+            // 不透明度 0 は飛ばす（エコーは残像を続けるために描く）
+            if mixAmt < 0.001 && e.kind != .echo { continue }
+            let i = pass
+            pass += 1
             if e.kind == .echo {
                 guard let (prev, out, dt) = echoTextures(key + "/" + e.id.uuidString, width: input.width,
                                                          height: input.height, now: now) else { continue }
@@ -853,7 +884,7 @@ final class EffectProcessor {
                 let keep = dt < 0 ? 0 : pow(0.01, step / max(v(1), 0.01))
                 var u = EchoUniforms(mode: Int32(v(0).rounded()), keep: Float(keep),
                                      zoom: Float(pow(1 + v(2), step)), hue: Float(v(3) / 360 * step),
-                                     amount: Float(v(4)))
+                                     amount: Float(v(4)), mixAmt: mixAmt)
                 enc.setRenderPipelineState(ctx.echoPipeline)
                 enc.setFragmentBytes(&u, length: MemoryLayout<EchoUniforms>.stride, index: 0)
                 enc.setFragmentTexture(src, index: 0)
@@ -876,6 +907,7 @@ final class EffectProcessor {
             var u = EffectUniforms(kind: e.kind.shaderIndex, a: va, b: vb,
                                    size: SIMD2(Float(input.width), Float(input.height)))
             u.color = e.color.simd
+            u.mixAmt = mixAmt
             let p = (e.palette.isEmpty ? [RGB.black, RGB.white] : Array(e.palette.prefix(Effect.maxPalette))).map(\.simd)
             func at(_ i: Int) -> SIMD4<Float> { i < p.count ? p[i] : p[p.count - 1] }
             u.pal = (at(0), at(1), at(2), at(3), at(4), at(5), at(6), at(7))
@@ -927,6 +959,33 @@ final class Compositor {
                   effects: EffectStack(), width: width, height: height, cb: cb)
     }
 
+    /// クリップのトランスフォームをかけた絵（出力の大きさ、周りは透明）を作る。エフェクトの前に使う
+    private var placeTargets: [Int: MTLTexture] = [:]
+    private func place(_ d: LayerDraw, key: Int, width w: Int, height h: Int, cb: MTLCommandBuffer) -> MTLTexture? {
+        let t: MTLTexture
+        if let c = placeTargets[key], c.width == w, c.height == h { t = c } else {
+            guard let c = makeTexture(w, h) else { return nil }
+            placeTargets[key] = c
+            t = c
+        }
+        let rpd = MTLRenderPassDescriptor()
+        rpd.colorAttachments[0].texture = t
+        rpd.colorAttachments[0].loadAction = .clear
+        rpd.colorAttachments[0].storeAction = .store
+        rpd.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
+        guard let enc = cb.makeRenderCommandEncoder(descriptor: rpd) else { return nil }
+        let fw = Float(w), fh = Float(h)
+        let m = d.transform.matrix(width: fw, height: fh) * simd_float3x3(diagonal: SIMD3(fw, fh, 1))
+        var u = LayerUniforms(inv: m.inverse, opacity: 1, blend: 0, premul: d.premul ? 1 : 0)
+        enc.setFragmentSamplerState(ctx.sampler, index: 0)
+        enc.setRenderPipelineState(ctx.accumPipeline)
+        enc.setFragmentBytes(&u, length: MemoryLayout<LayerUniforms>.stride, index: 0)
+        enc.setFragmentTexture(d.texture, index: 0)
+        enc.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
+        enc.endEncoding()
+        return t
+    }
+
     /// groups は奥 → 手前の順。effects はコンポジションのエフェクト
     func composite(_ groups: [LayerGroup], effects: EffectStack, width: Int, height: Int,
                    cb: MTLCommandBuffer, now: Double = CACurrentMediaTime()) -> MTLTexture? {
@@ -946,6 +1005,8 @@ final class Compositor {
         // 1. クリップ・レイヤーのエフェクト（下ごしらえ）。最後に重ねるものを並べる
         struct Final {
             var texture: MTLTexture?; var matrix: simd_float3x3; var opacity: Float; var blend: BlendMode; var premul: Bool
+            /// 調整レイヤー：下の絵と置き換える
+            var replace = false
             /// 調整レイヤー：ここまでの絵にかけるエフェクト
             var adjust: LayerGroup? = nil
             /// 特殊合成：下の絵を読んで混ぜる
@@ -954,17 +1015,26 @@ final class Compositor {
         var finals: [Final] = []
         for g in groups {
             if g.isAdjustment {
-                finals.append(Final(texture: nil, matrix: uvToPx, opacity: g.opacity, blend: .normal, premul: false, adjust: g))
+                finals.append(Final(texture: nil, matrix: uvToPx, opacity: g.opacity, blend: .normal, premul: true,
+                                    replace: true, adjust: g))
                 continue
             }
             // クリップのエフェクト
             var draws = g.draws
             for i in draws.indices where !draws[i].effects.spatial.isEmpty {
-                let d = draws[i]
-                let out = fx.apply(d.effects, to: d.texture, key: "c\(d.effectKey)", cb: cb, now: now)
+                var d = draws[i]
+                var src: MTLTexture = d.texture
+                // クリップのトランスフォーム（位置・スケール・角度）を先にかけてから、エフェクトを通す。
+                // 回したクリップにミラーをかけると、回った絵がミラーになる（Resolume と同じ順番）
+                if !d.transform.isPlain, let placed = place(d, key: d.effectKey, width: w, height: h, cb: cb) {
+                    src = placed
+                    d.transform = ClipTransform(opacity: d.transform.opacity)
+                    d.premul = true
+                }
+                let out = fx.apply(d.effects, to: src, key: "c\(d.effectKey)", cb: cb, now: now)
                 draws[i] = LayerDraw(texture: out, opacity: d.opacity, blend: d.blend, transform: d.transform,
                                      layerTransform: d.layerTransform, compTransform: d.compTransform,
-                                     holder: d.holder, effects: d.effects, effectKey: d.effectKey)
+                                     holder: d.holder, effects: d.effects, effectKey: d.effectKey, premul: d.premul)
             }
             if g.effects.isEmpty && !g.blend.isSpecial {
                 for d in draws {
@@ -972,7 +1042,7 @@ final class Compositor {
                         * d.layerTransform.matrix(width: fw, height: fh)
                         * d.transform.matrix(width: fw, height: fh) * uvToPx
                     finals.append(Final(texture: d.texture, matrix: m, opacity: g.opacity * d.opacity * d.transform.opacity,
-                                        blend: g.blend, premul: false))
+                                        blend: g.blend, premul: d.premul))
                 }
                 continue
             }
@@ -999,7 +1069,8 @@ final class Compositor {
                 enc.setRenderPipelineState(ctx.accumPipeline)
                 for d in draws {
                     let m = d.layerTransform.matrix(width: fw, height: fh) * d.transform.matrix(width: fw, height: fh) * uvToPx
-                    var u = LayerUniforms(inv: m.inverse, opacity: d.opacity * d.transform.opacity, blend: 0)
+                    var u = LayerUniforms(inv: m.inverse, opacity: d.opacity * d.transform.opacity, blend: 0,
+                                          premul: d.premul ? 1 : 0)
                     enc.setFragmentBytes(&u, length: MemoryLayout<LayerUniforms>.stride, index: 0)
                     enc.setFragmentTexture(d.texture, index: 0)
                     enc.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
@@ -1049,7 +1120,7 @@ final class Compositor {
                 if let tick, let c = groupCache[key], c.tick == tick, c.texture.width == w, c.texture.height == h {
                     texture = c.texture
                 } else {
-                    let out = fx.apply(adj.effects, to: target, key: "a\(adj.key)", cb: cb, now: now)
+                    let out = fx.apply(adj.effects.masksLast, to: target, key: "a\(adj.key)", cb: cb, now: now)
                     // ポスタライズ時間だけのときも、前のコマの絵を取っておく（下のレイヤー全体がカクカクになる）
                     if let tick, let dst = (groupCache[key]?.texture.width == w && groupCache[key]?.texture.height == h)
                         ? groupCache[key]!.texture : makeTexture(w, h), let blit = cb.makeBlitCommandEncoder() {
@@ -1076,7 +1147,7 @@ final class Compositor {
             }
             guard let texture, let p = ctx.layerPipelines[f.blend] else { continue }
             var u = LayerUniforms(inv: f.matrix.inverse, opacity: f.opacity, blend: Int32(f.blend.rawValue),
-                                  premul: f.premul ? 1 : 0)
+                                  premul: f.replace ? 2 : (f.premul ? 1 : 0))
             enc.setRenderPipelineState(p)
             enc.setFragmentBytes(&u, length: MemoryLayout<LayerUniforms>.stride, index: 0)
             enc.setFragmentTexture(texture, index: 0)

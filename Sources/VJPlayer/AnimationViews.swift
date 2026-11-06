@@ -413,6 +413,15 @@ struct EffectCard: View {
                         .foregroundStyle(effect.enabled ? Color.primary : Color.secondary)
                         .lineLimit(1)
                         .minimumScaleFactor(0.75)
+                    if effect.hasMix && (effect.mix < 0.995 || effect.mixAnim.isOn) {
+                        // 不透明度を下げている（動かしている）ことが閉じていても分かるように
+                        Text(effect.mixAnim.isOn ? "不透明度〜" : String(format: "%.0f%%", effect.mix * 100))
+                            .font(.system(size: 10, weight: .semibold).monospacedDigit())
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .fixedSize()
+                            .help("このエフェクトの不透明度")
+                    }
                     if effect.anims.values.contains(where: \.isOn) {
                         Image(systemName: "waveform.path").font(.system(size: 11, weight: .semibold))
                             .foregroundStyle(.purple)
@@ -437,6 +446,15 @@ struct EffectCard: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             if open || isBlendSettings {
+            if effect.hasMix && !isBlendSettings {
+                // エフェクトの不透明度（かかり具合）：元の絵とエフェクトをかけた絵を混ぜる
+                AnimValueField(label: "不透明度", value: mixBinding, range: 0...1, perPoint: 0.003, defaultValue: 1,
+                               showsBar: true, format: EffectParam.percent,
+                               anim: Binding(get: { effect.mixAnim }, set: { var e = effect; e.setMixAnim($0); effect = e }),
+                               origin: origin, animDefault: 0...1)
+                    .frame(maxWidth: narrow ? .infinity : UI.paramColumnWidth, alignment: .leading)
+                    .help("このエフェクトの不透明度（かかり具合）。0% で元の絵のまま、100% でいっぱいにかかる")
+            }
             if effect.kind == .strobe { strobeSwitches }
             LazyVGrid(columns: narrow ? [GridItem(.flexible(), alignment: .top)]
                       : [GridItem(.fixed(UI.paramColumnWidth), spacing: 16), GridItem(.fixed(UI.paramColumnWidth), alignment: .top)],
@@ -522,6 +540,8 @@ struct EffectCard: View {
 
     /// その値を出すか（カラーライズのパレットモードでは「明るさを保つ」は使わない）
     private func shows(_ i: Int) -> Bool {
+        // 以前の「かかり具合」は、上の「不透明度」にまとめた
+        if i == effect.kind.amountIndex { return false }
         if effect.kind == .strobe {
             // 光り方・合わせるもの・間隔は上のスイッチで。秒のときだけ「1 秒の回数」を出す
             if i <= 2 { return false }
@@ -560,6 +580,10 @@ struct EffectCard: View {
     private func colorBinding(_ key: WritableKeyPath<Effect, RGB>) -> Binding<Color> {
         Binding(get: { Color(rgb: effect[keyPath: key]) },
                 set: { var e = effect; e[keyPath: key] = RGB(color: $0); effect = e })
+    }
+
+    private var mixBinding: Binding<Double> {
+        Binding(get: { effect.mix }, set: { v in var e = effect; e.mix = min(max(v, 0), 1); effect = e })
     }
 
     private func valueBinding(_ i: Int) -> Binding<Double> {

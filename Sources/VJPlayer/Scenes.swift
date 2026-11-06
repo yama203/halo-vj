@@ -269,6 +269,7 @@ extension Engine {
                 return ps[i].animatable ? va + (vb - va) * k : (p < 0.5 ? va : vb)
             }
             e.color = p < 0.5 ? ea.color : eb.color
+            e.mix = ea.mix + (eb.mix - ea.mix) * k
             return e
         }
     }
