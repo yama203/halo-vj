@@ -88,6 +88,14 @@ struct VJPlayerApp: App {
                 Button("別名で保存…") { ProjectMenu.saveAs() }
                     .keyboardShortcut("s", modifiers: [.command, .shift])
             }
+            // 使わない標準の項目（英語の「Toggle Sidebar」・空の「表示」の中身）は出さない
+            CommandGroup(replacing: .sidebar) {}
+            CommandGroup(replacing: .toolbar) {
+                Button("全画面表示にする／戻す") { NSApp.keyWindow?.toggleFullScreen(nil) }
+                    .keyboardShortcut("f", modifiers: [.command, .control])
+            }
+            // 中身の無い「Halo VJヘルプ」は出さない（ヘルプのメニューは検索だけ）
+            CommandGroup(replacing: .help) {}
             CommandMenu("レイアウト") {
                 LayoutMenu(layout: LayoutManager.shared)
             }
@@ -120,6 +128,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let v = ProcessInfo.processInfo.environment["VJ_TRIGGER"] {
             let list = v.split(separator: ",").compactMap { Int($0) }
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { list.forEach { Engine.shared.trigger($0) } }
+        }
+        // 画面確認用：VJ_PRINT_MENUS=1 で、メニューバーの項目の名前を書き出す（日本語になっているかの確認）
+        if ProcessInfo.processInfo.environment["VJ_PRINT_MENUS"] != nil {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                for m in NSApp.mainMenu?.items ?? [] {
+                    let sub = (m.submenu?.items ?? []).filter { !$0.isSeparatorItem && !$0.isHidden && !$0.isAlternate }.map(\.title)
+                    FileHandle.standardError.write("MENU \(m.title): \(sub.joined(separator: " | "))\n".data(using: .utf8)!)
+                }
+            }
         }
         // 画面確認用：VJ_MULTI_SELECT=番号,番号 で起動時にそのクリップを複数選択しておく
         if let v = ProcessInfo.processInfo.environment["VJ_MULTI_SELECT"] {

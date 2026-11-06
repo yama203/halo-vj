@@ -14,11 +14,18 @@ if [ ! -f Resources/AppIcon.icns ] || [ ! -f Resources/ProjectIcon.icns ]; then
   iconutil -c icns Resources/ProjectIcon.iconset -o Resources/ProjectIcon.icns
 fi
 cp Resources/AppIcon.icns Resources/ProjectIcon.icns "$APP/Contents/Resources/"
+# 日本語の印（中身は空でよい。これがあるとシステムの文言が日本語になる）
+mkdir -p "$APP/Contents/Resources/ja.lproj"
+: > "$APP/Contents/Resources/ja.lproj/InfoPlist.strings"
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+  <!-- 日本語のアプリ：メニューバーの標準の項目（ファイル・編集・ウインドウ・ヘルプ・終了など）も日本語で出る -->
+  <key>CFBundleDevelopmentRegion</key><string>ja</string>
+  <key>CFBundleLocalizations</key><array><string>ja</string></array>
+  <key>CFBundleAllowMixedLocalizations</key><true/>
   <key>CFBundleName</key><string>Halo VJ</string>
   <key>CFBundleDisplayName</key><string>Halo VJ</string>
   <key>CFBundleIdentifier</key><string>local.yama.vjplayer</string>
