@@ -340,15 +340,10 @@ struct ClipGrid: View {
                                     .frame(width: Self.volumeWidth, height: cell.height)
                             }
                         }
-                        if layer.isAdjustment {
-                            AdjustmentRow(layer: layer,
-                                          width: cell.width * CGFloat(engine.columns) + Self.spacing * CGFloat(engine.columns - 1),
-                                          height: cell.height)
-                        } else {
-                            ForEach(0..<engine.columns, id: \.self) { c in
-                                SlotCell(index: engine.slotIndex(deck: engine.shownDeck, layer: r, column: c),
-                                         width: cell.width, height: cell.height)
-                            }
+                        // 調整レイヤーも同じ枠（エフェクトのクリップを置く）
+                        ForEach(0..<engine.columns, id: \.self) { c in
+                            SlotCell(index: engine.slotIndex(deck: engine.shownDeck, layer: r, column: c),
+                                     width: cell.width, height: cell.height)
                         }
                     }
                 }
@@ -555,6 +550,8 @@ struct LayerHeader: View {
                 Text(layer.name)
                     .font(.system(size: 14, weight: .bold, design: .monospaced))
                     .fixedSize()
+                    .onTapGesture(count: 2) { renameLayer() }
+                    .help("ダブルクリックで名前を付ける")
                 if layer.isAdjustment {
                     Image(systemName: "camera.filters").font(.system(size: 11)).foregroundStyle(.teal)
                         .help("調整レイヤー")
@@ -564,6 +561,7 @@ struct LayerHeader: View {
                 }
                 Spacer(minLength: 0)
                 MuteButton(muted: $layer.muted, what: layer.name, compact: true)
+                    .layoutPriority(1)
                 Button {
                     engine.viewStop(layer.index)
                 } label: {
@@ -595,10 +593,20 @@ struct LayerHeader: View {
                     Image(systemName: "square.grid.3x3.fill").font(.system(size: 10)).foregroundStyle(.orange)
                         .help("別のデッキ（\(engine.decks[engine.deckOf(a)].name)）のクリップを再生中")
                 }
-                Text(playing?.name ?? "—")
-                    .font(.system(size: 11))
-                    .foregroundStyle(playing != nil ? Color.primary.opacity(0.8) : Color.secondary)
-                    .lineLimit(1)
+                // 付けた名前があればそれを（シーンの編集中も、出力のレイヤーの名前）。無ければ再生中のクリップ名
+                if let t = layerTitle, !t.isEmpty {
+                    Text(t)
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(Color.primary)
+                        .lineLimit(1)
+                        .onTapGesture(count: 2) { renameLayer() }
+                        .help(t + (playing.map { "\n再生中：" + $0.name } ?? "") + "\n（ダブルクリックで名前を変える）")
+                } else {
+                    Text(playing?.name ?? "—")
+                        .font(.system(size: 11))
+                        .foregroundStyle(playing != nil ? Color.primary.opacity(0.8) : Color.secondary)
+                        .lineLimit(1)
+                }
             }
         }
         .padding(8)
@@ -639,6 +647,8 @@ struct LayerHeader: View {
             engine.inspectorTab = .layer
         }
         .contextMenu {
+            Button("名前を変える…") { renameLayer() }
+            Divider()
             Button("上にレイヤーを追加") { engine.insertLayer(at: layer.index) }
                 .disabled(engine.layerCount >= Engine.maxLayers)
             Button("下にレイヤーを追加") { engine.insertLayer(at: layer.index + 1) }
@@ -667,53 +677,23 @@ struct LayerHeader: View {
 }
 
 extension LayerHeader {
+    /// 出力のレイヤーに付けた名前（シーンの編集中も同じ）
+    var layerTitle: String? {
+        engine.layers.indices.contains(layer.index) ? engine.layers[layer.index].title : nil
+    }
+
+    func renameLayer() {
+        guard engine.layers.indices.contains(layer.index) else { return }
+        let l = engine.layers[layer.index]
+        if let t = askText(title: "\(l.name) の名前（空にすると番号だけ）", initial: l.title) { l.title = t }
+    }
+
     /// 不透明度にアニメーションが付いていれば、今の値
     var layerOpacityLive: (() -> Double)? {
         let a = layer.anim(.opacity)
         guard a.isOn else { return nil }
         let base = layer.opacity, beat = engine.beatClock
         return { a.value(base: base, at: CACurrentMediaTime(), beat: beat) }
-    }
-}
-
-/// 調整レイヤーの段：クリップの代わりに、エフェクトを置く場所を出す
-struct AdjustmentRow: View {
-    @ObservedObject var layer: Layer
-    @EnvironmentObject var engine: Engine
-    let width: CGFloat
-    let height: CGFloat
-
-    var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "camera.filters").font(.system(size: 20)).foregroundStyle(.teal)
-            VStack(alignment: .leading, spacing: 4) {
-                Text("調整レイヤー：ここに付けたエフェクトが、下のレイヤー全体にかかる")
-                    .font(.system(size: 13, weight: .semibold))
-                Text(layer.effects.isEmpty
-                     ? "右下の「エフェクト」からここへドラッグ。不透明度でかかり具合を調整"
-                     : layer.effects.map { $0.enabled ? $0.kind.label : "（\($0.kind.label)）" }.joined(separator: " → "))
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 14)
-        .frame(width: width, height: height, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 6).fill(Color.teal.opacity(layer.muted ? 0.04 : 0.10)))
-        .overlay(RoundedRectangle(cornerRadius: 6)
-            .strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [6, 4]))
-            .foregroundStyle(Color.teal.opacity(0.6)))
-        .contentShape(Rectangle())
-        .onTapGesture {
-            engine.selectedLayer = layer.index
-            engine.inspectorTab = .layer
-        }
-        .effectDropTarget { k in
-            layer.addEffect(k)
-            engine.selectedLayer = layer.index
-            engine.inspectorTab = .layer
-        }
     }
 }
 
@@ -825,7 +805,10 @@ struct SlotCell: View {
         })
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
-        .help(slot == nil ? "クリックでこのレイヤーを停止。右上の＋・右クリック・動画のドロップでクリップを入れる" : "")
+        .help(slot == nil
+              ? (adjustmentRow ? "クリックでこのレイヤーのエフェクトを外す。右上の＋でエフェクトのクリップを作る。エフェクト一覧からドラッグでも作れる"
+                               : "クリックでこのレイヤーを停止。右上の＋・右クリック・動画のドロップでクリップを入れる")
+              : "")
         // クリックを離した時ではなく「押した瞬間」に再生する。
         // ⌘ドラッグで移動、⌥ドラッグで複製（どちらも再生しない。⌥クリックだけなら選択）
         .gesture(
@@ -895,7 +878,8 @@ struct SlotCell: View {
                         drag.copying = false
                         drag.group = false
                     } else if slot == nil && addPressed {
-                        engine.openPanel(for: index)
+                        // 調整レイヤーの空き枠の＋ → エフェクトのクリップを作る
+                        if adjustmentRow { engine.createEffectClip(at: index) } else { engine.openPanel(for: index) }
                     } else if drag.cueSource == index {
                         if CueDropTarget.shared.hovering { engine.addClipCue(index) }
                         drag.cueSource = nil
@@ -909,10 +893,17 @@ struct SlotCell: View {
         // 動画ファイル → 読み込む。エフェクト一覧から → このクリップに付ける（空きスロットには付けない）
         .onDrop(of: [.fileURL, .plainText], isTargeted: $dropTargeted) { providers in
             if providers.contains(where: { $0.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) }) {
+                // 調整レイヤーには動画・画像は置かない
+                if adjustmentRow { NSSound.beep(); return false }
                 loadDropped(providers)
                 return true
             }
-            return EffectDrop.handle(providers, allowGenerators: true) { k in
+            return EffectDrop.handle(providers, allowGenerators: !adjustmentRow) { k in
+                if adjustmentRow && engine.slots[index] == nil {
+                    // 調整レイヤーの空き枠 → そのエフェクトでエフェクトのクリップを作る
+                    if !engine.createEffectClip(at: index, with: k) { NSSound.beep() }
+                    return
+                }
                 if k.isGenerator {
                     // ジェネレーター → このスロットに置く（再生中のクリップは置き換えない）
                     if engine.placeGenerator(k, at: index) { engine.selectClip(index) } else { NSSound.beep() }
@@ -962,6 +953,8 @@ struct SlotCell: View {
                 }
                 Divider()
                 Button("このスロットを空にする", role: .destructive) { engine.clear(index) }
+            } else if adjustmentRow {
+                Button("エフェクトのクリップを作る") { engine.createEffectClip(at: index) }
             } else {
                 Button("クリップを読み込む…") { engine.openPanel(for: index) }
                 Menu("ジェネレーターを置く") {
@@ -972,6 +965,9 @@ struct SlotCell: View {
             }
         }
     }
+
+    /// 調整レイヤーの行か（シーンの編集中は、そのシーンのレイヤーで見る）
+    private var adjustmentRow: Bool { engine.viewLayer(engine.layerOf(index)).isAdjustment }
 
     /// 空きの枠の右上の＋の上か
     private func inAddCorner(_ p: CGPoint) -> Bool {
@@ -1013,14 +1009,32 @@ struct SlotContent: View {
         ZStack(alignment: .bottom) {
             Color.white.opacity(0.06)
                 .overlay {
-                    if let img = slot.thumbnail {
+                    if slot.isEffectClip {
+                        // エフェクトのクリップ：紫の地に、エフェクトのアイコン
+                        ZStack {
+                            LinearGradient(colors: [Color.purple.opacity(0.45), Color.indigo.opacity(0.3)],
+                                           startPoint: .topLeading, endPoint: .bottomTrailing)
+                            HStack(spacing: 6) {
+                                ForEach(slot.effects.prefix(4)) { e in
+                                    Image(systemName: e.kind.icon).font(.system(size: 18, weight: .semibold))
+                                        .opacity(e.enabled ? 1 : 0.35)
+                                }
+                                if slot.effects.isEmpty {
+                                    Image(systemName: "plus.rectangle.on.rectangle").font(.system(size: 18))
+                                        .opacity(0.6)
+                                }
+                            }
+                            .foregroundStyle(.white)
+                            .padding(.bottom, Self.stripHeight)
+                        }
+                    } else if let img = slot.thumbnail {
                         Image(nsImage: img).resizable().aspectRatio(contentMode: .fill)
                     }
                 }
                 .clipped()
                 .opacity(slot.isReady ? (slot.muted ? 0.35 : 1) : 0.4)
                 .overlay(alignment: .topLeading) {
-                    EffectIcons(effects: slot.effects).padding(4)
+                    if !slot.isEffectClip { EffectIcons(effects: slot.effects).padding(4) }
                 }
                 .overlay(alignment: .topTrailing) {
                     if slot.muted {
@@ -1037,7 +1051,7 @@ struct SlotContent: View {
             VStack(spacing: 2) {
                 HStack(spacing: 4) {
                     if slot.isImage { Image(systemName: "photo").font(.system(size: 10)) }
-                    if slot.endAction != .hold && !slot.isImage { EndActionIcon(action: slot.endAction, size: 10) }
+                    if slot.endAction != .hold && !slot.isImage && !slot.isEffectClip { EndActionIcon(action: slot.endAction, size: 10) }
                     if slot.hasInOut && !slot.isImage { Image(systemName: "scissors").font(.system(size: 10)) }
                     if slot.audioMuted { Image(systemName: "speaker.slash.fill").font(.system(size: 10)).foregroundStyle(.red) }
                     if slot.jumpBeats > 0 && !slot.isImage { Image(systemName: "die.face.5").font(.system(size: 10)).foregroundStyle(.purple) }
@@ -1131,7 +1145,7 @@ struct LivePanel: View {
     @AppStorage("speedSpringBack") private var springBack = false
 
     var body: some View {
-        let layerName = engine.layers[engine.selectedLayer].name
+        let layerName = engine.layers[engine.selectedLayer].displayName
         VStack(alignment: .leading, spacing: 10) {
             SectionTitle("再生中 — \(layerName)")
             Group {

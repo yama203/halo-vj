@@ -232,7 +232,7 @@ struct ParameterPanel: View {
         HStack(spacing: 10) {
             Picker("", selection: $engine.inspectorTab) {
                 Text(part == .preview ? "コンポ" : "コンポジション").tag(Engine.InspectorTab.composition)
-                Text("レイヤー \(layer.name)").tag(Engine.InspectorTab.layer)
+                Text("レイヤー \(engine.layers[min(engine.selectedLayer, engine.layers.count - 1)].displayName)").tag(Engine.InspectorTab.layer)
                 Text(clip.map { part == .preview ? "クリップ" : "クリップ：\($0.name)" } ?? "クリップ").tag(Engine.InspectorTab.clip)
             }
             .pickerStyle(.segmented)
@@ -276,7 +276,8 @@ struct ParameterPanel: View {
         let layer = self.layer, clip = self.clip, draft = engine.sceneDraft
         ZStack(alignment: .topLeading) {
             MetalPreview(kind: previewKind)
-                .id(engine.inspectorTab)
+                // 描き方（クリップ・出力など）が変わったら作り直す
+                .id("\(engine.inspectorTab)-\(previewKind)")
             switch engine.inspectorTab {
             case .composition:
                 if let draft { PolyMaskOverlay(holder: draft) } else { PolyMaskOverlay(holder: engine) }
@@ -349,7 +350,8 @@ struct ParameterPanel: View {
         switch engine.inspectorTab {
         case .composition: engine.sceneDraft != nil ? .scenePreview : .composition
         case .layer: .layer
-        case .clip: .clipPreview
+        // エフェクトのクリップは絵を持たないので、出力（コンポジション）を見せる
+        case .clip: (clip?.isEffectClip == true ? .composition : .clipPreview)
         }
     }
 
@@ -358,11 +360,12 @@ struct ParameterPanel: View {
         case .composition:
             return engine.editingScene.map { "シーン「\($0.name)」（出力しない・音なし）" } ?? "コンポジション"
         case .layer:
-            let name = "レイヤー \(engine.layers[engine.selectedLayer].name)"
+            let name = "レイヤー \(engine.layers[engine.selectedLayer].displayName)"
             return engine.editingScene.map { "シーン「\($0.name)」の\(name)（出力しない）" } ?? name
         case .clip:
             guard let clipIndex else { return "クリップ" }
             let live = engine.activeByLayer[engine.layerOf(clipIndex)] == clipIndex
+            if clip?.isEffectClip == true { return live ? "出力（このエフェクトがかかっている）" : "出力（このエフェクトはまだかかっていない）" }
             return live ? "出力中" : "プレビュー（出力しない・音なし）"
         }
     }
@@ -606,6 +609,14 @@ struct ClipParams: View {
     @ObservedObject var slot: ClipSlot
 
     var body: some View {
+        if slot.isEffectClip {
+            EffectClipParams(slot: slot)
+        } else {
+            mediaParams
+        }
+    }
+
+    @ViewBuilder private var mediaParams: some View {
         SideBySide {
         VStack(alignment: .leading, spacing: 0) {
         HStack(alignment: .top, spacing: 16) {
@@ -668,6 +679,31 @@ struct ClipParams: View {
         }
         }
         .frame(width: UI.paramsWidth, alignment: .topLeading)
+        } second: {
+            EffectsSection(holder: slot)
+        }
+    }
+}
+
+/// エフェクトのクリップ（調整レイヤーの枠）の設定：名前と、エフェクトの並び
+struct EffectClipParams: View {
+    @ObservedObject var slot: ClipSlot
+
+    var body: some View {
+        SideBySide {
+            VStack(alignment: .leading, spacing: 10) {
+                SectionTitle("エフェクトのクリップ")
+                HStack(spacing: 6) {
+                    Text("名前").font(.system(size: 12)).foregroundStyle(.secondary)
+                    TextField("空ならエフェクト名", text: $slot.title)
+                        .textFieldStyle(.roundedBorder)
+                }
+                Text("押すと、右のエフェクトがこのレイヤーより下の絵全体にかかる（レイヤーの不透明度がかかり具合）。同じ段の別の枠を押すと切り替わり、空きの枠を押すと外れる。レイヤー自体に付けたエフェクトは、いつも一緒にかかる。")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(width: UI.paramsWidth, alignment: .topLeading)
         } second: {
             EffectsSection(holder: slot)
         }

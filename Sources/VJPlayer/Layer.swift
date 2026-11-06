@@ -93,6 +93,10 @@ final class Layer: ObservableObject, Identifiable, Animatable, EffectHolder {
     /// 上から何段目か（0 = 一番上 = 一番手前）。レイヤーを足したり消したりすると変わる
     @Published var index: Int
     var name: String { "L\(index + 1)" }
+    /// 付けた名前（「背景」など。空なら無し）。番号 L1 などはそのまま目印として使う
+    @Published var title = "" { didSet { if oldValue != title { onChanged?() } } }
+    /// 表示用：「L1 背景」（名前が無ければ「L1」）
+    var displayName: String { title.isEmpty ? name : name + " " + title }
 
     @Published var opacity: Double = 1 { didSet { onChanged?() } }
     @Published var blend: BlendMode = .normal { didSet { onChanged?() } }

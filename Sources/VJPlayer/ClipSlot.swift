@@ -474,7 +474,32 @@ final class ClipSlot: ObservableObject, Identifiable, Animatable, EffectHolder {
     @Published private(set) var thumbnail: NSImage?
     @Published private(set) var errorMessage: String?
 
-    var name: String { generator?.kind.label ?? url.deletingPathExtension().lastPathComponent }
+    var name: String {
+        if isEffectClip {
+            if !title.isEmpty { return title }
+            return effects.isEmpty ? "エフェクト（空）" : effects.map(\.kind.label).joined(separator: "＋")
+        }
+        return generator?.kind.label ?? url.deletingPathExtension().lastPathComponent
+    }
+
+    /// エフェクトのクリップ（調整レイヤーの枠に置く、エフェクトのセット。絵は持たない）
+    private(set) var isEffectClip = false
+    /// エフェクトのクリップに付けた名前（空ならエフェクト名を並べる）
+    @Published var title = "" { didSet { if oldValue != title { onSettingsChanged?() } } }
+
+    /// エフェクトのクリップを作る。読み込みは要らないので、すぐ使える
+    init(effects: [Effect], title: String = "") {
+        url = URL(string: "halovj-effects:")!
+        speed = 1
+        endAction = .loop
+        inPoint = 0
+        outPoint = nil
+        asset = AVURLAsset(url: url)
+        isEffectClip = true
+        isReady = true
+        self.effects = effects
+        self.title = title
+    }
 
     /// ジェネレーター（動画の代わりに描く絵）。nil なら動画のクリップ
     @Published var generator: Effect? {
@@ -518,7 +543,7 @@ final class ClipSlot: ObservableObject, Identifiable, Animatable, EffectHolder {
         return frames[min(lo, frames.count - 1)]
     }
     /// 動画ではない（ジェネレーター・静止画）。速度・再生範囲などは使わない
-    var isStill: Bool { isGenerator || isImage }
+    var isStill: Bool { isGenerator || isImage || isEffectClip }
 
     private func loadImage() {
         guard FileManager.default.fileExists(atPath: url.path) else {

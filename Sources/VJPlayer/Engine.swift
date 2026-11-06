@@ -759,7 +759,9 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
     /// 同じ設定のクリップを、url の動画で作る（複製・ファイルの付け直し）
     private static func copy(of src: ClipSlot, url: URL) -> ClipSlot {
         let copy: ClipSlot
-        if let g = src.generator {
+        if src.isEffectClip {
+            copy = ClipSlot(effects: [], title: src.title)
+        } else if let g = src.generator {
             var g2 = g; g2.id = UUID()
             copy = ClipSlot(generator: g2)
         } else {
@@ -829,6 +831,17 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
     }
 
     // MARK: - クリップの読み込み
+
+    /// エフェクトのクリップを index に作る（調整レイヤーの枠用。空き枠だけ）。作ったら選ぶ
+    @discardableResult
+    func createEffectClip(at index: Int, with kind: EffectKind? = nil) -> Bool {
+        guard slots.indices.contains(index), slots[index] == nil else { return false }
+        if let kind, kind.isGenerator || kind.isBlend { return false }
+        setSlot(index, ClipSlot(effects: kind.map { [Effect(kind: $0)] } ?? []))
+        selectClip(index)
+        scheduleSave()
+        return true
+    }
 
     /// ジェネレーターを index に置く（あれば置き換える。再生中なら何もしない）
     @discardableResult
@@ -1360,11 +1373,16 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
         guard !l.muted else { return nil }
         if l.isAdjustment {
             // 調整レイヤー：クリップは描かず、エフェクトを下の絵全体にかける（不透明度＝かかり具合）
-            guard !l.layerEffects.isEmpty else { return nil }
+            // レイヤーのエフェクト（いつもかかる）＋ 出しているエフェクトのクリップのエフェクト
+            var fx = l.layerEffects
+            if l.slot?.isEffectClip == true, !l.clipEffects.effects.isEmpty {
+                fx = EffectStack(effects: l.layerEffects.effects + l.clipEffects.effects, beat: beat, origin: l.clipEffects.origin)
+            }
+            guard !fx.isEmpty else { return nil }
             let op = Float(l.opacityAnim.map { min(max($0.value(base: Double(l.opacity), at: now, beat: beat), 0), 1) }
                            ?? Double(l.opacity))
             guard op > 0.001 else { return nil }
-            return LayerGroup(draws: [], opacity: op, blend: .normal, effects: l.layerEffects, key: r, isAdjustment: true)
+            return LayerGroup(draws: [], opacity: op, blend: .normal, effects: fx, key: r, isAdjustment: true)
         }
         let opacity = Float(l.opacityAnim.map { min(max($0.value(base: Double(l.opacity), at: now, beat: beat), 0), 1) }
                             ?? Double(l.opacity))
@@ -1478,6 +1496,10 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
         var audioMuted: Bool?
         /// ジェネレーター（動画ではない）。あれば path は使わない
         var generator: Effect?
+        /// エフェクトのクリップ（調整レイヤーの枠。絵は持たず、effects がかかる）
+        var effectClip: Bool?
+        /// エフェクトのクリップの名前
+        var title: String?
     }
 
     /// [ParamKey: ParamAnim] ⇔ 保存用の [String: ParamAnim]
@@ -1515,6 +1537,8 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
         var audioMuted: Bool?
         var isAdjustment: Bool?
         var blendFX: Effect?
+        /// レイヤーに付けた名前（シーンには入れない）
+        var title: String?
     }
 
     struct SavedDeck: Codable {
@@ -1602,14 +1626,16 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
             format: dir == nil ? nil : "vjplayer-project-1",
             columns: columns,
             slots: slots.map { $0.map {
-                SavedSlot(path: $0.generator == nil ? $0.url.path : "", relPath: $0.generator == nil ? rel($0.url) : nil,
+                SavedSlot(path: $0.generator == nil && !$0.isEffectClip ? $0.url.path : "",
+                          relPath: $0.generator == nil && !$0.isEffectClip ? rel($0.url) : nil,
                           speed: $0.speed, loop: $0.loop,
                           endAction: $0.endAction.rawValue, inPoint: $0.inPoint, outPoint: $0.outPoint,
                           x: $0.posX, y: $0.posY, scale: $0.scale, rotation: $0.rotation,
                           opacity: $0.opacity, volume: $0.clipVolume, anims: Self.encodeAnims($0.anims),
                           syncMode: $0.syncMode.rawValue, syncBeats: $0.syncBeats, jumpBeats: $0.jumpBeats,
                           effects: $0.effects.isEmpty ? nil : $0.effects, muted: $0.muted ? true : nil,
-                          audioMuted: $0.audioMuted ? true : nil, generator: $0.generator)
+                          audioMuted: $0.audioMuted ? true : nil, generator: $0.generator,
+                          effectClip: $0.isEffectClip ? true : nil, title: $0.title.isEmpty ? nil : $0.title)
             } },
             layers: layers.map {
                 SavedLayer(opacity: $0.opacity, blend: $0.blend.rawValue, volume: $0.volume,
@@ -1617,7 +1643,8 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
                            anims: Self.encodeAnims($0.anims), effects: $0.effects.isEmpty ? nil : $0.effects,
                            muted: $0.muted ? true : nil, audioMuted: $0.audioMuted ? true : nil,
                            isAdjustment: $0.isAdjustment ? true : nil,
-                           blendFX: $0.blend.isSpecial ? $0.blendFX : nil)
+                           blendFX: $0.blend.isSpecial ? $0.blendFX : nil,
+                           title: $0.title.isEmpty ? nil : $0.title)
             },
             corners: corners.map { [$0.x, $0.y] },
             audioDeviceUID: nil,
@@ -1701,6 +1728,7 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
             layer.audioMuted = saved.audioMuted ?? false
             layer.isAdjustment = saved.isAdjustment ?? false
             layer.blendFX = saved.blendFX ?? Effect(kind: .overdrive)
+            layer.title = saved.title ?? ""
         }
         for (i, saved) in state.slots.enumerated() {
             let d = i / savedGrid, r = (i % savedGrid) / savedColumns, c = i % savedColumns
@@ -1712,7 +1740,8 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
                 if FileManager.default.fileExists(atPath: u.path) { url = u }
             }
             let end = saved.endAction.flatMap(EndAction.init(rawValue:)) ?? (saved.loop ? .loop : .hold)
-            let slot = saved.generator.map { ClipSlot(generator: $0) }
+            let slot = saved.effectClip == true ? ClipSlot(effects: [], title: saved.title ?? "")
+                : saved.generator.map { ClipSlot(generator: $0) }
                 ?? ClipSlot(url: url, speed: saved.speed, endAction: end, inPoint: saved.inPoint ?? 0, outPoint: saved.outPoint)
             slot.posX = saved.x ?? 0
             slot.posY = saved.y ?? 0

@@ -272,6 +272,7 @@ enum SelfTest {
         testPads(check: check)
         testMultiSelect(check: check)
         testMoveLayer(check: check)
+        testEffectClips(check: check)
         testCues(check: check, wait: wait)
         do {
             // レイアウト：保存して読み戻せる（古い保存データの無い項目は既定値）
@@ -1283,6 +1284,41 @@ enum SelfTest {
               "ソース：なぞって見る用のコマと長さを作れる")
     }
 
+    /// 調整レイヤーの枠：エフェクトのクリップを置いて、押すとそのエフェクトが下の絵全体にかかる
+    static func testEffectClips(check: (Bool, String) -> Void) {
+        let e = Engine(persistent: false)
+        e.insertAdjustmentLayer(at: 0)
+        let c = e.columns
+        e.layers[0].effects = [Effect(kind: .levels)]     // レイヤー自体のエフェクト（いつもかかる）
+        check(e.createEffectClip(at: 0, with: .mirror) && e.createEffectClip(at: 1, with: .invert)
+              && e.slots[0]?.isEffectClip == true && e.slots[0]?.name == "ミラー" && e.inspectedIndex == 1,
+              "エフェクトのクリップ：調整レイヤーの空き枠に作れる（エフェクト名が名前になり、作ると選ばれる）")
+        check(!e.createEffectClip(at: 0), "エフェクトのクリップ：埋まっている枠には作らない")
+        e.slots[1]?.addEffect(.colorize)
+        func adjFX() -> [EffectKind]? { e.layerGroups().first { $0.isAdjustment }?.effects.effects.map(\.kind) }
+        check(adjFX() == [.levels], "エフェクトのクリップ：出していなければ、レイヤー自体のエフェクトだけ")
+        e.trigger(0)
+        check(adjFX() == [.levels, .mirror], "エフェクトのクリップ：押すと、そのエフェクトが下の絵全体にかかる")
+        e.trigger(1)
+        check(adjFX() == [.levels, .invert, .colorize] && e.activeByLayer[0] == 1, "エフェクトのクリップ：同じ段の別の枠で切り替わる")
+        e.stopLayer(0)
+        check(adjFX() == [.levels], "エフェクトのクリップ：空き枠（停止）で外れる")
+        e.layers[0].effects = []
+        check(adjFX() == nil, "エフェクトのクリップ：何もかけないときは何もしない")
+        e.trigger(0)
+        check(adjFX() == [.mirror], "エフェクトのクリップ：レイヤーにエフェクトが無くても、クリップのエフェクトだけかかる")
+        // 名前・保存・複製
+        e.slots[1]?.title = "ネガ"
+        let e2 = Engine(persistent: false)
+        e2.apply(e.makeState(relativeTo: nil), baseDir: nil)
+        check(e2.slots[1]?.isEffectClip == true && e2.slots[1]?.name == "ネガ"
+              && e2.slots[1]?.effects.map(\.kind) == [.invert, .colorize] && e2.layers[0].isAdjustment,
+              "エフェクトのクリップ：名前とエフェクトを保存して読み込める")
+        check(e.duplicateSlot(1, to: 2) && e.slots[2]?.isEffectClip == true && e.slots[2]?.name == "ネガ"
+              && e.slots[2] !== e.slots[1], "エフェクトのクリップ：複製できる")
+        _ = c
+    }
+
     /// キュー：並べたものを GO で順に出す
     static func testCues(check: (Bool, String) -> Void, wait: (Double) -> Void) {
         let e = Engine(persistent: false)
@@ -1425,7 +1461,10 @@ enum SelfTest {
         e.layers[0].blend = .add
         let l0 = e.layers[0]
         let sc = e.addScene()
+        l0.title = "背景"
         e.moveLayer(0, to: 2)
+        check(e.layers[2].title == "背景" && e.layers[2].displayName == "L3 背景" && e.layers[0].displayName == "L1",
+              "レイヤーの名前：番号は場所で変わり、付けた名前はレイヤーに付いていく")
         check(e.layers[2] === l0 && l0.index == 2 && abs(e.layers[2].opacity - 0.3) < 1e-9
               && e.slots[2 * c]?.generator?.kind == .solid && e.slots[c + 1 - c]?.generator?.kind == .noise
               && e.slots[c]?.generator?.kind == .stripes,
@@ -1441,6 +1480,10 @@ enum SelfTest {
         e.recallScene(sc.id)
         check(e.activeByLayer[2] == 2 * c && e.activeByLayer[0] == 1 && abs(e.layers[2].opacity - 0.3) < 1e-9,
               "レイヤーの移動：動かしたあとにシーンを呼んでも、正しいレイヤーに出る")
+        check(e.layers[2].title == "背景", "レイヤーの名前：シーンを呼んでも変わらない")
+        let named = Engine(persistent: false)
+        named.apply(e.makeState(relativeTo: nil), baseDir: nil)
+        check(named.layers[2].title == "背景" && named.layers[0].title.isEmpty, "レイヤーの名前：保存して読み込める")
         // 足す・消すでもシーンが付いてくる
         e.insertLayer(at: 0)
         let s3 = e.scenes.first { $0.id == sc.id }

@@ -28,7 +28,7 @@ struct EffectBrowser: View {
             .background(RoundedRectangle(cornerRadius: 6).fill(Color.white.opacity(0.06)))
 
             Text(generators
-                 ? "動画の代わりに置く絵。クリップの枠へドラッグ、ダブルクリックで選択中のレイヤー（\(engine.layers[engine.selectedLayer].name)）の空いている所へ。空きの枠の右クリックからも置ける"
+                 ? "動画の代わりに置く絵。クリップの枠へドラッグ、ダブルクリックで選択中のレイヤー（\(engine.layers[engine.selectedLayer].displayName)）の空いている所へ。空きの枠の右クリックからも置ける"
                  : "付けたい所へドラッグ（クリップ・レイヤー欄・出力モニター・エフェクト欄）。ダブルクリックで今のタブ（\(targetName)）へ")
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
@@ -78,7 +78,7 @@ struct EffectBrowser: View {
     private var targetName: String {
         switch engine.inspectorTab {
         case .composition: (engine.sceneDraft != nil ? "シーンの" : "") + "コンポジション"
-        case .layer: (engine.sceneDraft != nil ? "シーンの" : "") + "レイヤー " + engine.layers[engine.selectedLayer].name
+        case .layer: (engine.sceneDraft != nil ? "シーンの" : "") + "レイヤー " + engine.layers[engine.selectedLayer].displayName
         case .clip: engine.inspectedIndex.flatMap { engine.slots[$0]?.name }.map { "クリップ " + $0 } ?? "クリップ（未選択）"
         }
     }
