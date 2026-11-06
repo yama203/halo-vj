@@ -268,7 +268,7 @@ struct SceneCompParams: View {
 
     var body: some View {
         SideBySide {
-            HStack(alignment: .top, spacing: 16) {
+            ParamColumns {
                 ParamColumn(title: "トランスフォーム") {
                     MiniButton(icon: "arrow.counterclockwise", label: "リセット", disabled: draft.compTransform.isDefault,
                                help: "位置・スケール・角度を初期値に戻す") { draft.compTransform.reset() }
@@ -282,7 +282,7 @@ struct SceneCompParams: View {
                         .frame(height: UI.rowHeight)
                 }
             }
-            .frame(width: UI.paramsWidth, alignment: .topLeading)
+            .paramsFrame()
         } second: {
             EffectsSection(holder: draft)
         }

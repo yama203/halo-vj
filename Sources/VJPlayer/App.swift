@@ -244,6 +244,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 /// 開発用：エフェクトの設定パネルを画像にする
 enum CardPreview {
     struct Host: View {
+        static let cardWidth = ProcessInfo.processInfo.environment["VJ_CARD_WIDTH"].flatMap(Double.init).map { CGFloat($0) } ?? UI.paramsWidth
         @State var effect: Effect
         @State var blend = BlendMode.normal
         @State var other = Effect(kind: .mirror)
@@ -253,14 +254,16 @@ enum CardPreview {
                 EffectCard(effect: $other, isFirst: true, isLast: false, move: { _ in }, remove: {})
                 EffectCard(effect: $effect, isFirst: false, isLast: true, move: { _ in }, remove: {})
                     .onAppear { EffectUIState.shared.expanded.insert(effect.id) }
-                HStack(alignment: .top, spacing: 16) {
+                ParamColumns {
                     BlendChoice(blend: $blend)
-                        .frame(width: UI.paramColumnWidth)
+                        .frame(width: min(UI.paramColumnWidth, Self.cardWidth))
                     AnimEditor(anim: $anim, defaultRange: 0...1, format: EffectParam.percent, range: 0...1, perPoint: 0.003)
-                        .frame(width: UI.paramColumnWidth)
+                        .frame(width: min(UI.paramColumnWidth, Self.cardWidth))
                 }
             }
-                .frame(width: UI.paramsWidth + 20)
+                // VJ_CARD_WIDTH で細い幅のときの見た目も確かめられる
+                .environment(\.paramsWidth, Self.cardWidth)
+                .frame(width: Self.cardWidth + 20)
                 .padding(12)
                 .background(Color(white: 0.16))
                 .environment(\.colorScheme, .dark)
@@ -269,12 +272,18 @@ enum CardPreview {
     }
 
     static func writePanel(width: Double, path: String) {
-        let root = ParameterPanel(previewHeight: 300)
-            .frame(width: width, height: 420)
+        // VJ_INSPECTOR_TAB=composition|layer|clip でタブを選ぶ。VJ_PANEL_HEIGHT を付けると設定部分だけをその高さで
+        let env = ProcessInfo.processInfo.environment
+        if let t = env["VJ_INSPECTOR_TAB"].flatMap(Engine.InspectorTab.init(rawValue:)) { Engine.shared.inspectorTab = t }
+        let height = env["VJ_PANEL_HEIGHT"].flatMap(Double.init) ?? 420
+        let root = Group {
+            if env["VJ_PANEL_HEIGHT"] != nil { ParameterPanel(part: .settings) } else { ParameterPanel(previewHeight: 300) }
+        }
+            .frame(width: width, height: height)
             .background(Color(white: 0.12))
             .environment(\.colorScheme, .dark)
             .environmentObject(Engine.shared)
-        snapshot(NSHostingView(rootView: root), size: NSSize(width: width, height: 420), path: path)
+        snapshot(NSHostingView(rootView: root), size: NSSize(width: width, height: height), path: path)
     }
 
     private static func snapshot(_ view: NSView, size: NSSize, path: String) {

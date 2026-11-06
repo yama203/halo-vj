@@ -207,8 +207,8 @@ struct ParameterPanel: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 case .settings:
                     // 設定だけ：区画の幅いっぱいに（2 列が入れば横に並べる。1 列も入らなければ横にもスクロール）
-                    settings(twoCol: geo.size.width >= SideBySide<EmptyView, EmptyView>.twoColumnWidth,
-                             sideways: geo.size.width < UI.paramsWidth + 12)
+                    settings(twoCol: geo.size.width >= SideBySide<EmptyView, EmptyView>.twoColumnWidth)
+                        .environment(\.paramsWidth, min(max(geo.size.width - 14, 160), UI.paramsWidth))
                         .frame(width: geo.size.width, alignment: .topLeading)
                 }
             }
@@ -229,19 +229,26 @@ struct ParameterPanel: View {
     /// 上の段：コンポジション・レイヤー・クリップの切り替えと、タブごとの操作
     @ViewBuilder private var header: some View {
         let layer = self.layer, clip = self.clip, draft = engine.sceneDraft
-        HStack(spacing: 10) {
-            Picker("", selection: $engine.inspectorTab) {
-                Text(part == .preview ? "コンポ" : "コンポジション").tag(Engine.InspectorTab.composition)
-                Text("レイヤー \(engine.layers[min(engine.selectedLayer, engine.layers.count - 1)].displayName)").tag(Engine.InspectorTab.layer)
-                Text(clip.map { part == .preview ? "クリップ" : "クリップ：\($0.name)" } ?? "クリップ").tag(Engine.InspectorTab.clip)
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .controlSize(part == .preview ? .regular : .large)
-            .frame(minWidth: 0, maxWidth: 560)
-            .layoutPriority(1)
-            Spacer(minLength: 0)
+        // 幅が足りないときは短い名前に切り替える（見切れて読めなくならないように）
+        ViewThatFits(in: .horizontal) {
+            tabPicker(short: part == .preview, clip: clip).fixedSize()
+            tabPicker(short: true, clip: clip).fixedSize()
+            tabPicker(short: true, clip: clip).frame(minWidth: 0, maxWidth: .infinity)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func tabPicker(short: Bool, clip: ClipSlot?) -> some View {
+        let layerName = engine.layers[min(engine.selectedLayer, engine.layers.count - 1)].displayName
+        return Picker("", selection: $engine.inspectorTab) {
+            Text(short ? "コンポ" : "コンポジション").tag(Engine.InspectorTab.composition)
+            Text(short ? layerName : "レイヤー \(layerName)").tag(Engine.InspectorTab.layer)
+            Text(clip.map { short ? "クリップ" : "クリップ：\($0.name)" } ?? "クリップ").tag(Engine.InspectorTab.clip)
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .controlSize(part == .preview ? .regular : .large)
+        .frame(maxWidth: 560)
     }
 
     /// プレビューと設定を横に並べる（いつもの形）
@@ -299,9 +306,9 @@ struct ParameterPanel: View {
     }
 
     /// 設定（タブごとの数値とエフェクト。縦にスクロール）
-    @ViewBuilder private func settings(twoCol: Bool, sideways: Bool = false) -> some View {
+    @ViewBuilder private func settings(twoCol: Bool) -> some View {
         let layer = self.layer, clip = self.clip, clipIndex = self.clipIndex, draft = engine.sceneDraft
-        ScrollView(sideways ? [.vertical, .horizontal] : .vertical) {
+        ScrollView(.vertical) {
             VStack(alignment: .leading, spacing: 0) {
                 switch engine.inspectorTab {
                 case .composition:
@@ -373,6 +380,7 @@ struct ParameterPanel: View {
 
 /// 見出し付きの縦並びパラメーター
 struct ParamColumn<Content: View, Accessory: View>: View {
+    @Environment(\.paramsWidth) private var w
     let title: String
     /// 見出しの右に置く小さなボタン（リセット・停止など）
     @ViewBuilder var accessory: Accessory
@@ -388,7 +396,7 @@ struct ParamColumn<Content: View, Accessory: View>: View {
             .frame(height: 18)
             content
         }
-        .frame(width: UI.paramColumnWidth, alignment: .topLeading)
+        .frame(width: w < UI.paramsWidth - 1 ? w : UI.paramColumnWidth, alignment: .topLeading)
     }
 }
 
@@ -492,7 +500,7 @@ struct CompositionParams: View {
     var body: some View {
         SideBySide {
         VStack(alignment: .leading, spacing: 0) {
-        HStack(alignment: .top, spacing: 16) {
+        ParamColumns {
             ParamColumn(title: "トランスフォーム") {
                 MiniButton(icon: "arrow.counterclockwise", label: "リセット", disabled: engine.compTransform.isDefault,
                            help: "位置・スケール・角度を初期値に戻す") { engine.compTransform.reset() }
@@ -520,7 +528,7 @@ struct CompositionParams: View {
             }
         }
         }
-        .frame(width: UI.paramsWidth, alignment: .topLeading)
+        .paramsFrame()
         } second: {
             EffectsSection(holder: engine)
         }
@@ -545,7 +553,7 @@ struct LayerParams: View {
     var body: some View {
         SideBySide {
         VStack(alignment: .leading, spacing: 0) {
-        HStack(alignment: .top, spacing: 16) {
+        ParamColumns {
             ParamColumn(title: "トランスフォーム") {
                 MiniButton(icon: "arrow.counterclockwise", label: "リセット", disabled: layer.transform.isDefault,
                            help: "位置・スケール・角度を初期値に戻す") { layer.transform.reset() }
@@ -589,11 +597,11 @@ struct LayerParams: View {
                     layer.blend = .add
                 }, isBlendSettings: true)
             }
-            .frame(width: UI.paramsWidth, alignment: .leading)
+            .paramsFrame(alignment: .leading)
             .padding(.top, 14)
         }
         }
-        .frame(width: UI.paramsWidth, alignment: .topLeading)
+        .paramsFrame()
         } second: {
             EffectsSection(holder: layer)
         }
@@ -619,7 +627,7 @@ struct ClipParams: View {
     @ViewBuilder private var mediaParams: some View {
         SideBySide {
         VStack(alignment: .leading, spacing: 0) {
-        HStack(alignment: .top, spacing: 16) {
+        ParamColumns {
             ParamColumn(title: "トランスフォーム") {
                 MiniButton(icon: "arrow.counterclockwise", label: "リセット", disabled: !slot.hasCustomTransform,
                            help: "位置・スケール・角度・不透明度・音量を初期値に戻す（速度はそのまま）") { slot.resetTransform() }
@@ -653,7 +661,7 @@ struct ClipParams: View {
                            origin: slot.animOrigin, isFirst: true, isLast: true, move: { _ in }, remove: {},
                            isBlendSettings: true)
             }
-            .frame(width: UI.paramsWidth, alignment: .leading)
+            .paramsFrame(alignment: .leading)
             .padding(.top, 10)
         } else if slot.isImage {
             // 静止画：再生範囲は無い。動く画像（GIF など）は速度だけ
@@ -671,14 +679,14 @@ struct ClipParams: View {
                         .help("動く画像の速さ（コンポジション速度も掛かる）。ダブルクリックで 1.00x")
                 }
             }
-            .frame(width: UI.paramsWidth, alignment: .leading)
+            .paramsFrame(alignment: .leading)
             .padding(.top, 10)
         } else {
             PlayRangeSection(slot: slot)
                 .padding(.top, 10)
         }
         }
-        .frame(width: UI.paramsWidth, alignment: .topLeading)
+        .paramsFrame()
         } second: {
             EffectsSection(holder: slot)
         }
@@ -703,7 +711,7 @@ struct EffectClipParams: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            .frame(width: UI.paramsWidth, alignment: .topLeading)
+            .paramsFrame()
         } second: {
             EffectsSection(holder: slot)
         }
@@ -768,37 +776,94 @@ struct PlayRangeSection: View {
             }
             InOutBar(slot: slot)
                 .frame(height: 40)
-            HStack(spacing: 6) {
-                timeLabel("イン", slot.inPoint, changed: slot.inPoint > 0)
-                FrameStepButtons(help: "イン点") { slot.stepIn($0) }
-                Spacer(minLength: 4)
-                timeLabel("アウト", slot.outTime, changed: slot.outPoint != nil)
-                FrameStepButtons(help: "アウト点") { slot.stepOut($0) }
+            // 細いときはイン・アウトを 2 段に
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 6) {
+                    inControls
+                    Spacer(minLength: 4)
+                    outControls
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 6) { inControls; Spacer(minLength: 0) }
+                    HStack(spacing: 6) { outControls; Spacer(minLength: 0) }
+                }
             }
             .font(.system(size: 12).monospacedDigit())
             Text(String(format: "長さ %.2f 秒（%.0f コマ）", max(slot.outTime - slot.inPoint, 0),
                         (max(slot.outTime - slot.inPoint, 0) / slot.frameLength).rounded()))
                 .font(.system(size: 11).monospacedDigit())
                 .foregroundStyle(.secondary)
-            HStack(spacing: 8) {
-                Text("終わったら").font(.system(size: 12)).foregroundStyle(.secondary)
-                Picker("", selection: $slot.endAction) {
-                    ForEach(EndAction.allCases) { Label($0.label, systemImage: $0.icon).tag($0) }
+            // 細いときは見出しを上に、さらに細いときはアイコンだけ
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) {
+                    endLabel
+                    endPicker(iconOnly: false).fixedSize()
                 }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .controlSize(.large)
+                VStack(alignment: .leading, spacing: 4) {
+                    endLabel
+                    endPicker(iconOnly: false).fixedSize()
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    endLabel
+                    endPicker(iconOnly: true).frame(minWidth: 0, maxWidth: .infinity)
+                }
             }
             .help("アウト点まで来たとき：ループ＝イン点から繰り返す／最後で停止＝最後のコマで止める／ブラックアウト＝このレイヤーを消す")
-            HStack(spacing: 8) {
-                Text("ジャンプ").font(.system(size: 12)).foregroundStyle(.secondary)
-                ChoiceButtons(selection: $slot.jumpBeats,
-                              items: ClipSlot.jumpChoices.map { ($0, $0 == 0 ? "しない" : beatShort($0)) })
-                Text("拍ごと").font(.system(size: 12)).foregroundStyle(.secondary).fixedSize()
+            Group {
+                if narrow {
+                    // 細いときは見出しを上に、ボタンは 2 段
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("ジャンプ（拍ごと）").font(.system(size: 12)).foregroundStyle(.secondary)
+                        ChoiceButtons(selection: $slot.jumpBeats, items: jumpItems, columns: 4)
+                    }
+                } else {
+                    HStack(spacing: 8) {
+                        Text("ジャンプ").font(.system(size: 12)).foregroundStyle(.secondary).fixedSize()
+                        ChoiceButtons(selection: $slot.jumpBeats, items: jumpItems)
+                        Text("拍ごと").font(.system(size: 12)).foregroundStyle(.secondary).fixedSize()
+                    }
+                }
             }
             .help("BPM の拍の頭で、再生範囲の中のランダムな位置へ飛ぶ（音も一緒に飛ぶ）。テンポは「ライブ」パネルの BPM / TAP で")
         }
-        .frame(width: UI.paramsWidth, alignment: .leading)
+        .paramsFrame(alignment: .leading)
+    }
+
+    @Environment(\.paramsWidth) private var w
+    private var narrow: Bool { w < 420 }
+    private var jumpItems: [(Double, String)] { ClipSlot.jumpChoices.map { ($0, $0 == 0 ? "しない" : beatShort($0)) } }
+
+    private var inControls: some View {
+        HStack(spacing: 6) {
+            timeLabel("イン", slot.inPoint, changed: slot.inPoint > 0)
+            FrameStepButtons(help: "イン点") { slot.stepIn($0) }
+        }
+    }
+
+    private var outControls: some View {
+        HStack(spacing: 6) {
+            timeLabel("アウト", slot.outTime, changed: slot.outPoint != nil)
+            FrameStepButtons(help: "アウト点") { slot.stepOut($0) }
+        }
+    }
+
+    private var endLabel: some View {
+        Text("終わったら").font(.system(size: 12)).foregroundStyle(.secondary).fixedSize()
+    }
+
+    private func endPicker(iconOnly: Bool) -> some View {
+        Picker("", selection: $slot.endAction) {
+            ForEach(EndAction.allCases) { a in
+                Group {
+                    if iconOnly { Image(systemName: a.icon) } else { Label(a.label, systemImage: a.icon) }
+                }
+                .help(a.label)
+                .tag(a)
+            }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .controlSize(.large)
     }
 
     private func timeLabel(_ title: String, _ t: Double, changed: Bool) -> some View {
@@ -806,6 +871,7 @@ struct PlayRangeSection: View {
             Text(title).foregroundStyle(.secondary)
             Text(clipTime(t)).foregroundStyle(changed ? Color.orange : Color.primary)
         }
+        .fixedSize()
     }
 }
 
@@ -863,7 +929,8 @@ struct EdgeFrame: View {
                 .background(Color.black.opacity(0.65), in: RoundedRectangle(cornerRadius: 3))
                 .padding(3)
         }
-        .frame(width: 136, height: 76)
+        .aspectRatio(16.0 / 9.0, contentMode: .fit)
+        .frame(maxWidth: 136)
         .clipShape(RoundedRectangle(cornerRadius: 4))
         .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.gray.opacity(0.35)))
         // ドラッグ中は少し待ってから描く（描きすぎない）
@@ -1062,7 +1129,7 @@ struct SideBySide<A: View, B: View>: View {
         if twoCol {
             HStack(alignment: .top, spacing: Self.gap) {
                 first
-                second.frame(width: UI.paramsWidth, alignment: .topLeading)
+                second.paramsFrame()
             }
         } else {
             VStack(alignment: .leading, spacing: 14) {
@@ -1074,6 +1141,38 @@ struct SideBySide<A: View, B: View>: View {
 }
 
 private struct ParamsTwoColumnKey: EnvironmentKey { static let defaultValue = false }
+private struct ParamsWidthKey: EnvironmentKey { static let defaultValue = UI.paramsWidth }
+extension EnvironmentValues {
+    /// パラメーター欄に使える幅（狭いと、2 つの列を縦に積んで幅いっぱいに広げる）
+    var paramsWidth: CGFloat {
+        get { self[ParamsWidthKey.self] }
+        set { self[ParamsWidthKey.self] = newValue }
+    }
+}
+
+extension View {
+    /// パラメーター欄の幅にする（狭い所では狭く）
+    func paramsFrame(alignment: Alignment = .topLeading) -> some View { modifier(ParamsFrame(alignment: alignment)) }
+}
+
+private struct ParamsFrame: ViewModifier {
+    let alignment: Alignment
+    @Environment(\.paramsWidth) private var w
+    func body(content: Content) -> some View { content.frame(width: w, alignment: alignment) }
+}
+
+/// 2 つの列（トランスフォーム・ミックスなど）。幅があれば横に、狭ければ縦に積む
+struct ParamColumns<Content: View>: View {
+    @Environment(\.paramsWidth) private var w
+    @ViewBuilder var content: Content
+    var body: some View {
+        if w < UI.paramsWidth - 1 {
+            VStack(alignment: .leading, spacing: 14) { content }
+        } else {
+            ParamColumns { content }
+        }
+    }
+}
 extension EnvironmentValues {
     /// パラメーター欄を 2 列（右にエフェクト）にするか
     var paramsTwoColumn: Bool {

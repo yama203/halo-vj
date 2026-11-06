@@ -355,7 +355,7 @@ struct EffectsSection<H: ObservableObject & EffectHolder>: View {
                     .font(.system(size: 11)).foregroundStyle(.secondary)
             }
         }
-        .frame(width: UI.paramsWidth, alignment: .leading)
+        .paramsFrame(alignment: .leading)
     }
 
     private func binding(_ id: UUID) -> Binding<Effect> {
@@ -377,23 +377,29 @@ struct EffectCard: View {
     let remove: () -> Void
     /// 重ね方（特殊合成）の設定として出す：オン/オフ・並べ替え・削除は出さない
     var isBlendSettings = false
+    /// パラメーター欄の幅（狭いと 1 列に並べる）
+    @Environment(\.paramsWidth) private var paramsWidth
+    private var narrow: Bool { paramsWidth < UI.paramsWidth - 1 }
 
     var body: some View {
         let params = effect.kind.params
         VStack(alignment: .leading, spacing: 8) {
             if !isBlendSettings {
-            HStack(spacing: 8) {
-                Image(systemName: "line.3.horizontal")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 16)
-                    .help("ドラッグして並べ替え")
+            HStack(spacing: narrow ? 5 : 8) {
+                // 細いときは名前を優先してつまみの印を省く（行のどこをドラッグしても並べ替えられる）
+                if !narrow {
+                    Image(systemName: "line.3.horizontal")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 16)
+                        .help("ドラッグして並べ替え")
+                }
                 Toggle("", isOn: $effect.enabled)
                     .toggleStyle(.switch)
                     .labelsHidden()
                     .controlSize(.small)
                     .help("オン／オフ")
-                HStack(spacing: 8) {
+                HStack(spacing: narrow ? 4 : 8) {
                     Image(systemName: open ? "chevron.down" : "chevron.right")
                         .font(.system(size: 11, weight: .bold))
                         .foregroundStyle(.secondary)
@@ -405,6 +411,8 @@ struct EffectCard: View {
                     Text(effect.kind.label)
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(effect.enabled ? Color.primary : Color.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
                     if effect.anims.values.contains(where: \.isOn) {
                         Image(systemName: "waveform.path").font(.system(size: 11, weight: .semibold))
                             .foregroundStyle(.purple)
@@ -430,14 +438,15 @@ struct EffectCard: View {
             }
             if open || isBlendSettings {
             if effect.kind == .strobe { strobeSwitches }
-            LazyVGrid(columns: [GridItem(.fixed(UI.paramColumnWidth), spacing: 16),
-                                GridItem(.fixed(UI.paramColumnWidth), alignment: .top)], alignment: .leading, spacing: 8) {
+            LazyVGrid(columns: narrow ? [GridItem(.flexible(), alignment: .top)]
+                      : [GridItem(.fixed(UI.paramColumnWidth), spacing: 16), GridItem(.fixed(UI.paramColumnWidth), alignment: .top)],
+                      alignment: .leading, spacing: 8) {
                 ForEach(params.indices.filter { shows($0) }, id: \.self) { i in
                     let p = params[i]
                     if p.isToggle {
                         Toggle(p.label, isOn: Binding(get: { effect.value(i) > 0.5 }, set: { valueBinding(i).wrappedValue = $0 ? 1 : 0 }))
                             .toggleStyle(.switch)
-                            .frame(height: UI.rowHeight)
+                            .frame(maxWidth: .infinity, minHeight: UI.rowHeight, maxHeight: UI.rowHeight, alignment: .leading)
                             .help(effect.kind == .colorize
                                   ? "オン：元の明るさのまま色だけ変える／オフ：黒は黒、白はその色そのものになる" : "")
                     } else if let choices = p.choices {
@@ -524,15 +533,17 @@ struct EffectCard: View {
     /// ストロボの切り替え（1 クリックで切り替わるスイッチ）
     private var strobeSwitches: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 16) {
-                segmented(0, ["色で光る", "消える", "反転"], width: UI.paramColumnWidth)
+            // 狭いときは縦に
+            let row = narrow ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8)) : AnyLayout(HStackLayout(spacing: 16))
+            row {
+                segmented(0, ["色で光る", "消える", "反転"], width: narrow ? paramsWidth - 24 : UI.paramColumnWidth)
                 segmented(1, ["BPM", "秒"], width: 120)
             }
             if effect.value(1) < 0.5 {
                 HStack(spacing: 8) {
                     Text("間隔").font(.system(size: 12)).foregroundStyle(.secondary)
                         .frame(width: 34, alignment: .leading)
-                    segmented(2, ["1/16", "1/8", "1/4", "1/2", "1", "2", "4"], width: UI.paramsWidth - 72)
+                    segmented(2, ["1/16", "1/8", "1/4", "1/2", "1", "2", "4"], width: max(paramsWidth - 96, 120))
                     Text("拍").font(.system(size: 12)).foregroundStyle(.secondary)
                 }
                 .help("何拍ごとに光るか（BPM に合わせる）")
