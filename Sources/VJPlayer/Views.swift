@@ -26,6 +26,7 @@ struct SectionTitle: View {
 struct ContentView: View {
     @EnvironmentObject var engine: Engine
     @ObservedObject private var layout = LayoutManager.shared
+    @AppStorage("gridSize") private var gridSizeRaw = 0
     /// 境目をドラッグし始めたときの値
     @State private var dragStart: CGFloat?
 
@@ -43,7 +44,8 @@ struct ContentView: View {
                 let showMonitor = !layout.isDetached(.monitor)
                 let monitorW = showMonitor ? min(max(CGFloat(st.monitorWidth), 220), max(g.size.width * 0.6, 220)) : 0
                 let gridWidth = g.size.width - 24 - (showMonitor ? 12 + monitorW : 0)
-                let cell = ClipGrid.cellSize(forWidth: gridWidth, columns: engine.columns)
+                let cell = ClipGrid.cellSize(forWidth: gridWidth, columns: engine.columns,
+                                             size: GridSize(rawValue: gridSizeRaw) ?? .large)
                 let gridHeight = ClipGrid.contentHeight(cell: cell.height, layers: engine.layerCount)
                 let monitorHeight = showMonitor ? (monitorW / max(engine.outputAspect, 0.1)) + 24 : 0
                 let padHeight: CGFloat = layout.isDetached(.pads) ? 0 : 58
@@ -303,11 +305,18 @@ struct ClipGrid: View {
     static let minCellWidth: CGFloat = 100
     let size: CGSize
     @StateObject private var drag = SlotDragState()
+    /// グリッドの表示の大きさ（大・中・小）
+    @AppStorage("gridSize") private var gridSizeRaw = 0
     /// キューの一覧の上にドラッグしているか（印の表示を変える）
     @ObservedObject private var cueTarget = CueDropTarget.shared
 
     /// 1 マスの大きさ。横幅から決め、高さは横幅の 3/4（縦長にならないように）
-    static func cellSize(forWidth w: CGFloat, columns: Int) -> CGSize {
+    static func cellSize(forWidth w: CGFloat, columns: Int, size: GridSize = .large) -> CGSize {
+        switch size {
+        case .medium: return CGSize(width: 120, height: 80)
+        case .small: return CGSize(width: 88, height: 56)
+        case .large: break
+        }
         let n = CGFloat(max(columns, 1))
         let cw = max((w - leftWidth - addColumnWidth - spacing * (n + 1)) / n, minCellWidth)
         // レイヤー欄（名前・停止・不透明度）が収まる高さは確保する
@@ -320,7 +329,8 @@ struct ClipGrid: View {
     }
 
     var body: some View {
-        let cell = Self.cellSize(forWidth: size.width, columns: engine.columns)
+        let gs = GridSize(rawValue: gridSizeRaw) ?? .large
+        let cell = Self.cellSize(forWidth: size.width, columns: engine.columns, size: gs)
         VStack(alignment: .leading, spacing: Self.spacing) {
         SceneEditBanner()
         DeckBar()
@@ -413,6 +423,7 @@ struct ClipGrid: View {
         }
         .scrollIndicators(.automatic)
         .environmentObject(drag)
+        .environment(\.gridSize, gs)
         .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.orange, lineWidth: 2)
             .opacity(engine.sceneDraft != nil ? 1 : 0).allowsHitTesting(false))
         }
@@ -529,11 +540,13 @@ struct LayerHeader: View {
     @EnvironmentObject var engine: Engine
     @EnvironmentObject var drag: SlotDragState
 
+    @Environment(\.gridSize) private var gridSize
+
     var body: some View {
         let selected = engine.selectedLayer == layer.index
         let playing = engine.viewPlaying(layer.index).flatMap { engine.slots[$0] }
 
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: gridSize == .large ? 6 : 3) {
             HStack(spacing: 6) {
                 Circle()
                     .fill(playing != nil ? Color.green : Color.gray.opacity(0.4))
@@ -568,8 +581,10 @@ struct LayerHeader: View {
             ValueDrag(label: "不透明度", value: $layer.opacity, range: 0...1, perPoint: 0.006,
                       defaultValue: 1, showsBar: true, format: { String(format: "%.0f%%", $0 * 100) },
                       live: layerOpacityLive)
-                .frame(height: 28)
+                .frame(height: gridSize == .small ? 18 : (gridSize == .medium ? 22 : 28))
             Spacer(minLength: 0)
+            // 小さい表示では、下の段（重ね方・名前）は省く
+            if gridSize != .small {
             HStack(spacing: 4) {
                 // 重ね方：押すとその場で選べる
                 if !layer.isAdjustment { BlendMenuButton(layer: layer) }
@@ -594,8 +609,9 @@ struct LayerHeader: View {
                         .lineLimit(1)
                 }
             }
+            }
         }
-        .padding(8)
+        .padding(gridSize == .large ? 8 : 5)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         // ほかのレイヤーのソロで隠れているときは薄く
         .modifier(SoloDim(layer: engine.layers.indices.contains(layer.index) ? engine.layers[layer.index] : layer))
@@ -721,6 +737,7 @@ struct SlotCell: View {
     var height: CGFloat = 80
     @EnvironmentObject var engine: Engine
     @EnvironmentObject var drag: SlotDragState
+    @Environment(\.gridSize) private var gridSize
     @State private var pressed = false
     @State private var dropTargeted = false
     @State private var hovering = false
@@ -976,7 +993,7 @@ struct SlotCell: View {
     /// サムネイル下の名前の帯の上か
     private func inNameStrip(_ p: CGPoint) -> Bool {
         guard let f = drag.frames[index] else { return false }
-        return p.y >= f.maxY - SlotContent.stripHeight
+        return p.y >= f.maxY - gridSize.stripHeight
     }
 
     private func loadDropped(_ providers: [NSItemProvider]) {
@@ -996,10 +1013,27 @@ struct SlotCell: View {
     }
 }
 
+/// グリッドの表示の大きさ（大 = 幅いっぱい、中・小 = 小さい枠でたくさん見せる）
+enum GridSize: Int {
+    case large = 0, medium = 1, small = 2
+    /// クリップの名前の帯の高さ
+    var stripHeight: CGFloat { self == .small ? 18 : (self == .medium ? 22 : 26) }
+    var nameFont: CGFloat { self == .small ? 10 : (self == .medium ? 11 : 12) }
+}
+
+private struct GridSizeKey: EnvironmentKey { static let defaultValue = GridSize.large }
+extension EnvironmentValues {
+    var gridSize: GridSize {
+        get { self[GridSizeKey.self] }
+        set { self[GridSizeKey.self] = newValue }
+    }
+}
+
 struct SlotContent: View {
     @ObservedObject var slot: ClipSlot
     let active: Bool
     let selected: Bool
+    @Environment(\.gridSize) private var gridSize
     /// 名前の帯の高さ（ここをクリックすると選択のみ）
     static let stripHeight: CGFloat = 26
 
@@ -1023,7 +1057,7 @@ struct SlotContent: View {
                                 }
                             }
                             .foregroundStyle(.white)
-                            .padding(.bottom, Self.stripHeight)
+                            .padding(.bottom, gridSize.stripHeight)
                         }
                     } else if let img = slot.thumbnail {
                         Image(nsImage: img).resizable().aspectRatio(contentMode: .fill)
@@ -1063,7 +1097,7 @@ struct SlotContent: View {
                             .foregroundStyle(.orange)
                     }
                     Text(slot.errorMessage ?? slot.name)
-                        .font(.system(size: 12, weight: .medium))
+                        .font(.system(size: gridSize.nameFont, weight: .medium))
                         .foregroundStyle(slot.errorMessage == nil ? Color.white : Color.red)
                         .lineLimit(1)
                     Spacer(minLength: 0)
@@ -1075,7 +1109,7 @@ struct SlotContent: View {
                         .frame(height: 3)
                 }
             }
-            .frame(height: Self.stripHeight)
+            .frame(height: gridSize.stripHeight)
             .background(selected ? Color.accentColor.opacity(0.9) : Color.black.opacity(0.65))
             .help("名前の帯をクリック：選択（出力せずにプレビュー・編集）")
         }

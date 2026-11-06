@@ -312,6 +312,17 @@ enum SelfTest {
                 lm.resetWorkspace("Show")
                 check(lm.state.dock.map { Set($0.panels) == Set(DockPanel.allCases) } == true && lm.state.dock != edited,
                       "ワークスペース：最初の形に戻せる")
+                // 自分で初期状態を決める → いじる → 初期状態に戻す（自分のもの）→ アプリの最初の状態に戻す
+                lm.state.dock = lm.state.dock?.movingToEdge(.pads, .top)
+                let mine = lm.state.dock
+                lm.setCurrentAsDefault()
+                lm.state.dock = lm.state.dock?.movingToEdge(.grid, .right)
+                lm.resetWorkspace("Show")
+                check(lm.state.dock == mine && lm.hasUserDefault("Show"), "ワークスペース：今の形を初期状態にでき、「初期状態に戻す」でその形に戻る")
+                lm.factoryReset("Show")
+                check(lm.state.dock == DockNode.cuePlayback.normalized() || lm.state.dock.map { Set($0.panels) == Set(DockPanel.allCases) && $0 != mine } == true,
+                      "ワークスペース：アプリの最初の状態にも戻せる")
+                check(!lm.hasUserDefault("Show"), "ワークスペース：アプリの最初の状態に戻すと、自分の初期状態は消える")
                 lm.savePreset("本番A")
                 check(lm.workspaceNames.last == "本番A" && lm.state.workspace == "本番A", "ワークスペース：今の並べ方を新しいワークスペースにできる")
                 lm.switchWorkspace("前の並べ方")

@@ -38,7 +38,7 @@ struct EffectBrowser: View {
                 VStack(alignment: .leading, spacing: 10) {
                     let gens = generators ? EffectKind.generators.filter(matches) : []
                     if !gens.isEmpty {
-                        LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible())], spacing: 8) {
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 190), spacing: 8)], spacing: 8) {
                             ForEach(gens) { k in
                                 EffectTile(kind: k, tint: .teal) {
                                     if !engine.placeGeneratorInSelectedLayer(k) { NSSound.beep() }
@@ -52,7 +52,7 @@ struct EffectBrowser: View {
                         let items = EffectKind.allCases.filter { $0.category == cat && !$0.isBlend && !$0.isGenerator && matches($0) }
                         if !items.isEmpty {
                             SectionTitle(cat.label)
-                            LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible())], spacing: 8) {
+                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 190), spacing: 8)], spacing: 8) {
                                 ForEach(items) { k in
                                     EffectTile(kind: k) { add(k) }
                                 }

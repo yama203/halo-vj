@@ -121,6 +121,7 @@ final class LayoutManager: NSObject, ObservableObject, NSWindowDelegate {
         var st = d.data(forKey: "layoutState").flatMap { try? JSONDecoder().decode(LayoutState.self, from: $0) } ?? LayoutState()
         if let w = st.workspace, let new = Self.renamedWorkspaces[w] { st.workspace = new }
         state = st
+        userDefaults = d.data(forKey: "layoutWorkspaceDefaults").flatMap { try? JSONDecoder().decode([String: LayoutState].self, from: $0) } ?? [:]
         var ps = d.data(forKey: "layoutPresets").flatMap { try? JSONDecoder().decode([String: LayoutState].self, from: $0) } ?? [:]
         // 前の名前（いつもの・ポン出し・クラブ VJ）で覚えていたものは、今の名前へ
         for (old, new) in Self.renamedWorkspaces {
@@ -142,6 +143,7 @@ final class LayoutManager: NSObject, ObservableObject, NSWindowDelegate {
     private func savePresets() {
         guard !readOnly else { return }
         let d = UserDefaults.standard
+        if let data = try? JSONEncoder().encode(userDefaults) { d.set(data, forKey: "layoutWorkspaceDefaults") }
         if let data = try? JSONEncoder().encode(presets) { d.set(data, forKey: presetsKey) }
         d.set(presetNames, forKey: presetNamesKey)
     }
@@ -254,6 +256,37 @@ final class LayoutManager: NSObject, ObservableObject, NSWindowDelegate {
         return s
     }
 
+    /// 自分で決めたワークスペースの初期状態（「初期状態に戻す」で戻る形）
+    private var userDefaults: [String: LayoutState] = [:]
+
+    /// ワークスペースの初期状態：自分で決めたもの → はじめからのもの
+    func defaultState(_ name: String) -> LayoutState? {
+        if var s = userDefaults[name] { s.workspace = name; return s }
+        return Self.builtinState(name)
+    }
+
+    /// 自分で初期状態を決めているか
+    func hasUserDefault(_ name: String) -> Bool { userDefaults[name] != nil }
+
+    /// 今の形を、今のワークスペースの初期状態にする
+    func setCurrentAsDefault() {
+        guard let name = state.workspace else { return }
+        var s = snapshot()
+        s.workspace = name
+        userDefaults[name] = s
+        presets[name] = s
+        savePresets()
+    }
+
+    /// はじめからのワークスペースを、アプリの最初の形に戻す（自分で決めた初期状態も消す）
+    func factoryReset(_ name: String) {
+        guard let s = Self.builtinState(name) else { return }
+        userDefaults[name] = nil
+        presets[name] = nil
+        if state.workspace == name { state = s; syncWindows() }
+        savePresets()
+    }
+
     /// 上のバーに並べるワークスペース（はじめからのもの → 自分で保存したもの）
     var workspaceNames: [String] { Self.builtinWorkspaces + presetNames.filter { !Self.builtinWorkspaces.contains($0) } }
 
@@ -277,7 +310,7 @@ final class LayoutManager: NSObject, ObservableObject, NSWindowDelegate {
             presets["前の並べ方"] = s
             if !presetNames.contains("前の並べ方") { presetNames.append("前の並べ方") }
         }
-        guard var next = presets[name] ?? Self.builtinState(name) else { savePresets(); return }
+        guard var next = presets[name] ?? defaultState(name) else { savePresets(); return }
         next.workspace = name
         state = next
         savePresets()
@@ -299,6 +332,8 @@ final class LayoutManager: NSObject, ObservableObject, NSWindowDelegate {
         var s = snapshot()
         s.workspace = name
         presets[name] = s
+        // 自分で作ったワークスペースは、作ったときの形を初期状態にする
+        if !Self.builtinWorkspaces.contains(name) { userDefaults[name] = s }
         if !Self.builtinWorkspaces.contains(name) && !presetNames.contains(name) { presetNames.append(name) }
         state.workspace = name
         savePresets()
@@ -306,18 +341,19 @@ final class LayoutManager: NSObject, ObservableObject, NSWindowDelegate {
 
     func applyPreset(_ name: String) { switchWorkspace(name) }
 
-    /// はじめからのワークスペースを最初の形に戻す（今そのワークスペースなら、表示も戻す）
+    /// ワークスペースを初期状態に戻す（自分で決めた初期状態があればそれ、無ければアプリの最初の形）
     func resetWorkspace(_ name: String) {
-        guard let s = Self.builtinState(name) else { return }
-        presets[name] = nil
+        guard let s = defaultState(name) else { return }
+        presets[name] = s
         if state.workspace == name { state = s; syncWindows() }
         savePresets()
     }
 
     /// 自分で保存したワークスペースを消す（はじめからのものは最初の形に戻す）
     func deletePreset(_ name: String) {
-        if Self.builtinWorkspaces.contains(name) { resetWorkspace(name); return }
+        if Self.builtinWorkspaces.contains(name) { factoryReset(name); return }
         presets[name] = nil
+        userDefaults[name] = nil
         presetNames.removeAll { $0 == name }
         if state.workspace == name { state.workspace = nil }
         savePresets()
@@ -445,10 +481,16 @@ struct WorkspaceBar: View {
                     layout.savePreset(n)
                 }
             }
-            if let cur, LayoutManager.builtinWorkspaces.contains(cur) {
-                Button("「\(cur)」を最初の形に戻す") { layout.resetWorkspace(cur) }
-            } else if let cur {
-                Button("「\(cur)」を削除", role: .destructive) { layout.deletePreset(cur) }
+            if let cur {
+                Divider()
+                Button("今の形を「\(cur)」の初期状態にする") { layout.setCurrentAsDefault() }
+                Button("「\(cur)」を初期状態に戻す") { layout.resetWorkspace(cur) }
+                if LayoutManager.builtinWorkspaces.contains(cur) {
+                    Button("「\(cur)」をアプリの最初の状態に戻す") { layout.factoryReset(cur) }
+                        .disabled(!layout.hasUserDefault(cur))
+                } else {
+                    Button("「\(cur)」を削除", role: .destructive) { layout.deletePreset(cur) }
+                }
             }
         } label: {
             Label(cur ?? "ワークスペース", systemImage: "rectangle.3.group")

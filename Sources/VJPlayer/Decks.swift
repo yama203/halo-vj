@@ -5,6 +5,8 @@ import SwiftUI
 /// 右クリックで名前・複製・削除。＋で空のデッキを足す
 struct DeckBar: View {
     @EnvironmentObject var engine: Engine
+    /// グリッドの表示の大きさ（大・中・小）
+    @AppStorage("gridSize") private var gridSizeRaw = 0
 
     var body: some View {
         HStack(spacing: 6) {
@@ -28,6 +30,16 @@ struct DeckBar: View {
                 }
             }
             .scrollIndicators(.never)
+            Picker("", selection: $gridSizeRaw) {
+                Text("大").tag(0)
+                Text("中").tag(1)
+                Text("小").tag(2)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .controlSize(.small)
+            .fixedSize()
+            .help("グリッドの表示の大きさ（小さくすると、たくさんのクリップが見える）")
         }
     }
 }

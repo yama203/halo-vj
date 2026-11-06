@@ -98,11 +98,12 @@ indirect enum DockNode: Codable, Equatable {
           t([.pads]))
     }
 
-    /// おすすめ：クラブ VJ 用。上にグリッドとモニター、下いっぱいに FX パッド、モニターの下にライブ・シーン
+    /// おすすめ：VJ 用。左にグリッド（大きく）とプレビュー・パラメーター・エフェクト、
+    /// 右に出力モニターとライブ（シーン・キューはタブ）、下いっぱいに FX パッド
     static var clubVJ: DockNode {
-        v(0.85,
-          h(0.62,
-            v(0.6, t([.grid]), h(0.35, t([.preview]), t([.params, .effects, .generators, .sources]))),
+        v(0.921,
+          h(0.778,
+            v(0.388, t([.grid]), h(0.327, t([.preview]), h(0.641, t([.params]), t([.effects, .generators, .sources])))),
             v(0.45, t([.monitor]), t([.live, .scenes, .cues]))),
           t([.pads]))
     }
