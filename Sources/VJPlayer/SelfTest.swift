@@ -268,6 +268,7 @@ enum SelfTest {
         testGeneratorSlots(check: check)
         testScenes(check: check, wait: wait)
         testSceneEdit(check: check, wait: wait)
+        testSceneClipIDs(check: check)
         testDecks(check: check, wait: wait)
         testPads(check: check)
         testMultiSelect(check: check)
@@ -1441,6 +1442,38 @@ enum SelfTest {
         if case .clip(_, let l, let col) = e.cues[0].kind {
             check(l == 2 && col == 2 && !e.cueTitle(e.cues[0]).contains("見つからない"), "キュー：レイヤーを足しても、クリップのキューは同じクリップを指す")
         }
+        // クリップを動かしても、キューは同じクリップを指す（目印で探す）
+        do {
+            let clip = e.slots[e.cueClipIndex(e.cues[0])!]!
+            let from = e.slots.firstIndex { $0 === clip }!
+            let to = e.slotIndex(deck: 0, layer: 3, column: 5)
+            e.moveSlot(from, to: to)
+            check(e.cueClipIndex(e.cues[0]) == to && e.cueTitle(e.cues[0]) == clip.name,
+                  "キュー：クリップをグリッドで動かしても、同じクリップを指す")
+            let d2 = e.addDeck()
+            e.showDeck(0)
+            e.multiSelection = [to]
+            _ = e.moveSelection(toDeck: d2)
+            let moved = e.slotIndex(deck: d2, layer: 3, column: 5)
+            check(e.cueClipIndex(e.cues[0]) == moved, "キュー：別のデッキへ移しても、同じクリップを指す")
+            e.fireCue(0)
+            check(e.activeByLayer[3] == moved, "キュー：動かした先のクリップが出る")
+            e.clear(moved)
+            check(e.cueClipIndex(e.cues[0]) == nil && e.cueTitle(e.cues[0]).contains("見つからない"),
+                  "キュー：クリップを消すと「見つからない」（同じ場所の別のクリップは出さない）")
+            e.cues.removeFirst()
+            e.placeGenerator(.grid, at: c + 2)
+            e.addClipCue(c + 2)
+        }
+        // 前に作ったキュー（目印が無い）は、読み込むと場所で探して目印を覚える
+        do {
+            var old = e.makeState(relativeTo: nil)
+            old.cues = old.cues?.map { var x = $0; x.clipID = nil; return x }
+            let o = Engine(persistent: false)
+            o.apply(old, baseDir: nil)
+            check(o.cues.first?.clipID != nil && o.cues.first?.clipID == o.slots[o.cueClipIndex(o.cues[0]) ?? 0]?.id,
+                  "キュー：前に作ったクリップのキューも、読み込むと目印を覚える")
+        }
         // 保存
         e.addCue(.scene(sa.id))
         let st = e.makeState(relativeTo: nil)
@@ -1721,6 +1754,48 @@ enum SelfTest {
         check(e.decks.count == 2 && e.activeByLayer[0] == nil && e.scenes.first { $0.id == sb.id }?.deck == nil
               && e.slots.count == 2 * e.gridSize && e.slots[e.slotIndex(deck: 1, layer: 1, column: 1)]?.generator?.kind == .noise,
               "デッキ：消すと中のクリップは止まって外れ、後ろのデッキが詰まる")
+    }
+
+    /// シーン：クリップを動かしても、同じクリップを流す（目印で探す）
+    static func testSceneClipIDs(check: (Bool, String) -> Void) {
+        let e = Engine(persistent: false)
+        let c = e.columns
+        e.placeGenerator(.solid, at: 0)
+        e.placeGenerator(.noise, at: c + 1)
+        e.placeGenerator(.stripes, at: 2)
+        e.trigger(0); e.trigger(c + 1)
+        let sc = e.addScene()
+        check(sc.playingIDs?[0] == e.slots[0]?.id && sc.playingIDs?[1] == e.slots[c + 1]?.id,
+              "シーン：流しているクリップの目印を覚える")
+        let solid = e.slots[0]!
+        e.stopAll()
+        // 同じ段の中で動かす（元の場所には別のクリップを置く）
+        e.moveSlot(0, to: 3)
+        e.moveSlot(2, to: 0)
+        e.updateScene(sc.id) { $0.fade = 0 }
+        e.recallScene(sc.id)
+        check(e.activeByLayer[0] == 3 && e.slots[3] === solid, "シーン：クリップを動かしても、同じクリップが出る（元の場所の別のクリップではなく）")
+        // 別のデッキへ移す
+        let d2 = e.addDeck()
+        e.showDeck(0)
+        e.stopAll()
+        e.multiSelection = [3]
+        _ = e.moveSelection(toDeck: d2)
+        e.recallScene(sc.id)
+        check(e.activeByLayer[0] == e.slotIndex(deck: d2, layer: 0, column: 3), "シーン：別のデッキへ移しても、同じクリップが出る")
+        // シーンの編集でも、動かした先に表示され、選び直すと目印が変わる
+        e.editScene(sc.id)
+        check(e.viewPlaying(0) == e.slotIndex(deck: d2, layer: 0, column: 3), "シーンの編集：動かしたクリップは、動かした先に表示される")
+        e.pressSlot(0)
+        check(e.scenes.first { $0.id == sc.id }?.playingIDs?[0] == e.slots[0]?.id, "シーンの編集：クリップを選ぶと、その目印を覚える")
+        e.closeSceneEditor()
+        // 前のシーン（目印が無い）は読み込むと、場所で探して目印を覚える
+        var old = e.makeState(relativeTo: nil)
+        old.scenes = old.scenes?.map { var x = $0; x.playingIDs = nil; return x }
+        let o = Engine(persistent: false)
+        o.apply(old, baseDir: nil)
+        check(o.scenes.first?.playingIDs?[0] == o.slots[0]?.id && o.scenes.first?.playingIDs?[0] != nil,
+              "シーン：前に作ったシーンも、読み込むと目印を覚える")
     }
 
     /// シーンの編集：グリッド・レイヤー欄・下のパネルがそのシーンになり、出力はそのまま

@@ -153,7 +153,7 @@ struct PolyMaskControls: View {
             .buttonStyle(.borderedProminent)
             .tint(editing ? .cyan : Color(white: 0.35))
             .controlSize(.large)
-            .help("左のプレビューの上に点が出ます。クリックで点を追加、ドラッグで移動、右クリックで削除")
+            .help("プレビューの上に点が出ます。クリックで点を追加、ドラッグで移動、右クリックで削除")
             Text("点 \(effect.points.count) 個").font(.system(size: 12)).foregroundStyle(.secondary)
             Spacer(minLength: 0)
             Button("四角に戻す") { var e = effect; e.points = MaskPoint.defaultShape; effect = e }

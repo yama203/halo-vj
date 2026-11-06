@@ -477,15 +477,18 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
             var p = [Int?](repeating: nil, count: n)
             var ls = (0..<n).map { _ in SavedLayer(opacity: 1, blend: 0, volume: 1) }
             var ld = [UUID?](repeating: nil, count: n)
+            var ids = [UUID?](repeating: nil, count: n)
             for i in s.playing.indices {
                 guard let j = map(i), j < n else { continue }
                 p[j] = s.playing[i]
                 if i < s.layers.count { ls[j] = s.layers[i] }
                 if let o = s.layerDecks, i < o.count { ld[j] = o[i] }
+                if let o = s.playingIDs, i < o.count { ids[j] = o[i] }
             }
             s.playing = p
             s.layers = ls
             s.layerDecks = ld.contains { $0 != nil } ? ld : nil
+            if s.playingIDs != nil { s.playingIDs = ids }
             out[k] = s
         }
         scenes = out
@@ -1500,6 +1503,8 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
         var effectClip: Bool?
         /// エフェクトのクリップの名前
         var title: String?
+        /// クリップの目印（キューがクリップを探すのに使う）
+        var id: UUID?
     }
 
     /// [ParamKey: ParamAnim] ⇔ 保存用の [String: ParamAnim]
@@ -1635,7 +1640,7 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
                           syncMode: $0.syncMode.rawValue, syncBeats: $0.syncBeats, jumpBeats: $0.jumpBeats,
                           effects: $0.effects.isEmpty ? nil : $0.effects, muted: $0.muted ? true : nil,
                           audioMuted: $0.audioMuted ? true : nil, generator: $0.generator,
-                          effectClip: $0.isEffectClip ? true : nil, title: $0.title.isEmpty ? nil : $0.title)
+                          effectClip: $0.isEffectClip ? true : nil, title: $0.title.isEmpty ? nil : $0.title, id: $0.id)
             } },
             layers: layers.map {
                 SavedLayer(opacity: $0.opacity, blend: $0.blend.rawValue, volume: $0.volume,
@@ -1756,9 +1761,13 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
             slot.effects = saved.effects ?? []
             slot.muted = saved.muted ?? false
             slot.audioMuted = saved.audioMuted ?? false
+            if let id = saved.id { slot.id = id }
             setSlot(slotIndex(deck: d, layer: r, column: c), slot)
         }
         currentDeck = min(max(state.currentDeck ?? 0, 0), decks.count - 1)
+        // 前に作ったクリップのキュー・シーン（目印が無い）は、場所で探して目印を覚える
+        adoptCueClipIDs()
+        adoptSceneClipIDs()
         syncRenderState()
     }
 

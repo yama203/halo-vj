@@ -329,8 +329,8 @@ struct EffectsSection<H: ObservableObject & EffectHolder>: View {
             HStack(spacing: 8) {
                 Image(systemName: "plus.rectangle.on.rectangle").foregroundStyle(.purple)
                 Text(holder.effects.isEmpty
-                     ? "右下の「エフェクト」からドラッグして追加（上から順にかかります）"
-                     : "右下の「エフェクト」からドラッグして追加")
+                     ? "「エフェクト」パネルからドラッグして追加（上から順にかかります）"
+                     : "「エフェクト」パネルからドラッグして追加")
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                 Spacer(minLength: 0)

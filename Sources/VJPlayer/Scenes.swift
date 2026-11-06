@@ -16,6 +16,9 @@ struct VJScene: Codable, Identifiable {
     var deck: UUID?
     /// レイヤーごとに別のデッキのクリップを流すときだけ、そのデッキ（nil = deck と同じ）
     var layerDecks: [UUID?]?
+    /// レイヤーごとの、流すクリップの目印（nil の所 = 止める）。あればこちらで探すので、クリップを動かしても同じクリップが出る
+    /// （無い = 前に作ったシーン。playing の列で探す）
+    var playingIDs: [UUID?]?
     var layers: [Engine.SavedLayer]
     var masterOpacity: Double
     var compTransform: Engine.SavedTransform
@@ -42,6 +45,7 @@ extension Engine {
                        playing: layers.indices.map { r in activeByLayer[r].map { columnOf($0) } },
                        deck: deckID,
                        layerDecks: ld.contains { $0 != nil } ? ld : nil,
+                       playingIDs: layers.indices.map { r in activeByLayer[r].flatMap { slots[$0]?.id } },
                        layers: state.layers ?? [],
                        masterOpacity: masterOpacity,
                        compTransform: SavedTransform(compTransform),
@@ -69,6 +73,7 @@ extension Engine {
         let s = VJScene(name: "シーン \(n)", fade: scenes.last?.fade ?? 1,
                         playing: layers.map { _ in nil },
                         deck: decks[shownDeck].id,
+                        playingIDs: layers.map { _ in nil },
                         layers: layers.map { l in
                             // 調整レイヤーはそのまま（エフェクトは空）
                             SavedLayer(opacity: 1, blend: 0, volume: 1, isAdjustment: l.isAdjustment ? true : nil)
@@ -128,15 +133,11 @@ extension Engine {
         let sceneDeck = deckIndex(sc.deck) ?? 0
         currentDeck = sceneDeck
 
-        // クリップを切り替える（同じクリップはそのまま続ける）
+        // クリップを切り替える（同じクリップはそのまま続ける）。クリップは目印で探す（動かしていても同じクリップ）
+        let targets = sceneTargets(sc)
         var fadeIn = Set<Int>(), fadeOutStop = Set<Int>()
         for r in 0..<n {
-            let want = sc.playing[r].flatMap { c -> Int? in
-                guard c >= 0, c < columns else { return nil }
-                let d = sc.layerDecks.flatMap { $0.indices.contains(r) ? deckIndex($0[r]) : nil } ?? sceneDeck
-                let i = slotIndex(deck: d, layer: r, column: c)
-                return slots[i] != nil ? i : nil
-            }
+            let want = targets[r]
             guard want != activeByLayer[r] else { continue }
             if let w = want {
                 let wasEmpty = activeByLayer[r] == nil
@@ -218,6 +219,39 @@ extension Engine {
         }
         RunLoop.main.add(timer, forMode: .common)
         sceneTween = timer
+    }
+
+    /// シーンで流すクリップ：段 → スロット番号。目印があれば目印で探し、そのクリップが今ある段で流す
+    /// （目印の無い前のシーンは、列とデッキで探す）
+    func sceneTargets(_ sc: VJScene) -> [Int: Int] {
+        var out: [Int: Int] = [:]
+        let sceneDeck = deckIndex(sc.deck) ?? 0
+        for r in 0..<min(layers.count, sc.playing.count) {
+            if let ids = sc.playingIDs, r < ids.count {
+                guard let id = ids[r], let i = slots.firstIndex(where: { $0?.id == id }) else { continue }
+                let l = layerOf(i)
+                // 動かして同じ段に 2 つ来たら、元からその段のものを優先
+                if out[l] == nil || l == r { out[l] = i }
+                continue
+            }
+            guard let c = sc.playing[r], c >= 0, c < columns else { continue }
+            let d = sc.layerDecks.flatMap { $0.indices.contains(r) ? deckIndex($0[r]) : nil } ?? sceneDeck
+            let i = slotIndex(deck: d, layer: r, column: c)
+            if slots[i] != nil { out[r] = i }
+        }
+        return out
+    }
+
+    /// 目印の無い前のシーンに、今その場所にあるクリップの目印を覚えさせる（読み込んだとき）
+    func adoptSceneClipIDs() {
+        guard scenes.contains(where: { $0.playingIDs == nil }) else { return }
+        scenes = scenes.map { sc in
+            guard sc.playingIDs == nil else { return sc }
+            var s2 = sc
+            let t = sceneTargets(sc)
+            s2.playingIDs = sc.playing.indices.map { r in t[r].flatMap { slots[$0]?.id } }
+            return s2
+        }
     }
 
     /// エフェクトの並びを a → b に混ぜる。同じ種類が同じ順で並んでいれば値をなめらかに動かし、
@@ -413,7 +447,7 @@ struct SceneTile: View {
                 if editing { engine.closeSceneEditor() } else { engine.editScene(scene.id) }
             }
             .help(editing ? "クリックで編集を終える"
-                  : "クリックで「\(scene.name)」を編集（出力はそのまま。グリッドでクリップを選び、左下のプレビューで見ながら直せる）")
+                  : "クリックで「\(scene.name)」を編集（出力はそのまま。グリッドでクリップを選び、プレビューで見ながら直せる）")
         }
         .background(RoundedRectangle(cornerRadius: 6).fill(active ? Color.teal.opacity(0.25) : Color.white.opacity(hovering ? 0.10 : 0.05)))
         .clipShape(RoundedRectangle(cornerRadius: 6))

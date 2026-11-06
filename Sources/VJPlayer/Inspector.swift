@@ -786,7 +786,7 @@ struct PlayRangeSection: View {
                               items: ClipSlot.jumpChoices.map { ($0, $0 == 0 ? "しない" : beatShort($0)) })
                 Text("拍ごと").font(.system(size: 12)).foregroundStyle(.secondary).fixedSize()
             }
-            .help("BPM の拍の頭で、再生範囲の中のランダムな位置へ飛ぶ（音も一緒に飛ぶ）。テンポは右下の BPM / TAP で")
+            .help("BPM の拍の頭で、再生範囲の中のランダムな位置へ飛ぶ（音も一緒に飛ぶ）。テンポは「ライブ」パネルの BPM / TAP で")
         }
         .frame(width: UI.paramsWidth, alignment: .leading)
     }

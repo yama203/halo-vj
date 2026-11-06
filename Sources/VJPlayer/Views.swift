@@ -300,6 +300,8 @@ struct ClipGrid: View {
     static let minCellWidth: CGFloat = 100
     let size: CGSize
     @StateObject private var drag = SlotDragState()
+    /// キューの一覧の上にドラッグしているか（印の表示を変える）
+    @ObservedObject private var cueTarget = CueDropTarget.shared
 
     /// 1 マスの大きさ。横幅から決め、高さは横幅の 3/4（縦長にならないように）
     static func cellSize(forWidth w: CGFloat, columns: Int) -> CGSize {
@@ -377,19 +379,6 @@ struct ClipGrid: View {
             .onPreferenceChange(SlotFramesKey.self) { drag.frames = $0 }
             .onPreferenceChange(LayerFramesKey.self) { drag.layerFrames = $0 }
             .overlay(alignment: .topLeading) {
-                // 名前の帯からキューへドラッグしているときの印
-                if let s = drag.cueSource, engine.slots.indices.contains(s), let slot = engine.slots[s] {
-                    Label("キューに足す：" + slot.name, systemImage: "list.number")
-                        .font(.system(size: 11, weight: .semibold))
-                        .lineLimit(1)
-                        .padding(.horizontal, 8).padding(.vertical, 4)
-                        .background(Color.green.opacity(0.85), in: Capsule())
-                        .fixedSize()
-                        .position(x: drag.location.x, y: drag.location.y - 14)
-                        .allowsHitTesting(false)
-                }
-            }
-            .overlay(alignment: .topLeading) {
                 // レイヤーを動かしているときの印
                 if let s = drag.layerSource, let t = drag.layerTarget, t != s {
                     Label("L\(s + 1) → \(t + 1) 段目へ", systemImage: "arrow.up.arrow.down")
@@ -404,13 +393,14 @@ struct ClipGrid: View {
             .overlay(alignment: .topLeading) {
                 // ⌘ドラッグ中のクリップ名
                 if let s = drag.source, engine.slots.indices.contains(s), let slot = engine.slots[s],
-                   let t = drag.target, t != s {
-                    Label(drag.group ? "\(engine.multiSelection.count) 個を移動" : drag.copying ? "複製：" + slot.name : slot.name,
-                          systemImage: drag.copying ? "plus.square.on.square" : "film")
+                   cueTarget.hovering || (drag.target != nil && drag.target != s) {
+                    Label(cueTarget.hovering ? "キューに足す：" + slot.name
+                          : drag.group ? "\(engine.multiSelection.count) 個を移動" : drag.copying ? "複製：" + slot.name : slot.name,
+                          systemImage: cueTarget.hovering ? "list.number" : drag.copying ? "plus.square.on.square" : "film")
                         .font(.system(size: 11, weight: .semibold))
                         .lineLimit(1)
                         .padding(.horizontal, 8).padding(.vertical, 4)
-                        .background(Color.accentColor.opacity(0.85), in: Capsule())
+                        .background((cueTarget.hovering ? Color.green : Color.accentColor).opacity(0.85), in: Capsule())
                         .fixedSize()
                         .position(x: drag.location.x, y: drag.location.y - 14)
                         .allowsHitTesting(false)
@@ -493,8 +483,6 @@ final class SlotDragState: ObservableObject {
     @Published var copying = false
     /// 複数選択したクリップをまとめて動かしている
     @Published var group = false
-    /// 名前の帯からドラッグして、キューに足そうとしているクリップ
-    @Published var cueSource: Int?
     /// グリッドの左上（ウィンドウの中の位置。キューの一覧の上かを調べるのに使う）
     var gridOrigin: CGPoint = .zero
     /// レイヤー欄をドラッグしてレイヤーを動かしているときの、元の段と行き先の段
@@ -818,7 +806,8 @@ struct SlotCell: View {
                                : "クリックでこのレイヤーを停止。右上の＋・右クリック・動画のドロップでクリップを入れる")
               : "")
         // クリックを離した時ではなく「押した瞬間」に再生する。
-        // ⌘ドラッグで移動、⌥ドラッグで複製（どちらも再生しない。⌥クリックだけなら選択）
+        // 名前の帯（または ⌘）からドラッグで移動、⌥ドラッグで複製（どちらも再生しない。⌥クリックだけなら選択）。
+        // どのドラッグも、キューの一覧に落とせばキューに足す
         .gesture(
             DragGesture(minimumDistance: 0, coordinateSpace: .named(SlotDragState.space))
                 .onChanged { v in
@@ -858,21 +847,26 @@ struct SlotCell: View {
                             }
                         }
                     }
+                    // 名前の帯からドラッグ → 動かす（グリッドの枠へ）／キューに足す（キューの一覧へ）
+                    if stripPress && drag.source == nil && hypot(v.translation.width, v.translation.height) > 6 {
+                        drag.copying = false
+                        drag.group = false
+                        drag.source = index
+                    }
                     if drag.source == index {
                         drag.location = v.location
                         drag.target = drag.index(at: v.location)
-                    }
-                    // 名前の帯からドラッグ → キューの一覧へ落とせば足す
-                    if stripPress && hypot(v.translation.width, v.translation.height) > 6 {
-                        drag.cueSource = index
-                        drag.location = v.location
                         CueDropTarget.shared.track(CGPoint(x: drag.gridOrigin.x + v.location.x,
                                                            y: drag.gridOrigin.y + v.location.y))
                     }
                 }
                 .onEnded { _ in
                     if drag.source == index {
-                        if let t = drag.target, t != index {
+                        if CueDropTarget.shared.hovering {
+                            // キューの一覧に落とした → キューに足す（グリッドはそのまま）
+                            engine.addClipCue(index)
+                            CueDropTarget.shared.hovering = false
+                        } else if let t = drag.target, t != index {
                             if drag.group {
                                 if !engine.moveSelection(anchor: index, to: t) { NSSound.beep() }
                             } else if drag.copying {
@@ -888,10 +882,6 @@ struct SlotCell: View {
                     } else if slot == nil && addPressed {
                         // 調整レイヤーの空き枠の＋ → エフェクトのクリップを作る
                         if adjustmentRow { engine.createEffectClip(at: index) } else { engine.openPanel(for: index) }
-                    } else if drag.cueSource == index {
-                        if CueDropTarget.shared.hovering { engine.addClipCue(index) }
-                        drag.cueSource = nil
-                        CueDropTarget.shared.hovering = false
                     }
                     stripPress = false
                     addPressed = false

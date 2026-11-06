@@ -22,6 +22,9 @@ struct Cue: Codable, Identifiable, Equatable {
     var onlyThisClip: Bool { !(keepOthers ?? false) }
     /// クリップのキュー：「終わったら」をこのキューで決める（nil = クリップの設定のまま）。キューで出したときだけ効く
     var endAction: EndAction?
+    /// クリップのキュー：クリップの目印。グリッドの中で動かしても、別のデッキへ移しても、これで探す
+    /// （nil = 前に作ったキュー。場所で探す）
+    var clipID: UUID?
 
     static let fadeChoices: [Double?] = [nil, 0, 0.5, 1, 2, 3, 5, 8]
     static func fadeLabel(_ f: Double?) -> String {
@@ -70,8 +73,9 @@ extension Engine {
         switch c.kind {
         case .scene(let id):
             recallScene(id, fade: c.fade)
-        case .clip(let deck, let layer, let column):
-            guard let idx = cueSlotIndex(deck: deck, layer: layer, column: column) else { NSSound.beep(); return }
+        case .clip:
+            guard let idx = cueClipIndex(c) else { NSSound.beep(); return }
+            let layer = layerOf(idx)
             finishCueFade()
             let wasEmpty = activeByLayer[layer] == nil
             let T = c.fade ?? layers[layer].fadeTime
@@ -202,14 +206,31 @@ extension Engine {
         return slots[i] != nil ? i : nil
     }
 
+    /// クリップのキューが指すクリップの場所（目印で探す。目印の無い前のキューは場所で）。見つからなければ nil
+    func cueClipIndex(_ c: Cue) -> Int? {
+        if let id = c.clipID { return slots.firstIndex { $0?.id == id } }
+        guard case .clip(let d, let l, let col) = c.kind else { return nil }
+        return cueSlotIndex(deck: d, layer: l, column: col)
+    }
+
+    /// 目印の無いクリップのキューに、今その場所にあるクリップの目印を覚えさせる（読み込んだとき）
+    func adoptCueClipIDs() {
+        guard cues.contains(where: { $0.clipID == nil && { if case .clip = $0.kind { true } else { false } }($0) }) else { return }
+        cues = cues.map { c in
+            guard c.clipID == nil, case .clip = c.kind, let i = cueClipIndex(c), let s = slots[i] else { return c }
+            var c2 = c
+            c2.clipID = s.id
+            return c2
+        }
+    }
+
     /// キューの表示名
     func cueTitle(_ c: Cue) -> String {
         switch c.kind {
         case .scene(let id):
             return scenes.first { $0.id == id }.map { "シーン：" + $0.name } ?? "（見つからないシーン）"
-        case .clip(let deck, let layer, let column):
-            guard let i = cueSlotIndex(deck: deck, layer: layer, column: column), let s = slots[i] else { return "（見つからないクリップ）" }
-            _ = layer
+        case .clip:
+            guard let i = cueClipIndex(c), let s = slots[i] else { return "（見つからないクリップ）" }
             return s.name
         case .stopAll:
             return "全停止（暗転）"
@@ -240,7 +261,9 @@ extension Engine {
     /// クリップの場所をキューにする
     func addClipCue(_ index: Int) {
         guard slots.indices.contains(index), slots[index] != nil else { return }
-        addCue(.clip(deck: decks[deckOf(index)].id, layer: layerOf(index), column: columnOf(index)))
+        let c = Cue(kind: .clip(deck: decks[deckOf(index)].id, layer: layerOf(index), column: columnOf(index)),
+                    clipID: slots[index]?.id)
+        cues.append(c)
     }
 
     func removeCue(_ id: UUID) {
@@ -524,8 +547,7 @@ private struct CueThumb: View {
     }
 
     private var clipSlot: ClipSlot? {
-        guard case .clip(let deck, let layer, let column) = cue.kind,
-              let i = engine.cueSlotIndex(deck: deck, layer: layer, column: column) else { return nil }
+        guard case .clip = cue.kind, let i = engine.cueClipIndex(cue) else { return nil }
         return engine.slots[i]
     }
 
@@ -557,7 +579,9 @@ private struct CueModeIcons: View {
     let cue: Cue
 
     var body: some View {
-        if case .clip(_, let layer, _) = cue.kind {
+        if case .clip(_, let saved, _) = cue.kind {
+            // 今そのクリップがある段（動かしていれば、動かした先）
+            let layer = engine.cueClipIndex(cue).map(engine.layerOf) ?? saved
             HStack(spacing: 3) {
                 if cue.onlyThisClip {
                     Image(systemName: "square.fill")
@@ -628,7 +652,7 @@ private struct CueEndActionButton: View {
         .help("終わったら：" + (cue.endAction.map { $0.label + "（このキューで上書き）" } ?? "クリップの設定（" + (clipEnd?.label ?? "") + "）") + "。押して選ぶ")
     }
     private var clipEnd: EndAction? {
-        guard case .clip(let d, let l, let c) = cue.kind, let i = engine.cueSlotIndex(deck: d, layer: l, column: c) else { return nil }
+        guard case .clip = cue.kind, let i = engine.cueClipIndex(cue) else { return nil }
         return engine.slots[i]?.endAction
     }
 }
@@ -650,7 +674,7 @@ private struct CueEndActionMenu: View {
     }
 
     private var clipEndAction: EndAction? {
-        guard case .clip(let d, let l, let c) = cue.kind, let i = engine.cueSlotIndex(deck: d, layer: l, column: c) else { return nil }
+        guard case .clip = cue.kind, let i = engine.cueClipIndex(cue) else { return nil }
         return engine.slots[i]?.endAction
     }
 }

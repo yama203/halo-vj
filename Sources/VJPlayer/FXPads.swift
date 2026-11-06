@@ -253,7 +253,7 @@ struct FXPadBar: View {
                     LayoutManager.shared.toggleDetached(.pads)
                 }
             }
-            .help("押している間だけ、出力のいちばん最後にエフェクトがかかる（シーン・コンポジションとは別）。右下の「エフェクト」からパッドへドラッグして登録。⌘ドラッグで並び替え。右クリックで設定・名前・キー・空にする・削除")
+            .help("押している間だけ、出力のいちばん最後にエフェクトがかかる（シーン・コンポジションとは別）。「エフェクト」パネルからパッドへドラッグして登録。⌘ドラッグで並び替え。右クリックで設定・名前・キー・空にする・削除")
             ScrollView(.horizontal) {
                 HStack(spacing: 6) {
                     ForEach(engine.pads) { p in
@@ -370,7 +370,7 @@ struct FXPadButton: View {
         .onDrop(of: EffectDrop.types, isTargeted: $dropTargeted) { providers in
             EffectDrop.handle(providers) { k in pad.addEffect(k) }
         }
-        .help((empty ? "右下の「エフェクト」からここへドラッグして登録"
+        .help((empty ? "「エフェクト」パネルからここへドラッグして登録"
                : "押している間だけ「\(pad.displayName)」（右クリックで設定）")
               + (pad.key.map { "\nキー \($0.uppercased()) を押している間も効く" } ?? ""))
         .popover(isPresented: $showSettings, arrowEdge: .top) {

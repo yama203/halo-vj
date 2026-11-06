@@ -80,7 +80,8 @@ enum EndAction: Int, CaseIterable, Codable, Identifiable {
 /// - 先頭からデコード済みの「待機ストリーム」を常に1本持っておき、トリガーで差し替えて即座に再生する
 /// - 映像は自前の時計で表示、音声は AVAudioEngine + タイムストレッチで同じ時刻から鳴らす
 final class ClipSlot: ObservableObject, Identifiable, Animatable, EffectHolder {
-    let id = UUID()
+    /// クリップの目印（保存される。キューはこれでクリップを探す。場所を動かしても変わらない）
+    var id = UUID()
     let url: URL
 
     /// 速度・ループなど保存対象の設定が変わったときに呼ばれる

@@ -155,6 +155,10 @@ extension Engine {
             sc.layerDecks.flatMap { $0.indices.contains(r) ? deckIndex($0[r]) : nil } ?? base
         }
         let d = SceneDraft(scene: sc, layerCount: layers.count, deck: base, layerDeck: ld)
+        // 流すクリップは目印で探して、今ある場所で表示する（動かしていても同じクリップ）
+        let targets = sceneTargets(sc)
+        d.playing = d.layers.indices.map { r in targets[r].map { columnOf($0) } }
+        d.layerDeck = d.layers.indices.map { r in targets[r].map { deckOf($0) } ?? base }
         d.onChanged = { [weak self, weak d] in
             guard let self, let d else { return }
             self.sceneDraftChanged(d)
@@ -176,6 +180,7 @@ extension Engine {
     private func writeDraft(_ d: SceneDraft, to s: inout VJScene) {
         let deck = min(max(d.shownDeck, 0), decks.count - 1)
         s.playing = d.playing
+        s.playingIDs = d.playing.indices.map { r in scenePlayingIndex(d, r).flatMap { slots[$0]?.id } }
         s.deck = decks[deck].id
         let ld: [UUID?] = d.playing.indices.map { r in
             guard d.playing[r] != nil, d.layerDeck.indices.contains(r), d.layerDeck[r] != deck,
