@@ -268,10 +268,19 @@ final class ClipSlot: ObservableObject, Identifiable, Animatable, EffectHolder {
     @Published var endAction: EndAction {
         didSet {
             guard oldValue != endAction else { return }
-            if endAction == .pingpong { prepareReverse() } else { dropReverse() }
+            if currentEndAction == .pingpong { prepareReverse() } else { dropReverse() }
             onSettingsChanged?()
         }
     }
+    /// キューで一時的に決めた「終わったら」（nil = 自分の設定）。保存しない。普通に出し直すと外れる
+    @Published var endActionOverride: EndAction? {
+        didSet {
+            guard oldValue != endActionOverride else { return }
+            if currentEndAction == .pingpong { prepareReverse() } else { dropReverse() }
+        }
+    }
+    /// 今効いている「終わったら」
+    var currentEndAction: EndAction { endActionOverride ?? endAction }
     /// 往復モードで逆向きに再生中
     @Published private(set) var isReversing = false
     var loop: Bool { endAction == .loop }
@@ -332,7 +341,7 @@ final class ClipSlot: ObservableObject, Identifiable, Animatable, EffectHolder {
                     self.audioDo { $0.schedule(from: p) }
                 }
             }
-            if self.endAction == .pingpong { self.prepareReverse() }
+            if self.currentEndAction == .pingpong { self.prepareReverse() }
         }
         standbyWork = w
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: w)
@@ -389,7 +398,7 @@ final class ClipSlot: ObservableObject, Identifiable, Animatable, EffectHolder {
         }
         // 次の折り返しに備える
         DispatchQueue.main.async { [weak self] in
-            guard let self, self.endAction == .pingpong, self.reverseStandby == nil else { return }
+            guard let self, self.currentEndAction == .pingpong, self.reverseStandby == nil else { return }
             self.reverseStandby = self.makeReverseStream()
         }
     }
@@ -674,7 +683,7 @@ final class ClipSlot: ObservableObject, Identifiable, Animatable, EffectHolder {
                 }
                 self.standby = self.makeStream(at: iP)
                 self.isReady = self.standby != nil
-                if self.endAction == .pingpong { self.prepareReverse() }
+                if self.currentEndAction == .pingpong { self.prepareReverse() }
                 self.onReady?()
             }
         } catch {
@@ -897,7 +906,7 @@ final class ClipSlot: ObservableObject, Identifiable, Animatable, EffectHolder {
         if isReversing {
             // 逆向きにイン点まで来た → 順向きに戻す（往復以外に切り替えられていたら、その動きに従う）
             guard pos <= inPoint else { return }
-            switch endAction {
+            switch currentEndAction {
             case .pingpong, .loop: playFromStart()
             case .blackout: stopAndRearm(); onBlackoutEnd?()
             case .hold: holdAt(inPoint)
@@ -905,7 +914,7 @@ final class ClipSlot: ObservableObject, Identifiable, Animatable, EffectHolder {
             return
         }
         guard pos >= outTime else { return }
-        switch endAction {
+        switch currentEndAction {
         case .loop:
             playFromStart()
         case .pingpong:

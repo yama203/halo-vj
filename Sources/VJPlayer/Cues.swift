@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// キュー：本番で出すものを順に並べたもの。GO で次へ進む
+/// キュー：本番で出すものを順に並べたもの。「次へ」で次々に出す
 struct Cue: Codable, Identifiable, Equatable {
     enum Kind: Codable, Equatable {
         /// シーンを呼ぶ
@@ -20,6 +20,8 @@ struct Cue: Codable, Identifiable, Equatable {
     /// クリップのキュー：ほかのレイヤーはそのまま（nil / false = このクリップだけを出す）
     var keepOthers: Bool?
     var onlyThisClip: Bool { !(keepOthers ?? false) }
+    /// クリップのキュー：「終わったら」をこのキューで決める（nil = クリップの設定のまま）。キューで出したときだけ効く
+    var endAction: EndAction?
 
     static let fadeChoices: [Double?] = [nil, 0, 0.5, 1, 2, 3, 5, 8]
     static func fadeLabel(_ f: Double?) -> String {
@@ -32,7 +34,7 @@ struct Cue: Codable, Identifiable, Equatable {
 }
 
 extension Engine {
-    /// GO を受け付けない間（押し間違いの連打よけ）
+    /// 「次へ」を受け付けない間（押し間違いの連打よけ）
     static let goGuard = 0.5
 
     /// 次に出すキューの番号
@@ -41,7 +43,7 @@ extension Engine {
         return cues.indices.contains(n) ? n : nil
     }
 
-    /// GO：次のキューを出す
+    /// 次へ：次のキューを出す
     @discardableResult
     func goCue() -> Bool {
         let now = CACurrentMediaTime()
@@ -72,6 +74,8 @@ extension Engine {
             guard let idx = cueSlotIndex(deck: deck, layer: layer, column: column) else { NSSound.beep(); return }
             finishCueFade()
             trigger(idx, fadeTime: c.fade, select: false)
+            // 「終わったら」の上書き（クリップの設定は変えない。普通に出し直すと外れる）
+            slots[idx]?.endActionOverride = c.endAction
             if c.onlyThisClip {
                 // このクリップだけ：ほかのレイヤーはフェードして止める
                 let others = layers.indices.filter { $0 != layer && activeByLayer[$0] != nil }
@@ -168,7 +172,8 @@ extension Engine {
             return scenes.first { $0.id == id }.map { "シーン：" + $0.name } ?? "（見つからないシーン）"
         case .clip(let deck, let layer, let column):
             guard let i = cueSlotIndex(deck: deck, layer: layer, column: column), let s = slots[i] else { return "（見つからないクリップ）" }
-            return (c.onlyThisClip ? "クリップだけ：" : "L\(layer + 1) を差し替え：") + s.name
+            _ = layer
+            return s.name
         case .stopAll:
             return "全停止（暗転）"
         }
@@ -243,7 +248,7 @@ final class CueDropTarget: ObservableObject {
     }
 }
 
-/// キューリストのパネル：今・次、GO・戻る、一覧
+/// キューリストのパネル：今・次、次へ・戻る、一覧
 struct CuePanel: View {
     @EnvironmentObject var engine: Engine
     @ObservedObject private var dropTarget = CueDropTarget.shared
@@ -288,7 +293,7 @@ struct CuePanel: View {
                 Button {
                     engine.goCue()
                 } label: {
-                    Label("GO", systemImage: "play.fill")
+                    Label("次へ", systemImage: "play.fill")
                         .font(.system(size: 16, weight: .heavy))
                         .frame(maxWidth: .infinity)
                 }
@@ -315,7 +320,7 @@ struct CuePanel: View {
                 }
                 .fixedSize()
                 Spacer(minLength: 0)
-                Text("スペースで GO・⇧スペースで戻る・ダブルクリックで飛ぶ")
+                Text("スペースで次へ・⇧スペースで戻る・ダブルクリックで飛ぶ")
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -323,7 +328,7 @@ struct CuePanel: View {
             if engine.cues.isEmpty {
                 VStack(spacing: 6) {
                     Image(systemName: "list.number").font(.system(size: 26)).foregroundStyle(.tertiary)
-                    Text("出すものを順に並べておくと、GO（スペース）で次々に出せます。\nシーンや、グリッドのクリップの名前の帯をここへドラッグ。「キューを足す」や右クリックからも足せます")
+                    Text("出すものを順に並べておくと、「次へ」（スペース）で次々に出せます。\nシーンや、グリッドのクリップの名前の帯をここへドラッグ。「キューを足す」や右クリックからも足せます")
                         .multilineTextAlignment(.center)
                         .font(.system(size: 12)).foregroundStyle(.secondary)
                 }
@@ -386,7 +391,10 @@ private struct CueRow: View {
                 .frame(width: 22, alignment: .trailing)
             CueThumb(cue: cue)
             VStack(alignment: .leading, spacing: 1) {
-                Text(engine.cueTitle(cue)).font(.system(size: 12, weight: .semibold)).lineLimit(1)
+                HStack(spacing: 4) {
+                    CueModeIcons(cue: cue)
+                    Text(engine.cueTitle(cue)).font(.system(size: 12, weight: .semibold)).lineLimit(1)
+                }
                 if !cue.note.isEmpty {
                     Text(cue.note).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
                 }
@@ -429,6 +437,7 @@ private struct CueRow: View {
                 Toggle("ほかのレイヤーはそのまま（このレイヤーだけ差し替え）", isOn: Binding(
                     get: { cue.keepOthers ?? false },
                     set: { v in engine.updateCue(cue.id) { $0.keepOthers = v ? true : nil } }))
+                CueEndActionMenu(cue: cue)
             }
             Button("メモを書く…") {
                 if let n = askText(title: "キュー \(index + 1) のメモ（きっかけなど）", initial: cue.note) {
@@ -503,6 +512,62 @@ private struct CueClipThumb: View {
             Image(systemName: "film").font(.system(size: 11)).foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+    }
+}
+
+/// クリップのキューの印：出し方（このクリップだけ／そのレイヤーだけ差し替え）と、「終わったら」の上書き
+private struct CueModeIcons: View {
+    @EnvironmentObject var engine: Engine
+    let cue: Cue
+
+    var body: some View {
+        if case .clip(_, let layer, _) = cue.kind {
+            HStack(spacing: 3) {
+                if cue.onlyThisClip {
+                    Image(systemName: "square.fill")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.green)
+                        .help("このクリップだけを出す（ほかのレイヤーはフェードして止まる）")
+                } else {
+                    HStack(spacing: 1) {
+                        Image(systemName: "square.3.layers.3d").font(.system(size: 10))
+                        Text("L\(layer + 1)").font(.system(size: 9, weight: .bold))
+                    }
+                    .foregroundStyle(.orange)
+                    .help("L\(layer + 1) だけ差し替える（ほかのレイヤーはそのまま）")
+                }
+                if let ea = cue.endAction {
+                    Image(systemName: ea.icon)
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(.teal)
+                        .help("終わったら：" + ea.label + "（このキューで出したときだけ）")
+                }
+            }
+        }
+    }
+}
+
+/// クリップのキューの右クリック：「終わったら」を上書きする
+private struct CueEndActionMenu: View {
+    @EnvironmentObject var engine: Engine
+    let cue: Cue
+
+    var body: some View {
+        let own = clipEndAction
+        Menu("終わったら（" + (cue.endAction?.label ?? "クリップの設定") + "）") {
+            Button((cue.endAction == nil ? "✓ " : "") + "クリップの設定のまま" + (own.map { "（" + $0.label + "）" } ?? "")) {
+                engine.updateCue(cue.id) { $0.endAction = nil }
+            }
+            Divider()
+            ForEach(EndAction.allCases) { ea in
+                Button((cue.endAction == ea ? "✓ " : "") + ea.label) { engine.updateCue(cue.id) { $0.endAction = ea } }
+            }
+        }
+    }
+
+    private var clipEndAction: EndAction? {
+        guard case .clip(let d, let l, let c) = cue.kind, let i = engine.cueSlotIndex(deck: d, layer: l, column: c) else { return nil }
+        return engine.slots[i]?.endAction
     }
 }
 

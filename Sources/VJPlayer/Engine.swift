@@ -658,6 +658,8 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
         let r = layerOf(index)
         // キューで消している途中のレイヤーを出し直したら、消すのをやめる
         cancelCueFade(layer: r)
+        // キューで一時的に決めた「終わったら」は、出し直すと外れる（キューから出すときは、この後でまた入れる）
+        slot.endActionOverride = nil
         // 消えかけのクリップをもう一度押した → それは頭から出し直す（クロスフェードの相手ではなくなる）
         if outgoing[r] == index { dropOutgoing(r, stop: false) }
         let fadeTime = fadeOverride ?? layers[r].fadeTime

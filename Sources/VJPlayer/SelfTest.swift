@@ -1315,9 +1315,24 @@ enum SelfTest {
         e.trigger(0)
         e.updateCue(e.cues[1].id) { $0.keepOthers = true }
         e.fireCue(1)
-        check(e.activeByLayer[0] == 0 && e.activeByLayer[1] == c + 2 && e.cueTitle(e.cues[1]).contains("差し替え"),
+        check(e.activeByLayer[0] == 0 && e.activeByLayer[1] == c + 2 && !e.cues[1].onlyThisClip,
               "キュー：「ほかのレイヤーはそのまま」なら、そのレイヤーだけ差し替える")
         e.updateCue(e.cues[1].id) { $0.keepOthers = nil }
+        // 「終わったら」の上書き：キューで出したときだけ効き、クリップの設定は変えない
+        if let clip = e.slots[c + 2] {
+            clip.endAction = .loop
+            e.updateCue(e.cues[1].id) { $0.endAction = .hold }
+            e.fireCue(1)
+            check(clip.currentEndAction == .hold && clip.endAction == .loop,
+                  "キュー：「終わったら」をキューで上書きできる（クリップの設定はそのまま）")
+            e.trigger(c + 2)
+            check(clip.currentEndAction == .loop && clip.endActionOverride == nil,
+                  "キュー：グリッドから普通に出し直すと、クリップ本来の「終わったら」に戻る")
+            e.updateCue(e.cues[1].id) { $0.endAction = nil }
+            e.fireCue(1)
+            check(clip.currentEndAction == .loop, "キュー：上書きしていなければクリップの設定のまま")
+            e.trigger(0)
+        }
         // フェード付き：ほかのレイヤーは薄くなってから止まり、不透明度は元に戻る
         e.layers[0].opacity = 0.8
         e.updateCue(e.cues[1].id) { $0.fade = 0.3 }
