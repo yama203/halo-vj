@@ -612,8 +612,7 @@ struct LayerHeader: View {
         .padding(8)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(RoundedRectangle(cornerRadius: 6)
-            .fill(layer.muted ? Color.red.opacity(0.16)
-                  : selected ? Color.accentColor.opacity(0.22) : Color.white.opacity(0.04)))
+            .fill(headerFill(selected: selected)))
         .overlay(RoundedRectangle(cornerRadius: 6)
             .stroke(selected ? Color.accentColor : Color.gray.opacity(0.3), lineWidth: selected ? 1.5 : 1))
         // レイヤーを動かすときの行き先
@@ -677,6 +676,13 @@ struct LayerHeader: View {
 }
 
 extension LayerHeader {
+    /// レイヤー欄の地の色（ミュート = 赤、選択中 = 青、調整レイヤー = 青緑）
+    func headerFill(selected: Bool) -> Color {
+        if layer.muted { return Color.red.opacity(0.16) }
+        if selected { return Color.accentColor.opacity(0.22) }
+        return layer.isAdjustment ? Color.teal.opacity(0.10) : Color.white.opacity(0.04)
+    }
+
     /// 出力のレイヤーに付けた名前（シーンの編集中も同じ）
     var layerTitle: String? {
         engine.layers.indices.contains(layer.index) ? engine.layers[layer.index].title : nil
@@ -753,7 +759,8 @@ struct SlotCell: View {
             } else {
                 // 空きの枠：クリックでこのレイヤーを停止（Arena と同じ）。右上の＋でクリップを読み込む
                 RoundedRectangle(cornerRadius: 6)
-                    .fill(Color.white.opacity(hovering ? 0.07 : 0.04))
+                    // 調整レイヤーの行は青緑がかった色（ほかの段と見分ける）
+                    .fill(adjustmentRow ? Color.teal.opacity(hovering ? 0.16 : 0.09) : Color.white.opacity(hovering ? 0.07 : 0.04))
                     .overlay(alignment: .topTrailing) {
                         Image(systemName: "plus")
                             .font(.system(size: 10, weight: .bold))
@@ -772,7 +779,8 @@ struct SlotCell: View {
             RoundedRectangle(cornerRadius: 6)
                 .stroke(badTarget ? Color.red
                         : dropTargeted || moveTarget ? Color.accentColor
-                        : (active ? (editing ? Color.orange : Color.green) : Color.gray.opacity(0.3)),
+                        : (active ? (editing ? Color.orange : Color.green)
+                           : (adjustmentRow ? Color.teal.opacity(0.35) : Color.gray.opacity(0.3))),
                         lineWidth: active || dropTargeted || moveTarget || badTarget ? 3 : 1)
         )
         .overlay {
