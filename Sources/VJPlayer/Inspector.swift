@@ -760,16 +760,26 @@ struct PlayRangeSection: View {
                         .controlSize(.regular)
                 }
             }
+            // 端のコマ（イン点のコマと、アウト点の直前のコマ）。黒などが残っていないか見ながら決められる
+            HStack(spacing: 8) {
+                EdgeFrame(slot: slot, isIn: true)
+                Spacer(minLength: 0)
+                EdgeFrame(slot: slot, isIn: false)
+            }
             InOutBar(slot: slot)
                 .frame(height: 40)
-            HStack(spacing: 12) {
+            HStack(spacing: 6) {
                 timeLabel("イン", slot.inPoint, changed: slot.inPoint > 0)
+                FrameStepButtons(help: "イン点") { slot.stepIn($0) }
+                Spacer(minLength: 4)
                 timeLabel("アウト", slot.outTime, changed: slot.outPoint != nil)
-                Spacer()
-                Text(String(format: "長さ %.2f 秒", max(slot.outTime - slot.inPoint, 0)))
-                    .foregroundStyle(.secondary)
+                FrameStepButtons(help: "アウト点") { slot.stepOut($0) }
             }
             .font(.system(size: 12).monospacedDigit())
+            Text(String(format: "長さ %.2f 秒（%.0f コマ）", max(slot.outTime - slot.inPoint, 0),
+                        (max(slot.outTime - slot.inPoint, 0) / slot.frameLength).rounded()))
+                .font(.system(size: 11).monospacedDigit())
+                .foregroundStyle(.secondary)
             HStack(spacing: 8) {
                 Text("終わったら").font(.system(size: 12)).foregroundStyle(.secondary)
                 Picker("", selection: $slot.endAction) {
@@ -808,6 +818,65 @@ func clipTime(_ s: Double) -> String {
 
 /// クリップ全体の中でイン点・アウト点をドラッグで決めるバー。
 /// 両端のつまみを動かす。ダブルクリックでそのつまみを初期値に戻す。再生中なら再生位置も出す。
+/// イン点・アウト点を 1 コマずつ動かすボタン（⇧で 10 コマ）
+struct FrameStepButtons: View {
+    let help: String
+    let step: (Int) -> Void
+
+    var body: some View {
+        HStack(spacing: 2) {
+            button("chevron.left", -1)
+            button("chevron.right", 1)
+        }
+    }
+
+    private func button(_ icon: String, _ dir: Int) -> some View {
+        Button {
+            step(dir * (NSEvent.modifierFlags.contains(.shift) ? 10 : 1))
+        } label: {
+            Image(systemName: icon).font(.system(size: 10, weight: .bold)).frame(width: 18, height: 18)
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .help(help + "を 1 コマ" + (dir < 0 ? "前" : "後ろ") + "へ（⇧を押しながらで 10 コマ）")
+    }
+}
+
+/// 再生範囲の端のコマ：イン点のコマ／アウト点の直前（最後に映る）コマ。動かすと描き直す
+struct EdgeFrame: View {
+    @ObservedObject var slot: ClipSlot
+    let isIn: Bool
+    @State private var image: CGImage?
+
+    private var time: Double { isIn ? slot.inPoint : max(slot.outTime - slot.frameLength, 0) }
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            Color.black
+            if let image {
+                Image(decorative: image, scale: 1).resizable().aspectRatio(contentMode: .fit)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            Text(isIn ? "最初のコマ" : "最後のコマ")
+                .font(.system(size: 9, weight: .bold))
+                .padding(.horizontal, 4).padding(.vertical, 1)
+                .background(Color.black.opacity(0.65), in: RoundedRectangle(cornerRadius: 3))
+                .padding(3)
+        }
+        .frame(width: 136, height: 76)
+        .clipShape(RoundedRectangle(cornerRadius: 4))
+        .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.gray.opacity(0.35)))
+        // ドラッグ中は少し待ってから描く（描きすぎない）
+        .task(id: "\(time)-\(slot.duration)") {
+            try? await Task.sleep(nanoseconds: 60_000_000)
+            guard !Task.isCancelled else { return }
+            let img = await slot.exactFrame(at: time)
+            if !Task.isCancelled { image = img }
+        }
+        .help(isIn ? "イン点のコマ（ここから再生）" : "アウト点の直前のコマ（ここまで映る）")
+    }
+}
+
 struct InOutBar: View {
     @ObservedObject var slot: ClipSlot
     /// ドラッグを始めたときのつまみの位置
@@ -822,9 +891,26 @@ struct InOutBar: View {
             let xo = CGFloat(slot.outTime / d) * w
             ZStack(alignment: .leading) {
                 RoundedRectangle(cornerRadius: 3).fill(Color.white.opacity(0.06))
+                // クリップのコマを並べる（どこが黒いかなどが見える）
+                if !slot.filmstrip.isEmpty {
+                    HStack(spacing: 0) {
+                        ForEach(slot.filmstrip.indices, id: \.self) { k in
+                            Image(decorative: slot.filmstrip[k], scale: 1)
+                                .resizable()
+                                .aspectRatio(contentMode: .fill)
+                                .frame(width: w / CGFloat(slot.filmstrip.count), height: g.size.height)
+                                .clipped()
+                        }
+                    }
+                    .opacity(0.75)
+                    .clipShape(RoundedRectangle(cornerRadius: 3))
+                    // 使わない所は暗く
+                    Rectangle().fill(Color.black.opacity(0.6)).frame(width: max(xi, 0))
+                    Rectangle().fill(Color.black.opacity(0.6)).frame(width: max(w - xo, 0)).offset(x: xo)
+                }
                 // 使う範囲
                 Rectangle()
-                    .fill(Color.accentColor.opacity(0.35))
+                    .fill(Color.accentColor.opacity(slot.filmstrip.isEmpty ? 0.35 : 0.15))
                     .frame(width: max(xo - xi, 1))
                     .offset(x: xi)
                 // 再生位置
@@ -841,6 +927,8 @@ struct InOutBar: View {
             }
         }
         .transaction { $0.animation = nil }
+        .onAppear { slot.loadFilmstrip() }
+        .onChange(of: slot.duration) { _, _ in slot.loadFilmstrip() }
     }
 
     private func handle(x: CGFloat, isIn: Bool, width w: CGFloat, duration d: Double) -> some View {

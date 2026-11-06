@@ -327,6 +327,62 @@ final class ClipSlot: ObservableObject, Identifiable, Animatable, EffectHolder {
 
     func resetInOut() { setInOut(in: 0, out: .some(nil)) }
 
+    /// 1 コマの長さ（秒。動画のフレームレートから）
+    var frameLength: Double { frameDuration }
+
+    /// イン点を n コマ動かす（コマの区切りにそろえる）
+    func stepIn(_ n: Int) {
+        let f = frameDuration
+        setInOut(in: max((inPoint / f).rounded() + Double(n), 0) * f)
+    }
+
+    /// アウト点を n コマ動かす（コマの区切りにそろえる。最後まで行ったら「最後まで」）
+    func stepOut(_ n: Int) {
+        let f = frameDuration
+        let t = ((outTime / f).rounded() + Double(n)) * f
+        setInOut(out: .some(t >= duration - f / 2 ? nil : t))
+    }
+
+    /// 時刻 t のコマの絵（ぴったりそのコマ。再生範囲の端の確認用）
+    func exactFrame(at t: Double, maxSize: CGSize = CGSize(width: 480, height: 270)) async -> CGImage? {
+        guard !isStill else { return nil }
+        let gen = AVAssetImageGenerator(asset: asset)
+        gen.appliesPreferredTrackTransform = true
+        gen.maximumSize = maxSize
+        gen.requestedTimeToleranceBefore = .zero
+        gen.requestedTimeToleranceAfter = .zero
+        return try? await gen.image(at: CMTime(seconds: max(t, 0), preferredTimescale: 600)).image
+    }
+
+    /// 再生範囲のバーの後ろに並べる、クリップのコマ（少しずつ間引いたもの）。作ったら覚えておく
+    @Published private(set) var filmstrip: [CGImage] = []
+    private var filmstripLoading = false
+
+    func loadFilmstrip(count: Int = 24) {
+        guard !isStill, filmstrip.isEmpty, !filmstripLoading, duration > 0 else { return }
+        filmstripLoading = true
+        let a = asset, d = duration
+        let done: ([CGImage]) -> Void = { [weak self] frames in
+            self?.filmstrip = frames
+            self?.filmstripLoading = false
+        }
+        Task.detached(priority: .utility) {
+            let gen = AVAssetImageGenerator(asset: a)
+            gen.appliesPreferredTrackTransform = true
+            gen.maximumSize = CGSize(width: 96, height: 54)
+            let tol = CMTime(seconds: d / Double(count) / 2, preferredTimescale: 600)
+            gen.requestedTimeToleranceBefore = tol
+            gen.requestedTimeToleranceAfter = tol
+            var out: [CGImage] = []
+            for k in 0..<count {
+                let t = d * (Double(k) + 0.5) / Double(count)
+                if let img = try? await gen.image(at: CMTime(seconds: t, preferredTimescale: 600)).image { out.append(img) }
+            }
+            let frames = out
+            await MainActor.run { done(frames) }
+        }
+    }
+
     /// イン点が変わったら待機ストリームを作り直す（ドラッグ中に作りすぎないよう少し待つ）
     private var standbyWork: DispatchWorkItem?
     private func rebuildStandby(forward: Bool) {

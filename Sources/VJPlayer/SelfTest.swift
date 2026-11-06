@@ -372,6 +372,7 @@ enum SelfTest {
             }
         }
         testStillImages(check: check, wait: wait)
+        testFrameTrim(paths: paths, check: check, wait: wait)
         testSources(dir: URL(fileURLWithPath: paths[0]).deletingLastPathComponent(), check: check, wait: wait)
 
         // 16. ミュート（クリップ・レイヤー・コンポジション）
@@ -1143,6 +1144,32 @@ enum SelfTest {
     }
 
     /// シーン：今の状態を保存して、切り替える（すぐ／フェード）
+    /// 再生範囲を 1 コマずつ動かす・端のコマ・コマの並び
+    static func testFrameTrim(paths: [String], check: (Bool, String) -> Void, wait: (Double) -> Void) {
+        let s = ClipSlot(url: URL(fileURLWithPath: paths[0]))
+        for _ in 0..<60 where !s.isReady { wait(0.05) }
+        guard s.isReady else { check(false, "コマ送り：クリップが読める"); return }
+        let f = s.frameLength
+        s.stepIn(1)
+        check(abs(s.inPoint - f) < 1e-9, String(format: "コマ送り：イン点を 1 コマ後ろへ（%.4f 秒）", f))
+        s.stepIn(10)
+        check(abs(s.inPoint - 11 * f) < 1e-9, "コマ送り：イン点を 10 コマ後ろへ（コマの区切りにそろう）")
+        s.stepIn(-100)
+        check(s.inPoint == 0, "コマ送り：先頭より前へは行かない")
+        s.stepOut(-3)
+        check(abs(s.outTime - (s.duration / f).rounded() * f + 3 * f) < 1e-6 && s.outPoint != nil, "コマ送り：アウト点を 3 コマ前へ")
+        s.stepOut(3)
+        check(s.outPoint == nil, "コマ送り：最後まで戻すと「最後まで」になる")
+        var img: CGImage?
+        let done = DispatchSemaphore(value: 0)
+        Task { img = await s.exactFrame(at: 1.0); done.signal() }
+        for _ in 0..<60 where done.wait(timeout: .now()) == .timedOut { wait(0.05) }
+        check(img != nil, "端のコマ：その時刻のコマを取り出せる")
+        s.loadFilmstrip(count: 8)
+        for _ in 0..<80 where s.filmstrip.isEmpty { wait(0.05) }
+        check(s.filmstrip.count == 8, "コマの並び：再生範囲のバーの後ろに並べるコマを作れる")
+    }
+
     /// 静止画：PNG・PDF・AI（PDF 互換）・SVG・PSD を読み、クリップとして出力に出せる
     static func testStillImages(check: (Bool, String) -> Void, wait: (Double) -> Void) {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("halovj-still-\(UUID().uuidString)")
