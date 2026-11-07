@@ -657,12 +657,10 @@ struct CompositionParams: View {
                            help: "位置・スケール・角度・不透明度を初期値に戻す") { engine.compTransform.reset(); engine.masterOpacity = 1 }
             } content: {
                 TransformFields(t: engine.compTransform)
-                HStack(spacing: 4) {
-                    AnimField(label: "不透明度", value: $engine.masterOpacity, range: 0...1, perPoint: 0.003,
-                              defaultValue: 1, showsBar: true, format: percent, key: .opacity, target: engine)
-                    VisibilityButton(muted: $engine.compMuted, what: "コンポジション（出力全体）")
-                }
-                .frame(height: UI.rowHeight)
+                // 「映像を出さない」は動かし方のボタンの右に（開いた設定が欄の幅いっぱいに出るように）
+                AnimField(label: "不透明度", value: $engine.masterOpacity, range: 0...1, perPoint: 0.003,
+                              defaultValue: 1, showsBar: true, format: percent, key: .opacity, target: engine,
+                          trailing: AnyView(VisibilityButton(muted: $engine.compMuted, what: "コンポジション（出力全体）")))
             }
             ParamColumn(title: "マスター") {
                 Group {
@@ -710,12 +708,10 @@ struct LayerParams: View {
                            help: "位置・スケール・角度・不透明度を初期値に戻す") { layer.transform.reset(); layer.opacity = 1 }
             } content: {
                 TransformFields(t: layer.transform)
-                HStack(spacing: 4) {
-                    AnimField(label: "不透明度", value: $layer.opacity, range: 0...1, perPoint: 0.003,
-                              defaultValue: 1, showsBar: true, format: percent, key: .opacity, target: layer)
-                    VisibilityButton(muted: $layer.muted, what: "このレイヤー")
-                }
-                .frame(height: UI.rowHeight)
+                // 「映像を出さない」は動かし方のボタンの右に（開いた設定が欄の幅いっぱいに出るように）
+                AnimField(label: "不透明度", value: $layer.opacity, range: 0...1, perPoint: 0.003,
+                              defaultValue: 1, showsBar: true, format: percent, key: .opacity, target: layer,
+                          trailing: AnyView(VisibilityButton(muted: $layer.muted, what: "このレイヤー")))
             }
             ParamColumn(title: "ミックス") {
                 LayerStopMini(layer: layer)
@@ -793,12 +789,10 @@ struct ClipParams: View {
                            help: "位置・スケール・角度・不透明度・音量を初期値に戻す（速度はそのまま）") { slot.resetTransform() }
             } content: {
                 TransformFields(t: slot)
-                HStack(spacing: 4) {
-                    AnimField(label: "不透明度", value: $slot.opacity, range: 0...1, perPoint: 0.003, defaultValue: 1,
-                              showsBar: true, format: percent, key: .opacity, target: slot)
-                    VisibilityButton(muted: $slot.muted, what: "このクリップ")
-                }
-                .frame(height: UI.rowHeight)
+                // 「映像を出さない」は動かし方のボタンの右に（開いた設定が欄の幅いっぱいに出るように）
+                AnimField(label: "不透明度", value: $slot.opacity, range: 0...1, perPoint: 0.003, defaultValue: 1,
+                              showsBar: true, format: percent, key: .opacity, target: slot,
+                          trailing: AnyView(VisibilityButton(muted: $slot.muted, what: "このクリップ")))
             }
             // 静止画・ジェネレーターには音も再生範囲も無いので出さない
             if !slot.isStill {

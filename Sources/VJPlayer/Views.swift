@@ -87,7 +87,7 @@ struct ContentView: View {
                     .frame(height: topHeight, alignment: .top)
                     // 押している間だけ効くエフェクトのパッド
                     if padHeight > 0 {
-                        FXPadBar()
+                        FXPadBar(showsTitle: true)
                             .padding(.horizontal, 12)
                             .frame(height: padHeight, alignment: .top)
                     }
@@ -677,6 +677,19 @@ struct LayerHeader: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         // ほかのレイヤーのソロで隠れているときは薄く
         .modifier(SoloDim(layer: engine.layers.indices.contains(layer.index) ? engine.layers[layer.index] : layer))
+        // 流しているクリップのサムネイルを、うしろに薄く（何が出ているか一目で分かるように。字が読めるよう左を暗く）
+        .background {
+            if let img = playing?.thumbnail, !layer.isAdjustment {
+                ZStack {
+                    Image(nsImage: img).resizable().aspectRatio(contentMode: .fill)
+                        .opacity((layer.muted ? 0.25 : 0.55) * max(layer.opacity, 0.35))
+                    LinearGradient(colors: [Color.black.opacity(0.75), Color.black.opacity(0.35), Color.black.opacity(0.15)],
+                                   startPoint: .leading, endPoint: .trailing)
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .allowsHitTesting(false)
+            }
+        }
         .background(RoundedRectangle(cornerRadius: 6)
             .fill(headerFill(selected: selected)))
         .overlay(RoundedRectangle(cornerRadius: 6)

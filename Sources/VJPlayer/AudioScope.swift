@@ -4,13 +4,16 @@ import QuartzCore
 
 // 音の形：音の入力の、周波数ごとの大きさ（スペクトラム）と波形を、そのまま絵にするジェネレーター。
 
-/// スペクトラムと波形を作る（音声のスレッドで使う）
+/// スペクトラムと波形を作る（描くときに、ジェネレーターごとに使う）
 final class SpectrumAnalyzer {
     static let fftSize = 2048
     static let bands = 128
+    /// 波形の点の数（音 2048 個ぶん。まっすぐな波形はその前半、円は全部を使ってつなぎ目を消す）
+    static let wavePoints = 1024
+    /// 切り出す音の数（スペクトラム 2048＋波形の頭をそろえるための余り）
+    static let needSamples = 4096
     private let log2n = vDSP_Length(11)
     private let setup: FFTSetup
-    private var ring = [Float](repeating: 0, count: SpectrumAnalyzer.fftSize)
     private var window = [Float](repeating: 0, count: SpectrumAnalyzer.fftSize)
     private var peakDB: Float = -40
     private var peakAmp: Float = 0.05
@@ -21,13 +24,13 @@ final class SpectrumAnalyzer {
     }
     deinit { vDSP_destroy_fftsetup(setup) }
 
-    /// 新しい音（モノラル）を足して、スペクトラム（帯ごと 0〜1）と波形（-1〜1、512 点）を返す
-    func process(_ x: [Float], sampleRate: Double, autoGain: Bool) -> (spectrum: [Float], wave: [Float]) {
-        let n = Self.fftSize
-        if x.count >= n { ring = Array(x.suffix(n)) } else { ring.removeFirst(x.count); ring += x }
-        // 窓をかけて FFT
+    /// 最近の音（モノラル。古い方から、needSamples 個あるとよい）から、スペクトラム（帯ごと 0〜1）と波形（-1〜1、wavePoints 点）を作る
+    func process(_ input: [Float], sampleRate: Double, autoGain: Bool) -> (spectrum: [Float], wave: [Float]) {
+        let n = Self.fftSize, need = Self.needSamples
+        let x: [Float] = input.count >= need ? Array(input.suffix(need)) : [Float](repeating: 0, count: need - input.count) + input
+        // スペクトラム：最後の 2048 個に窓をかけて FFT
         var w = [Float](repeating: 0, count: n)
-        vDSP_vmul(ring, 1, window, 1, &w, 1, vDSP_Length(n))
+        Array(x.suffix(n)).withUnsafeBufferPointer { vDSP_vmul($0.baseAddress!, 1, window, 1, &w, 1, vDSP_Length(n)) }
         var re = [Float](repeating: 0, count: n / 2), im = [Float](repeating: 0, count: n / 2)
         var mags = [Float](repeating: 0, count: n / 2)
         re.withUnsafeMutableBufferPointer { rp in
@@ -55,19 +58,54 @@ final class SpectrumAnalyzer {
         let top = bands.max() ?? -120
         peakDB = autoGain ? max(top, peakDB - 0.05) : -12
         let spectrum = bands.map { min(max(1 + ($0 - peakDB) / 60, 0), 1) }
-        // 波形：最後の 1024 点を 512 点に。大きさも合わせる
-        let tail = Array(ring.suffix(1024))
+
+        // 波形：オシロスコープのように、上がりながら 0 を横切る所を頭にそろえる（毎回ばらばらの所から切ると、波が跳ねて見える）
+        let len = Self.wavePoints * 2
+        // 横切りを探すのは、低い音だけにした波で（細かいギザギザで頭がぶれないように）
+        var lp = [Float](repeating: 0, count: need)
+        var acc: Float = 0
+        for i in 0..<need { acc += (x[i] - acc) * 0.08; lp[i] = acc }
+        var start = need - len
+        let searchFrom = need - len - 1024
+        for st in stride(from: need - len, through: max(searchFrom, 1), by: -1) where lp[st - 1] < 0 && lp[st] >= 0 {
+            start = st; break
+        }
+        // 2 個ずつまとめて点に（まわりの 5 個を重みを付けて足し、角を取る）
+        var wave = [Float](repeating: 0, count: Self.wavePoints)
         var amp: Float = 0
-        vDSP_maxmgv(tail, 1, &amp, vDSP_Length(tail.count))
+        for j in 0..<Self.wavePoints {
+            let c = start + j * 2
+            func at(_ i: Int) -> Float { x[min(max(i, 0), need - 1)] }
+            let v = (at(c - 2) + 2 * at(c - 1) + 3 * at(c) + 2 * at(c + 1) + at(c + 2)) / 9
+            wave[j] = v
+            amp = max(amp, abs(v))
+        }
         peakAmp = autoGain ? max(amp, peakAmp * 0.995, 0.01) : 1
-        let wave = stride(from: 0, to: tail.count, by: 2).map { min(max(tail[$0] / peakAmp, -1), 1) }
-        return (spectrum, wave)
+        return (spectrum, wave.map { min(max($0 / peakAmp, -1), 1) })
     }
 }
 
 extension AudioReactive {
-    /// 今のスペクトラム（帯ごと 0〜1）と波形（-1〜1）。音が無ければ 0
-    func scope() -> (spectrum: [Float], wave: [Float]) { scopeLock.withLock { (scopeSpectrum, scopeWave) } }
+    /// 描くときの「今」までの音（古い方から count 個）。届くかたまりの間も、時間に合わせて少しずつ進める
+    func scopeSamples(count: Int, now: Double = CACurrentMediaTime()) -> (samples: [Float], rate: Double, autoGain: Bool)? {
+        let auto = autoGain
+        return scopeLock.withLock {
+            guard scopeWritten > 0 else { return nil }
+            let N = scopeRing.count
+            // 最後のかたまりの分だけ遅らせて、届いてからの時間で前へ進める
+            let ahead = min(Int((now - scopeLastTime) * scopeRate), scopeLastCount)
+            let end = scopeWritten - scopeLastCount + max(ahead, 0)
+            let c = min(count, N - scopeLastCount)
+            var out = [Float](repeating: 0, count: count)
+            for k in 0..<c {
+                let i = end - c + k
+                if i >= 0 && i < scopeWritten { out[count - c + k] = scopeRing[i % N] }
+            }
+            // しばらく音が来なければ、だんだん無音に
+            if now - scopeLastTime > 0.5 { return (out.map { $0 * 0 }, scopeRate, auto) }
+            return (out, scopeRate, auto)
+        }
+    }
 }
 
 private let scopeShaderSource = """
@@ -78,7 +116,7 @@ vertex VO sc_v(uint vid [[vertex_id]]) {
     float2 c = float2(float(vid & 1), float(vid >> 1));
     VO o; o.pos = float4(c.x * 2.0 - 1.0, 1.0 - c.y * 2.0, 0.0, 1.0); o.uv = c; return o;
 }
-// a = 形, 帯の数, 高さ, 太さ / b = 色の付け方, 上下対称, 明るさ, 円の大きさ / c = 縦横比, 時刻
+// a = 形, 帯の数, 高さ, 太さ / b = 色の付け方, 上下対称, 明るさ, 円の大きさ / c = 縦横比, 波形の点の数
 struct SCU { float4 a, b, c; float4 color; float4 pal[8]; int palCount; };
 static float3 scHue(float h) { float3 k = abs(fract(float3(h) + float3(0.0, 2.0 / 3.0, 1.0 / 3.0)) * 6.0 - 3.0); return saturate(k - 1.0); }
 static float3 scPal(constant float4* pal, int count, float x) {
@@ -96,6 +134,14 @@ static float bandAt(constant float* sp, float x, int nb) {
     float m = 0.0;
     for (int i = i0; i < min(i1, 128); i++) m = max(m, sp[i]);
     return m;
+}
+// 波形の点 f（0〜n-1）の値を、なめらかな曲線（Catmull-Rom）で。dv に傾き（点 1 つあたり）
+static float waveAt(constant float* wv, float f, int n, thread float& dv) {
+    int i = clamp(int(floor(f)), 0, n - 1);
+    float p0 = wv[max(i - 1, 0)], p1 = wv[i], p2 = wv[min(i + 1, n - 1)], p3 = wv[min(i + 2, n - 1)];
+    float t = fract(f), t2 = t * t, t3 = t2 * t;
+    dv = 0.5 * ((-p0 + p2) + 2.0 * (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * t + 3.0 * (-p0 + 3.0 * p1 - 3.0 * p2 + p3) * t2);
+    return 0.5 * (2.0 * p1 + (-p0 + p2) * t + (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * t2 + (-p0 + 3.0 * p1 - 3.0 * p2 + p3) * t3);
 }
 fragment float4 sc_f(VO in [[stage_in]], constant SCU& u [[buffer(0)]], constant float* sp [[buffer(1)]],
                      constant float* wv [[buffer(2)]]) {
@@ -134,14 +180,18 @@ fragment float4 sc_f(VO in [[stage_in]], constant SCU& u [[buffer(0)]], constant
             colorY = v;
         }
     } else if (shape == 2) {
-        // 波形
-        float f = uv.x * 511.0;
-        int i = int(floor(f));
-        float s = mix(wv[i], wv[min(i + 1, 511)], fract(f));
+        // 波形：前半の点を使う。点のあいだは曲線でつなぎ、線の太さは傾きを入れて見た目の太さにする
+        int nw = max(int(u.c.y + 0.5), 4);
+        float span = float(nw / 2 - 1);
+        float dv;
+        float s = waveAt(wv, saturate(uv.x) * span, nw, dv);
         float y = 0.5 - s * 0.5 * hgt;
         float w = 0.002 + th * 0.015;
-        k = 1.0 - smoothstep(w, w + fwidth(uv.y) * 1.5, abs(uv.y - y));
-        if (mirror) k = max(k, 1.0 - smoothstep(w, w + fwidth(uv.y) * 1.5, abs(uv.y - (1.0 - y))));
+        float dydx = dv * span * 0.5 * hgt;
+        float fac = sqrt(1.0 + pow(dydx / max(A, 1e-3), 2.0));
+        float aa = fwidth(uv.y) * 1.5;
+        k = 1.0 - smoothstep(w * fac, (w + aa) * fac, abs(uv.y - y));
+        if (mirror) k = max(k, 1.0 - smoothstep(w * fac, (w + aa) * fac, abs(uv.y - (1.0 - y))));
         colorY = abs(s);
     } else {
         // 円：まわりに放射状のスペクトラム（3）・円の波形（4）
@@ -159,9 +209,14 @@ fragment float4 sc_f(VO in [[stage_in]], constant SCU& u [[buffer(0)]], constant
             k = (fx > gap && fx < 1.0 - gap && r > R && r < R + v + 0.004) ? 1.0 : 0.0;
             colorY = (r - R) / max(hgt * 0.35, 1e-3);
         } else {
-            float f = ang * 511.0;
-            int i = int(floor(f));
-            float s = mix(wv[i], wv[min(i + 1, 511)], fract(f));
+            // 一周でつながるように：後半（a で 0→1）と前半を、重みを変えながら足す（0 と 1 で同じ点になる）
+            int nw = max(int(u.c.y + 0.5), 4);
+            float L = float(nw / 2);
+            float a = ang, d0, d1;
+            float s0 = waveAt(wv, L + a * (L - 1.0), nw, d0);
+            float s1 = waveAt(wv, a * (L - 1.0), nw, d1);
+            float wt = smoothstep(0.0, 1.0, a);
+            float s = mix(s0, s1, wt) * (1.0 + 0.5 * wt * (1.0 - wt));
             float target = R + s * 0.12 * hgt;
             float w = 0.002 + th * 0.012;
             k = 1.0 - smoothstep(w, w + fwidth(r) * 1.5, abs(r - target));
@@ -169,7 +224,8 @@ fragment float4 sc_f(VO in [[stage_in]], constant SCU& u [[buffer(0)]], constant
         }
     }
     int cm = int(u.b.x + 0.5);
-    float3 col = cm == 1 ? scHue(colorX * 0.8) : (cm == 2 ? scPal(u.pal, u.palCount, saturate(colorY)) : u.color.rgb);
+    // 虹色：円は一周で色もつながるように、色相を一回りさせる
+    float3 col = cm == 1 ? scHue(colorX * (shape >= 3 && !mirror ? 1.0 : 0.8)) : (cm == 2 ? scPal(u.pal, u.palCount, saturate(colorY)) : u.color.rgb);
     float a = saturate(k);
     return float4(col * a * u.b.z, a);
 }
@@ -195,21 +251,41 @@ final class AudioScopeSim {
         return try! dev.makeRenderPipelineState(descriptor: d)
     }()
     private var bands = [Float](repeating: 0, count: SpectrumAnalyzer.bands)
+    private var wave = [Float](repeating: 0, count: SpectrumAnalyzer.wavePoints)
+    private let analyzer = SpectrumAnalyzer()
     /// テスト用：音の代わりに使う値
     static var testScope: (spectrum: [Float], wave: [Float])?
 
     func render(_ e: Effect, into dst: MTLTexture, dt: Double, now: Double, stack: EffectStack, cb: MTLCommandBuffer) {
         func v(_ i: Int) -> Float { Float(e.value(i, at: now, beat: stack.beat, origin: stack.origin)) }
-        var (sp, wv) = Self.testScope ?? AudioReactive.shared.scope()
+        let nW = SpectrumAnalyzer.wavePoints
+        var sp: [Float], wv: [Float]
+        if let t = Self.testScope {
+            sp = t.spectrum
+            // テストの波形は長さが違ってもよい（引き伸ばして使う）
+            wv = (0..<nW).map { j in t.wave.isEmpty ? 0 : t.wave[j * t.wave.count / nW] }
+        } else if let s = AudioReactive.shared.scopeSamples(count: SpectrumAnalyzer.needSamples) {
+            (sp, wv) = analyzer.process(s.samples, sampleRate: s.rate, autoGain: s.autoGain)
+        } else {
+            sp = []; wv = []
+        }
         if sp.count != SpectrumAnalyzer.bands { sp = [Float](repeating: 0, count: SpectrumAnalyzer.bands) }
-        if wv.count != 512 { wv = [Float](repeating: 0, count: 512) }
-        // なめらかさ：上がるのはすぐ、下がるのはゆっくり
-        let fall = Float(pow(0.02 + 0.97 * Double(min(max(v(6), 0), 1)), max(dt, 1.0 / 60) * 60 * 0.15))
-        for i in bands.indices { bands[i] = max(sp[i], bands[i] * (dt > 0 ? fall : 1)) }
+        if wv.count != nW { wv = [Float](repeating: 0, count: nW) }
+        let smooth = Double(min(max(v(6), 0), 1))
+        let frames = max(dt, 1.0 / 120) * 60
+        // なめらかさ：帯は、上がるのは速め・下がるのはゆっくり。波形は前の形へ少しずつ寄せる
+        let fall = Float(pow(0.02 + 0.97 * smooth, frames * 0.15))
+        let rise = Float(1 - pow(0.75 * smooth, frames))
+        let follow = Float(1 - pow(0.8 * smooth, frames))
+        let first = dt <= 0
+        for i in bands.indices {
+            bands[i] = first ? sp[i] : (sp[i] > bands[i] ? bands[i] + (sp[i] - bands[i]) * rise : max(sp[i], bands[i] * fall))
+        }
+        for i in wave.indices { wave[i] = first ? wv[i] : wave[i] + (wv[i] - wave[i]) * follow }
         var u = ScopeUniforms()
         u.a = SIMD4(v(0).rounded(), v(1).rounded(), v(2), v(3))
         u.b = SIMD4(v(4).rounded(), v(5), v(7), v(8))
-        u.c = SIMD4(Float(dst.width) / Float(max(dst.height, 1)), 0, 0, 0)
+        u.c = SIMD4(Float(dst.width) / Float(max(dst.height, 1)), Float(nW), 0, 0)
         u.color = e.color.simd
         let p = (e.palette.isEmpty ? [RGB.black, RGB.white] : Array(e.palette.prefix(8))).map(\.simd)
         func at(_ i: Int) -> SIMD4<Float> { i < p.count ? p[i] : p[p.count - 1] }
@@ -224,7 +300,7 @@ final class AudioScopeSim {
         enc.setRenderPipelineState(Self.pipe)
         enc.setFragmentBytes(&u, length: MemoryLayout<ScopeUniforms>.stride, index: 0)
         bands.withUnsafeBytes { enc.setFragmentBytes($0.baseAddress!, length: $0.count, index: 1) }
-        wv.withUnsafeBytes { enc.setFragmentBytes($0.baseAddress!, length: $0.count, index: 2) }
+        wave.withUnsafeBytes { enc.setFragmentBytes($0.baseAddress!, length: $0.count, index: 2) }
         enc.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
         enc.endEncoding()
     }

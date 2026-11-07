@@ -294,12 +294,27 @@ struct SceneEditBanner: View {
                     Label("編集を終える", systemImage: "xmark")
                 }
             }
-            .controlSize(.small)
+            .buttonStyle(BannerButtonStyle())
             .foregroundStyle(.black)
             .padding(.horizontal, 10)
             .frame(height: 30)
             .background(RoundedRectangle(cornerRadius: 6).fill(Color.orange))
         }
+    }
+}
+
+/// オレンジの帯の上のボタン：暗い地に白い字（帯の色の上でも読める）
+struct BannerButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 11, weight: .semibold))
+            .labelStyle(.titleAndIcon)
+            .foregroundStyle(.white)
+            .padding(.horizontal, 9)
+            .frame(height: 22)
+            .background(RoundedRectangle(cornerRadius: 5)
+                .fill(Color.black.opacity(configuration.isPressed ? 0.9 : 0.72)))
+            .contentShape(Rectangle())
     }
 }
 
@@ -319,7 +334,7 @@ struct SceneCompParams: View {
                     AnimField(label: "不透明度", value: $draft.masterOpacity, range: 0...1, perPoint: 0.003,
                               defaultValue: 1, showsBar: true, format: { String(format: "%.0f%%", $0 * 100) },
                               key: .opacity, target: draft)
-                        .frame(height: UI.rowHeight)
+                        .frame(minHeight: UI.rowHeight)
                 }
             }
             .paramsFrame()

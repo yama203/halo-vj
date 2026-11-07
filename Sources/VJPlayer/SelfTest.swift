@@ -3450,11 +3450,39 @@ enum SelfTest {
             o.getBytes(&q, bytesPerRow: W * 4, from: MTLRegionMake2D(0, 0, W, H), mipmapLevel: 0)
             return stride(from: 3, to: q.count, by: 4).map { q[$0] }
         }
-        let bars = alpha(0), wave = alpha(2), circle = alpha(3)
+        let bars = alpha(0), wave = alpha(2), circle = alpha(3), circleWave = alpha(4)
         func lit(_ a: [UInt8], _ x0: Int, _ x1: Int) -> Int { var n = 0; for y in 0..<H { for x in x0..<x1 where a[y * W + x] > 128 { n += 1 } }; return n }
         AudioScopeSim.testScope = nil
         check(lit(bars, 0, 70) > 500 && lit(bars, 90, 160) == 0 && lit(wave, 0, 160) > 100 && lit(circle, 0, 160) > 50,
               "音の形：棒（大きい帯だけ伸びる）・波形・円が描ける（まわりは透明）")
+        // 円の波形：一周でつながる（真下に切れ目が無い）。真下のまわりの列に線がある
+        let bottom = (0..<H).filter { y in (W / 2 - 1...W / 2 + 1).contains { circleWave[y * W + $0] > 100 } }
+        check(bottom.contains { $0 > H / 2 }, "音の形：円の波形は一周でつながる（真下も途切れない）")
+        // 波形の頭をそろえる：同じ音を少しずらして切り出しても、ほぼ同じ形になる（跳ねない）
+        let an = SpectrumAnalyzer()
+        let tone: [Float] = (0..<8000).map { (i: Int) -> Float in
+            let t = Double(i) / 48000
+            let v: Double = 0.5 * sin(2 * .pi * 220 * t) + 0.2 * sin(2 * .pi * 660 * t)
+            return Float(v)
+        }
+        let w1 = an.process(Array(tone[0..<4096]), sampleRate: 48000, autoGain: true).wave
+        let w2 = an.process(Array(tone[137..<(137 + 4096)]), sampleRate: 48000, autoGain: true).wave
+        let diff = zip(w1.prefix(512), w2.prefix(512)).map { abs($0 - $1) }.max() ?? 9
+        check(diff < 0.1, "音の形：波形はオシロスコープのように頭がそろう（ずらして切っても差 \(String(format: "%.3f", diff))）")
+        // 届くかたまりの間も「今」へ少しずつ進む（100 ms ごとに届いても、描くたびに動く）
+        let ar = AudioReactive.shared
+        let saved = ar.scopeLock.withLock { (ar.scopeRing, ar.scopeWritten, ar.scopeLastCount, ar.scopeLastTime, ar.scopeRate) }
+        let t0 = CACurrentMediaTime()
+        ar.scopeLock.withLock {
+            for i in 0..<ar.scopeRing.count { ar.scopeRing[i] = Float(i) }
+            ar.scopeWritten = ar.scopeRing.count; ar.scopeLastCount = 4800; ar.scopeLastTime = t0; ar.scopeRate = 48000
+        }
+        let a1 = ar.scopeSamples(count: 16, now: t0)?.samples.last ?? -1
+        let a2 = ar.scopeSamples(count: 16, now: t0 + 1.0 / 60)?.samples.last ?? -1
+        let a3 = ar.scopeSamples(count: 16, now: t0 + 0.2)?.samples.last ?? -1
+        ar.scopeLock.withLock { (ar.scopeRing, ar.scopeWritten, ar.scopeLastCount, ar.scopeLastTime, ar.scopeRate) = saved }
+        check(abs((a2 - a1) - 800) < 2 && a3 == Float(ar.scopeRing.count - 1),
+              "音の形：届くかたまりの間も、描くたびに「今」へ進む（1/60 秒で \(Int(a2 - a1)) 個。届いた分の先へは行かない）")
     }
 
     /// HAP：Snappy・区切りの読み方と、自前で書いた HAP の動画（.mov）を読んで色が合うか
@@ -4263,9 +4291,10 @@ enum SelfTest {
                 let v: Double = 0.95 - d / 160 + 0.15 * sin(d * 0.4)
                 sp.append(Float(max(0, v)))
             }
-            for i in 0..<512 {
+            // 本物の音に近い波形（2048 個ぶん。続いている音）
+            for i in 0..<SpectrumAnalyzer.wavePoints {
                 let t = Double(i) / 512
-                let v: Double = 0.6 * sin(t * 6 * .pi) + 0.3 * sin(t * 31 * .pi)
+                let v: Double = 0.6 * sin(t * 6 * .pi) + 0.3 * sin(t * 31 * .pi + 1)
                 wv.append(Float(v))
             }
             AudioScopeSim.testScope = (sp, wv)

@@ -16,8 +16,11 @@ struct AnimValueField: View {
     var origin: Double = 0
     /// アニメーションの範囲を戻すときの値
     let animDefault: ClosedRange<Double>
+    /// 動かし方のボタンの右に並べるもの（不透明度の「映像を出さない」など）。開いた設定は、これも含めた幅いっぱいに出す
+    var trailing: AnyView? = nil
     @EnvironmentObject var engine: Engine
-    @State private var expanded = false
+    /// 画面確認用：VJ_ANIM_EXPANDED を付けると、はじめから開いて描く
+    @State private var expanded = ProcessInfo.processInfo.environment["VJ_ANIM_EXPANDED"] != nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -37,6 +40,7 @@ struct AnimValueField: View {
                 }
                 .buttonStyle(.plain)
                 .help("動かし方（固定／秒／BPM）")
+                if let trailing { trailing }
             }
             .frame(height: UI.rowHeight)
             if expanded {
@@ -64,12 +68,13 @@ struct AnimField<Target: ObservableObject & Animatable>: View {
     var style = ValueStyle.plain
     let key: ParamKey
     @ObservedObject var target: Target
+    var trailing: AnyView? = nil
 
     var body: some View {
         AnimValueField(label: label, value: $value, range: range, perPoint: perPoint, defaultValue: defaultValue,
                        showsBar: showsBar, format: format, style: style,
                        anim: Binding(get: { target.anim(key) }, set: { target.setAnim(key, $0) }),
-                       origin: target.animOrigin, animDefault: key.defaultRange)
+                       origin: target.animOrigin, animDefault: key.defaultRange, trailing: trailing)
     }
 }
 

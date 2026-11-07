@@ -236,24 +236,20 @@ private struct PadFramesKey: PreferenceKey {
 struct FXPadBar: View {
     @EnvironmentObject var engine: Engine
     @StateObject private var drag = PadDragState()
+    /// パネルの名前が上に無い所（いつもの並び）だけ、左に小さな見出しを出す
+    var showsTitle = false
 
     var body: some View {
         HStack(spacing: 8) {
-            VStack(alignment: .leading, spacing: 2) {
-                Label("FX パッド", systemImage: "bolt.fill")
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(.purple)
-                Text("押している間だけ")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
-            }
-            .frame(width: ClipGrid.leftWidth - 8, alignment: .leading)
-            .contextMenu {
-                Button(LayoutManager.shared.isDetached(.pads) ? "メインのウィンドウに戻す" : "別ウィンドウに出す") {
-                    LayoutManager.shared.toggleDetached(.pads)
+            if showsTitle {
+                VStack(spacing: 2) {
+                    Image(systemName: "bolt.fill").font(.system(size: 14, weight: .bold))
+                    Text("FX").font(.system(size: 10, weight: .bold))
                 }
+                .foregroundStyle(.purple)
+                .frame(width: 26)
+                .help("FX パッド：押している間だけ、出力のいちばん最後にエフェクトがかかる（シーン・コンポジションとは別）。「エフェクト」パネルからパッドへドラッグして登録。⌘ドラッグで並び替え。右クリックで設定・名前・キー・空にする・削除")
             }
-            .help("押している間だけ、出力のいちばん最後にエフェクトがかかる（シーン・コンポジションとは別）。「エフェクト」パネルからパッドへドラッグして登録。⌘ドラッグで並び替え。右クリックで設定・名前・キー・空にする・削除")
             ScrollView(.horizontal) {
                 HStack(spacing: 6) {
                     ForEach(engine.pads) { p in

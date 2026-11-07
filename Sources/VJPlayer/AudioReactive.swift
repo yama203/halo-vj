@@ -157,9 +157,13 @@ final class AudioReactive: ObservableObject {
     private var analyzer = AudioAnalyzer()
     /// 音の形（スペクトラム・波形）
     let scopeLock = NSLock()
-    var scopeSpectrum = [Float](repeating: 0, count: SpectrumAnalyzer.bands)
-    var scopeWave = [Float](repeating: 0, count: 512)
-    private let spectrum = SpectrumAnalyzer()
+    /// 届いた音（モノラル）の最近の分。描くときに「今」の所を切り出す（届くかたまりは 20〜100 ms ごとなので、そのままだと動きがカクつく）
+    var scopeRing = [Float](repeating: 0, count: 16384)
+    /// これまでに届いた音の数・最後のかたまりの長さ・届いた時刻・1 秒の数
+    var scopeWritten = 0
+    var scopeLastCount = 0
+    var scopeLastTime = 0.0
+    var scopeRate = 48000.0
     /// BPM の自動検出用：立ち上がりの強さの並び（最近 12 秒）と、1 秒の数・最後の時刻
     private var onsetRing: [Double] = []
     private var onsetRate = 48000.0 / Double(AudioAnalyzer.onsetHop)
@@ -234,8 +238,15 @@ final class AudioReactive: ObservableObject {
         let out = mono.withUnsafeBufferPointer {
             analyzer.process($0.baseAddress!, count: n, sampleRate: buf.format.sampleRate, time: time, release: rel, autoGain: auto)
         }
-        let sc = spectrum.process(mono, sampleRate: buf.format.sampleRate, autoGain: auto)
-        scopeLock.withLock { scopeSpectrum = sc.spectrum; scopeWave = sc.wave }
+        let now = CACurrentMediaTime()
+        scopeLock.withLock {
+            let N = scopeRing.count
+            for (k, v) in mono.suffix(N).enumerated() { scopeRing[(scopeWritten + k) % N] = v }
+            scopeWritten += min(n, N)
+            scopeLastCount = n
+            scopeLastTime = now
+            scopeRate = buf.format.sampleRate
+        }
         let onset = analyzer.lastOnset
         let newOnsets = analyzer.onsets
         analyzer.onsets.removeAll(keepingCapacity: true)
