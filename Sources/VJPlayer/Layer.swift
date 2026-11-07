@@ -2,6 +2,32 @@ import Foundation
 import QuartzCore
 
 /// レイヤーの重ね方
+/// クリップの切り替え方（新しいクリップが、どう現れるか）
+enum Transition: Int, CaseIterable, Codable, Identifiable {
+    case crossfade, wipe, circle, noise, luma, glitch
+    var id: Int { rawValue }
+    var label: String {
+        switch self {
+        case .crossfade: "クロス"
+        case .wipe: "ワイプ"
+        case .circle: "円"
+        case .noise: "ノイズ"
+        case .luma: "明るさ"
+        case .glitch: "グリッチ"
+        }
+    }
+    var help: String {
+        switch self {
+        case .crossfade: "だんだん重ねて入れ替わる"
+        case .wipe: "左から右へ、ふちをぼかして拭き取るように"
+        case .circle: "真ん中から円が広がって"
+        case .noise: "ノイズの模様で、ところどころから溶けるように"
+        case .luma: "新しいクリップの明るい所から順に現れる"
+        case .glitch: "ブロックが乱れながら、ばらばらに入れ替わる"
+        }
+    }
+}
+
 enum BlendMode: Int, CaseIterable, Codable, Identifiable {
     case normal, add, screen, multiply
     /// 特殊合成：下の絵を読んで、シェーダーで混ぜる（設定はレイヤーの blendFX）
@@ -192,6 +218,8 @@ final class Layer: ObservableObject, Identifiable, Animatable, EffectHolder {
 
     /// クリップを切り替えるときのクロスフェード時間（秒）。0 ならカット
     @Published var fadeTime: Double = 0 { didSet { onChanged?() } }
+    /// クリップを切り替えるときの切り替え方（クロスフェード・ワイプ など）
+    @Published var transition: Transition = .crossfade { didSet { onChanged?() } }
 
     let transform = TransformParams()
     /// 特殊合成（オーバードライブ加算など）の値。重ね方が特殊合成のときに使う

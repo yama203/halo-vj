@@ -77,6 +77,11 @@ struct AudioAnalyzer {
     static let floor = 0.0005
     private var lowAvg = 0.0
     var lastOnset = -10.0
+    /// BPM の自動検出用：256 サンプルごとの立ち上がりの強さ（読んだら空にする）
+    var onsets: [Double] = []
+    private var subLow = 0.0, subAll = 0.0, subN = 0
+    private var prevLowE = 1e-6, prevAllE = 1e-6
+    static let onsetHop = 256
 
     /// samples（モノラル）を読んで、0〜1 の 4 つの値（音量・低音・中音・高音）を返す。アタックは lastOnset に入る
     mutating func process(_ samples: UnsafePointer<Float>, count n: Int, sampleRate: Double, time: Double,
@@ -92,6 +97,14 @@ struct AudioAnalyzer {
             let x = Double(samples[i])
             let l = low.run(x), m = mid.run(x), h = high.run(x)
             s[0] += x * x; s[1] += l * l; s[2] += m * m; s[3] += h * h
+            // 立ち上がりの強さ：低音と全体の大きさが、前のかたまりよりどれだけ上がったか（対数で）
+            subLow += l * l; subAll += x * x; subN += 1
+            if subN == Self.onsetHop {
+                let le = subLow / Double(subN) + 1e-7, ae = subAll / Double(subN) + 1e-7
+                onsets.append(max(log(le) - log(prevLowE), 0) + 0.5 * max(log(ae) - log(prevAllE), 0))
+                prevLowE = le; prevAllE = ae
+                subLow = 0; subAll = 0; subN = 0
+            }
         }
         let dt = Double(n) / max(sampleRate, 1)
         let rms = s.map { ($0 / Double(max(n, 1))).squareRoot() }
@@ -142,6 +155,15 @@ final class AudioReactive: ObservableObject {
     private var startedAt = -10.0
     @Published private(set) var deviceName = ""
     private var analyzer = AudioAnalyzer()
+    /// 音の形（スペクトラム・波形）
+    let scopeLock = NSLock()
+    var scopeSpectrum = [Float](repeating: 0, count: SpectrumAnalyzer.bands)
+    var scopeWave = [Float](repeating: 0, count: 512)
+    private let spectrum = SpectrumAnalyzer()
+    /// BPM の自動検出用：立ち上がりの強さの並び（最近 12 秒）と、1 秒の数・最後の時刻
+    private var onsetRing: [Double] = []
+    private var onsetRate = 48000.0 / Double(AudioAnalyzer.onsetHop)
+    private var onsetEnd = 0.0
     private var mixerListener: UUID?
     private var inputEngine: AVAudioEngine?
     /// テスト用：値を決め打ちにする（音量・低音・中音・高音・アタック）
@@ -181,6 +203,14 @@ final class AudioReactive: ObservableObject {
 
     func setOverrideForTest(_ v: [Double]?) { lock.withLock { override = v } }
 
+    /// BPM の自動検出用：最近 seconds 秒の立ち上がりの強さと、1 秒の数・最後の時刻
+    func onsetWindow(seconds: Double) -> ([Double], Double, Double) {
+        lock.withLock {
+            let n = min(onsetRing.count, Int(onsetRate * seconds))
+            return (Array(onsetRing.suffix(n)), onsetRate, onsetEnd)
+        }
+    }
+
     /// 音の届き方（設定の画面に出す）
     enum Health: Equatable { case off, noBuffers, allZero, quiet(Double), ok(Double) }
     func health(at t: Double = CACurrentMediaTime()) -> Health {
@@ -204,7 +234,12 @@ final class AudioReactive: ObservableObject {
         let out = mono.withUnsafeBufferPointer {
             analyzer.process($0.baseAddress!, count: n, sampleRate: buf.format.sampleRate, time: time, release: rel, autoGain: auto)
         }
+        let sc = spectrum.process(mono, sampleRate: buf.format.sampleRate, autoGain: auto)
+        scopeLock.withLock { scopeSpectrum = sc.spectrum; scopeWave = sc.wave }
         let onset = analyzer.lastOnset
+        let newOnsets = analyzer.onsets
+        analyzer.onsets.removeAll(keepingCapacity: true)
+        let rate = buf.format.sampleRate / Double(AudioAnalyzer.onsetHop)
         var pk: Float = 0
         for i in 0..<n { pk = max(pk, abs(mono[i])) }
         lock.withLock {
@@ -214,6 +249,11 @@ final class AudioReactive: ObservableObject {
             rawPeak = max(Double(pk), rawPeak * 0.9)
             if pk > 0 { lastNonZero = time }
             buffers += 1
+            if abs(onsetRate - rate) > 0.01 { onsetRing.removeAll(); onsetRate = rate }
+            onsetRing.append(contentsOf: newOnsets)
+            let keep = Int(rate * 12)
+            if onsetRing.count > keep { onsetRing.removeFirst(onsetRing.count - keep) }
+            onsetEnd = time + Double(n) / buf.format.sampleRate
         }
     }
 

@@ -22,7 +22,7 @@ enum ParamKey: String, Codable, CaseIterable {
 
 /// 何に合わせて動かすか
 enum AnimMode: Int, Codable, CaseIterable, Identifiable {
-    case off, time, beat, audio
+    case off, time, beat, audio, osc
     var id: Int { rawValue }
     var label: String {
         switch self {
@@ -30,6 +30,7 @@ enum AnimMode: Int, Codable, CaseIterable, Identifiable {
         case .time: "秒"
         case .beat: "BPM"
         case .audio: "音"
+        case .osc: "OSC・MIDI"
         }
     }
 }
@@ -65,8 +66,10 @@ struct ParamAnim: Codable, Equatable {
     var start: Double = 0
     /// 音モード：音のどの部分で、どれだけの感度で動かすか（無ければ音量・感度 100%）
     var audio: AudioLink?
+    /// OSC モード：どのアドレスの値で動かすか
+    var osc: OSCLink?
 
-    enum CodingKeys: String, CodingKey { case mode, motion, seconds, beats, lo, hi, seed, audio }
+    enum CodingKeys: String, CodingKey { case mode, motion, seconds, beats, lo, hi, seed, audio, osc }
 
     init(key: ParamKey) {
         lo = key.defaultRange.lowerBound
@@ -102,6 +105,12 @@ struct ParamAnim: Codable, Equatable {
             var k = min(max(AudioReactive.shared.level(a.band, at: t) * a.gain, 0), 1)
             if motion == .backward { k = 1 - k }
             return lo + (hi - lo) * k
+        case .osc:
+            // そのアドレスの値（0〜1）で、から〜まで の間。まだ届いていなければ base のまま
+            guard let a = osc?.address, !a.isEmpty, let v = OSCHub.shared.value(a) else { return base }
+            var k = min(max(v, 0), 1)
+            if motion == .backward { k = 1 - k }
+            return lo + (hi - lo) * k
         }
         let cycle = floor(phase)
         let f = phase - cycle
@@ -135,6 +144,7 @@ struct ParamAnim: Codable, Equatable {
         case .time: return String(format: "%@ %.1f秒", motion.label, seconds)
         case .beat: return "\(motion.label) \(Self.beatsLabel(beats))"
         case .audio: return "音：" + (audio ?? AudioLink()).band.label
+        case .osc: return "OSC " + (osc?.address ?? "")
         }
     }
 

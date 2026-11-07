@@ -13,6 +13,10 @@ struct RenderParams {
     var compMaster: Float = 1
     /// 出力の解像度・フレームレート（解像度を決めていれば、その大きさで合成する）
     var format = OutputFormat()
+    /// 出力の分割（使わないときは enabled = false）
+    var outputMap = OutputMap()
+    /// 合成の縦横比（出力の分割で、出力の画面と合成の形が違っても、合成はこの形で作る）
+    var compAspect: Double = 16.0 / 9
 }
 
 /// 表示中の映像フレーム。GPU が描画し終わるまで参照を持ち続けるための入れ物。
@@ -143,6 +147,14 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
         syncRenderState()
     }
 
+    /// BPM の自動検出用：今の時計
+    func beatClockForEditing() -> BeatClock { beatClock }
+    /// BPM の自動検出用：時計を変える（保存・元に戻すには数えない）
+    func setBeatClockQuietly(_ c: BeatClock) {
+        beatClock = c
+        bpmChanged()
+    }
+
     /// 今を 1 拍目（小節の頭）にする
     func resyncBeat() {
         beatClock.resync(at: CACurrentMediaTime())
@@ -166,6 +178,7 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
     @Published var pads: [FXPad] = []
     /// 押しているパッドと、押した時刻
     @Published var heldPads: [UUID: Double] = [:]
+    func isPadHeld(_ id: UUID) -> Bool { heldPads[id] != nil }
     /// 離して消えている途中のパッド
     @Published var releasingPads: [UUID: PadRelease] = [:]
     /// パッドのエフェクトの時間の基準（押した時刻。消えている途中に押し直しても変えない）
@@ -312,6 +325,24 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
 
     private(set) var homographyInverse = matrix_identity_float3x3
 
+    /// 照明（Art-Net / DMX）の灯体（プロジェクトに保存する）
+    @Published var dmxMap = DMXMap() {
+        didSet {
+            guard dmxMap != oldValue else { return }
+            ArtNetOutput.shared.setMap(dmxMap)
+            scheduleSave()
+        }
+    }
+
+    /// 出力の分割（プロジェクトに保存する）
+    @Published var outputMap = OutputMap() {
+        didSet {
+            guard outputMap != oldValue else { return }
+            syncRenderState()
+            scheduleSave()
+        }
+    }
+
     /// 描画スレッドに渡す状態。メインスレッドで変更があるたびに作り直す（renderLock の中で触る）
     struct RenderState {
         struct LayerState {
@@ -341,6 +372,8 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
             /// 静止画のクリップなら、その絵
             var still: MTLTexture?
             var outgoingStill: MTLTexture?
+            /// 切り替え方
+            var transition = Transition.crossfade
         }
         enum Preview {
             case none
@@ -356,6 +389,8 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
         var layers: [LayerState] = []
         var homographyInverse = matrix_identity_float3x3
         var testPattern = false
+        var outputMap = OutputMap()
+        var compAspect: Double = 16.0 / 9
         var preview = Preview.none
         var previewTransform = AnimTransform()
         var masterOpacity: Float = 1
@@ -416,7 +451,10 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
     /// false ならディスクに保存も復元もしない（セルフテスト用）
     private let persistent: Bool
     private var saveWork: DispatchWorkItem?
-    private var isRestoring = false
+    private(set) var isRestoring = false
+    /// 元に戻す・やり直す
+    let undoHistory = UndoHistory()
+    func setRestoring(_ v: Bool) { isRestoring = v }
 
     /// 選択中レイヤーで再生中のクリップ
     var selectedSlot: ClipSlot? { activeByLayer[selectedLayer].flatMap { slots[$0] } }
@@ -439,6 +477,7 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
         }
         updateHomography()
         syncRenderState()
+        resetUndo()
     }
 
     private func wire(_ layer: Layer) {
@@ -991,7 +1030,7 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
         }
     }
 
-    private func setSlot(_ index: Int, _ slot: ClipSlot?) {
+    func setSlot(_ index: Int, _ slot: ClipSlot?) {
         let r = layerOf(index)
         if activeByLayer[r] == index { stopLayer(r) }
         if outgoing[r] == index { finishCrossfade(r) }
@@ -1048,13 +1087,16 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
                                               layerEffects: EffectStack(effects: l.effects, beat: beatClock),
                                               crossfade: crossfades[l.index],
                                               still: slot?.stillTexture,
-                                              outgoingStill: out?.stillTexture)
+                                              outgoingStill: out?.stillTexture,
+                                              transition: l.transition)
             },
             homographyInverse: homographyInverse,
             testPattern: testPattern)
         var state = st
         (state.preview, state.previewTransform) = syncPreview()
         state.masterOpacity = Float(masterOpacity)
+        state.outputMap = outputMap
+        state.compAspect = Double(outputAspect)
         state.blackoutFade = blackoutFade
         state.compTransform = compTransform.animValue
         state.masterOpacityAnim = anims[.opacity].flatMap { $0.isOn ? $0 : nil }
@@ -1448,9 +1490,11 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
         let clipT = l.transform.at(now, beat: beat)
         var draws: [LayerDraw] = []
         let x = l.outgoing == nil ? 1 : l.crossfade.value(at: now)
+        // 切り替え方：クロスフェード以外は、消えていく絵をそのまま残し、新しい絵を形（ワイプ・円 など）で出していく
+        let shaped = l.outgoing != nil && l.transition != .crossfade && blend == .normal && frame != nil && outgoingFrame != nil
         if l.outgoing != nil, !l.outgoingMuted, let f = outgoingFrame {
             // 通常の重ね方なら下の絵はそのまま残し、上に新しい絵を x で重ねる（途中で暗くならない）
-            let k: Float = blend == .normal && frame != nil ? 1 : 1 - x
+            let k: Float = (blend == .normal && frame != nil) || shaped ? 1 : 1 - x
             if k > 0.001 {
                 draws.append(LayerDraw(texture: f.texture, opacity: k, blend: blend,
                                        transform: l.outgoingTransform.at(now, beat: beat), layerTransform: layerT,
@@ -1458,9 +1502,15 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
             }
         }
         if l.slot != nil, !l.clipMuted, let f = frame, x > 0.001, clipT.opacity > 0.001 {
-            draws.append(LayerDraw(texture: f.texture, opacity: x, blend: blend, transform: clipT,
+            var fx = l.clipEffects
+            if shaped {
+                var m = Effect(kind: .transitionMask)
+                m.values = [Double(l.transition.rawValue), Double(x), 0.08, Double(r * 37 + 11)]
+                fx.effects.append(m)
+            }
+            draws.append(LayerDraw(texture: f.texture, opacity: shaped ? 1 : x, blend: blend, transform: clipT,
                                    layerTransform: layerT, compTransform: comp, holder: f,
-                                   effects: l.clipEffects, effectKey: r * 2))
+                                   effects: fx, effectKey: r * 2))
         }
         guard !draws.isEmpty else { return nil }
         return LayerGroup(draws: draws, opacity: opacity, blend: blend, effects: l.layerEffects, key: r,
@@ -1470,6 +1520,8 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
     /// コーナーピン・テストパターン・マスター不透明度・ブラックアウト（描画スレッド用）
     /// 描く回数（1 秒あたり。0 = ディスプレイに合わせる）。描画スレッドから
     func targetFPS() -> Double { renderLock.withLock { renderState.format.fps } }
+    /// OSC の送信用：今の BPM の時計（どのスレッドからでも）
+    func beatClockForOSC() -> BeatClock { renderLock.withLock { renderState.beat } }
 
     func renderParams() -> RenderParams {
         let now = CACurrentMediaTime()
@@ -1481,7 +1533,8 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
             return RenderParams(homographyInverse: renderState.homographyInverse,
                                 testPattern: renderState.testPattern,
                                 master: mm * renderState.blackoutFade.value(at: now),
-                                compMaster: mm, format: renderState.format)
+                                compMaster: mm, format: renderState.format,
+                                outputMap: renderState.outputMap, compAspect: renderState.compAspect)
         }
     }
 
@@ -1601,6 +1654,8 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
         var blendFX: Effect?
         /// レイヤーに付けた名前（シーンには入れない）
         var title: String?
+        /// 切り替え方（無ければクロスフェード）
+        var transition: Int?
     }
 
     struct SavedDeck: Codable {
@@ -1616,6 +1671,10 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
         var slots: [SavedSlot?]
         var layers: [SavedLayer]?
         var corners: [[Float]]
+        /// 出力の分割（古い保存データには無い）
+        var outputMap: OutputMap?
+        /// 照明（Art-Net / DMX）
+        var dmxMap: DMXMap?
         var audioDeviceUID: String?
         var masterOpacity: Double?
         var masterVolume: Double?
@@ -1649,6 +1708,7 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
 
     func scheduleSave() {
         guard !isRestoring else { return }
+        noteUndoChange()
         if !isDirty {
             isDirty = true
             if ProcessInfo.processInfo.environment["VJ_DEBUG_DIRTY"] != nil {
@@ -1708,9 +1768,12 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
                            muted: $0.muted ? true : nil, audioMuted: $0.audioMuted ? true : nil,
                            isAdjustment: $0.isAdjustment ? true : nil,
                            blendFX: $0.blend.isSpecial ? $0.blendFX : nil,
-                           title: $0.title.isEmpty ? nil : $0.title)
+                           title: $0.title.isEmpty ? nil : $0.title,
+                           transition: $0.transition == .crossfade ? nil : $0.transition.rawValue)
             },
             corners: corners.map { [$0.x, $0.y] },
+            outputMap: outputMap.slices.isEmpty && !outputMap.enabled ? nil : outputMap,
+            dmxMap: dmxMap.fixtures.isEmpty ? nil : dmxMap,
             audioDeviceUID: nil,
             masterOpacity: masterOpacity,
             masterVolume: masterVolume,
@@ -1782,12 +1845,15 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
         outputFormat = state.outputFormat ?? OutputFormat()
         masterSpeed = 1
         corners = state.corners.count == 4 ? state.corners.map { SIMD2($0[0], $0[1]) } : Engine.defaultCorners
+        outputMap = state.outputMap ?? OutputMap()
+        dmxMap = state.dmxMap ?? DMXMap()
         for (layer, saved) in zip(layers, state.layers ?? []) {
             layer.opacity = min(max(saved.opacity, 0), 1)
             layer.blend = BlendMode(rawValue: saved.blend) ?? .normal
             layer.volume = min(max(saved.volume, 0), 1)
             saved.transform?.apply(to: layer.transform)
             layer.fadeTime = min(max(saved.fadeTime ?? 0, 0), 10)
+            layer.transition = saved.transition.flatMap(Transition.init(rawValue:)) ?? .crossfade
             layer.anims = Self.decodeAnims(saved.anims)
             layer.effects = saved.effects ?? []
             layer.muted = saved.muted ?? false
@@ -1800,6 +1866,18 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
         for (i, saved) in state.slots.enumerated() {
             let d = i / savedGrid, r = (i % savedGrid) / savedColumns, c = i % savedColumns
             guard d < decks.count, r < layers.count, c < columns, let saved else { continue }
+            setSlot(slotIndex(deck: d, layer: r, column: c), makeSlot(saved, baseDir: baseDir))
+        }
+        currentDeck = min(max(state.currentDeck ?? 0, 0), decks.count - 1)
+        // 前に作ったクリップのキュー・シーン（目印が無い）は、場所で探して目印を覚える
+        adoptCueClipIDs()
+        adoptSceneClipIDs()
+        syncRenderState()
+        resetUndo()
+    }
+
+    /// 保存したクリップから、クリップを作る
+    func makeSlot(_ saved: SavedSlot, baseDir: URL?) -> ClipSlot {
             // プロジェクトのフォルダからの場所 → 元の場所の順に探す。どちらにも無ければ「見つからない」クリップとして置く
             var url = URL(fileURLWithPath: saved.path)
             if let baseDir, let rel = saved.relPath {
@@ -1810,6 +1888,13 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
             let slot = saved.effectClip == true ? ClipSlot(effects: [], title: saved.title ?? "")
                 : saved.generator.map { ClipSlot(generator: $0) }
                 ?? ClipSlot(url: url, speed: saved.speed, endAction: end, inPoint: saved.inPoint ?? 0, outPoint: saved.outPoint)
+            applySettings(saved, to: slot)
+            if let id = saved.id { slot.id = id }
+            return slot
+    }
+
+    /// 保存したクリップの設定（動画・ジェネレーターの種類以外）を、クリップに入れる
+    func applySettings(_ saved: SavedSlot, to slot: ClipSlot) {
             slot.title = saved.title ?? ""
             slot.posX = saved.x ?? 0
             slot.posY = saved.y ?? 0
@@ -1824,14 +1909,6 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
             slot.effects = saved.effects ?? []
             slot.muted = saved.muted ?? false
             slot.audioMuted = saved.audioMuted ?? false
-            if let id = saved.id { slot.id = id }
-            setSlot(slotIndex(deck: d, layer: r, column: c), slot)
-        }
-        currentDeck = min(max(state.currentDeck ?? 0, 0), decks.count - 1)
-        // 前に作ったクリップのキュー・シーン（目印が無い）は、場所で探して目印を覚える
-        adoptCueClipIDs()
-        adoptSceneClipIDs()
-        syncRenderState()
     }
 
     // MARK: - プロジェクトファイル（.halovj。名前を変える前の .vjproj も開ける）

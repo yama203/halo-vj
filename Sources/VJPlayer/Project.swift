@@ -123,7 +123,7 @@ enum ProjectMenu {
         engine.relinkSlot(index, to: url)
     }
 
-    private static func showError(_ title: String, _ error: Error) {
+    static func showError(_ title: String, _ error: Error) {
         let alert = NSAlert()
         alert.messageText = title
         alert.informativeText = error.localizedDescription

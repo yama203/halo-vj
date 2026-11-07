@@ -1,6 +1,9 @@
 import AVFoundation
 import AppKit
 import Metal
+import CoreMIDI
+import Network
+import Syphon
 import MetalKit
 import QuartzCore
 import simd
@@ -422,6 +425,42 @@ enum SelfTest {
 
         // 19. 音に反応させる
         testAudioReactive(check: check, wait: wait)
+
+        // 20. ほかのアプリとのやりとり（OSC・Syphon）
+        testLink(check: check, wait: wait)
+
+        // 21. MIDI コントローラー・キーの割り当て
+        testControls(check: check, wait: wait)
+
+        // 22. 元に戻す・やり直す
+        testUndo(check: check, wait: wait)
+
+        // 23. BPM の自動検出
+        testBeatDetect(check: check, wait: wait)
+
+        // 24. カメラ・ほかのアプリの映像の置き方
+        testSourceDraw(check: check)
+
+        // 25. 出力の分割
+        testOutputMap(check: check)
+
+        // 26. 切り替え方（トランジション）
+        testTransitions(check: check, wait: wait)
+
+        // 27. HAP の動画
+        testHap(check: check, wait: wait)
+
+        // 28. 音の形
+        testAudioScope(check: check)
+
+        // 29. 素材をまとめて保存
+        testCollect(paths: paths, check: check)
+
+        // 30. 照明（Art-Net / DMX）
+        testArtNet(check: check, wait: wait)
+
+        // 31. NDI（ランタイムがあるときだけ）
+        testNDI(check: check, wait: wait)
 
         let out = AudioOutput.shared.engine.outputNode
         let feeding = AudioOutput.shared.engine.inputConnectionPoint(for: out, inputBus: 0)?.node as? AVAudioMixerNode
@@ -1674,7 +1713,7 @@ enum SelfTest {
             // エフェクトを追加するメニュー：一覧と同じエフェクトが全部ある（ジェネレーター・重ね方の値は無い）。足したものは開いておく
             do {
                 let listed = AddEffectMenuItems.groups.flatMap(\.1)
-                let all = EffectKind.allCases.filter { !$0.isBlend && !$0.isGenerator }
+                let all = EffectKind.allCases.filter { !$0.isBlend && !$0.isGenerator && $0 != .transitionMask }
                 let pad = FXPad()
                 let added = pad.addEffectOpened(.mirror)
                 check(Set(listed) == Set(all) && listed.count == all.count && pad.effects.map(\.kind) == [.mirror]
@@ -3197,6 +3236,747 @@ enum SelfTest {
     }
 
     /// 開発用：ジェネレーターを 1 枚（1280×720、暗い下地）書き出す。かかった GPU 時間も出す
+    /// NDI：自分で出した NDI を探して受け取り、色が合っているか
+    static func testNDI(check: (Bool, String) -> Void, wait: (Double) -> Void) {
+        guard NDIRuntime.available else { print("SKIP NDI：NDI ランタイムが見つからない"); return }
+        print("NDI ランタイム：\(NDIRuntime.libraryPath)（\(NDIRuntime.version)）")
+        let ctx = MetalContext.shared
+        let td = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: 320, height: 180, mipmapped: false)
+        td.usage = [.renderTarget, .shaderRead]
+        td.storageMode = .shared
+        let src = ctx.device.makeTexture(descriptor: td)!
+        var px = [UInt8](repeating: 0, count: 320 * 180 * 4)
+        for i in stride(from: 0, to: px.count, by: 4) { px[i] = 30; px[i + 1] = 60; px[i + 2] = 230; px[i + 3] = 255 }
+        src.replace(region: MTLRegionMake2D(0, 0, 320, 180), mipmapLevel: 0, withBytes: px, bytesPerRow: 320 * 4)
+        let out = NDIOutput.shared
+        out.forTests = true
+        let name = "HaloTest\(Int.random(in: 1000..<9999))"
+        out.name = name
+        out.enabled = true
+        check(out.isOn, "NDI：送り手を作れる")
+        func pump() {
+            if let cb = ctx.queue.makeCommandBuffer() { out.publish(src, cb: cb); cb.commit() }
+            wait(0.03)
+        }
+        var found: String?
+        let t0 = CACurrentMediaTime()
+        while found == nil && CACurrentMediaTime() - t0 < 10 {
+            pump()
+            found = NDIFinder.shared.sources(includeSelf: true).first { $0.hasSuffix("(\(name))") }
+        }
+        check(found != nil && !NDIFinder.shared.sources().contains(found ?? ""), "NDI：自分の出力が見つかる（選ぶ一覧には出さない）\(found ?? "")")
+        guard let found else { out.enabled = false; return }
+        var tex: MTLTexture?
+        let t1 = CACurrentMediaTime()
+        while tex == nil && CACurrentMediaTime() - t1 < 10 {
+            pump()
+            tex = NDIInputs.shared.frame(found)
+        }
+        var got = [UInt8](repeating: 0, count: 4)
+        if let tex { tex.getBytes(&got, bytesPerRow: tex.width * 4, from: MTLRegionMake2D(tex.width / 2, tex.height / 2, 1, 1), mipmapLevel: 0) }
+        let near = { (a: UInt8, b: UInt8) in abs(Int(a) - Int(b)) <= 12 }
+        check(tex?.width == 320 && tex?.height == 180 && near(got[0], 30) && near(got[1], 60) && near(got[2], 230),
+              "NDI：送った絵を受け取れる（\(tex?.width ?? 0)×\(tex?.height ?? 0)、色 \(got)、送った \(out.sentFrames) 枚）")
+        // ジェネレーター「NDI から」で枠に置ける（BGRX は不透明として読む）
+        var e = Effect(kind: .ndiIn); e.text = found
+        let dd = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: 64, height: 36, mipmapped: false)
+        dd.usage = [.renderTarget, .shaderRead]; dd.storageMode = .shared
+        let dst = ctx.device.makeTexture(descriptor: dd)!
+        if let cb = ctx.queue.makeCommandBuffer() {
+            SyphonDraw.shared.renderNDI(e, into: dst, now: CACurrentMediaTime(), stack: EffectStack(), cb: cb)
+            cb.commit(); cb.waitUntilCompleted()
+        }
+        dst.getBytes(&got, bytesPerRow: 64 * 4, from: MTLRegionMake2D(32, 18, 1, 1), mipmapLevel: 0)
+        check(near(got[2], 230) && got[3] > 240, "NDI：ジェネレーター「NDI から」で枠に置ける（色 \(got)）")
+        out.enabled = false
+        NDIInputs.shared.stopAll()
+        check(!out.isOn, "NDI：止められる")
+    }
+
+    /// 照明：Art-Net のパケット・灯体ごとのチャンネル・本当に UDP で届くか
+    static func testArtNet(check: (Bool, String) -> Void, wait: (Double) -> Void) {
+        let pk = ArtNetOutput.packet(universe: 0x0102, data: [1, 2, 3], sequence: 7)
+        check(Array(pk.prefix(8)) == Array("Art-Net".utf8) + [0] && pk[8] == 0x00 && pk[9] == 0x50 && pk[11] == 14 && pk[12] == 7
+              && pk[14] == 0x02 && pk[15] == 0x01 && pk[16] == 0 && pk[17] == 4 && Array(pk.suffix(4)) == [1, 2, 3, 0],
+              "照明：Art-Net（ArtDmx）のパケットの形（ユニバース・長さは偶数）")
+        // 左が赤・右が青、上の行だけ白の絵
+        let W = 128, H = 72
+        var px = [UInt8](repeating: 0, count: W * H * 4)
+        for y in 0..<H { for x in 0..<W {
+            let i = (y * W + x) * 4
+            if y < 4 { px[i] = 255; px[i + 1] = 255; px[i + 2] = 255 } else if x < W / 2 { px[i + 2] = 255 } else { px[i] = 255 }
+            px[i + 3] = 255
+        } }
+        var m = DMXMap(); m.gamma = 1
+        var a1 = DMXFixture(); a1.kind = .rgb; a1.channel = 1; a1.start = [0.25, 0.5]
+        var l1 = DMXFixture(); l1.kind = .line; l1.channel = 10; l1.pixels = 4; l1.start = [0.1, 0.5]; l1.end = [0.9, 0.5]
+        var w1 = DMXFixture(); w1.kind = .rgbw; w1.channel = 30; w1.start = [0.5, 0.01]
+        var d1 = DMXFixture(); d1.kind = .dimmer; d1.channel = 40; d1.start = [0.75, 0.5]
+        var big = DMXFixture(); big.kind = .line; big.universe = 3; big.channel = 1; big.pixels = 200; big.start = [0, 0.5]; big.end = [1, 0.5]
+        m.fixtures = [a1, l1, w1, d1, big]
+        let u = m.universes(pixels: px, width: W, height: H)
+        let u0 = u[0] ?? []
+        check(Array(u0[0..<3]) == [255, 0, 0] && Array(u0[9..<21]) == [255, 0, 0, 255, 0, 0, 0, 0, 255, 0, 0, 255]
+              && Array(u0[29..<33]) == [0, 0, 0, 255] && u0[39] == 18 && u[3]?.count == 512 && (u[4]?[87] ?? 0) == 255 && (u[4]?[88] ?? 1) == 0,
+              "照明：灯体ごとに、取る所の色を決めたチャンネルへ（RGB・LED テープ・白は W に・明るさだけ・512 を超えたら次のユニバース）")
+        // 本当に送る：自分あてに送って受け取る
+        let port = UInt16(40_000 + Int.random(in: 0..<500))
+        let rs = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)
+        var addr = sockaddr_in(); addr.sin_family = sa_family_t(AF_INET); addr.sin_port = port.bigEndian; addr.sin_addr.s_addr = inet_addr("127.0.0.1")
+        _ = withUnsafePointer(to: &addr) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(rs, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) } }
+        var tv = timeval(tv_sec: 0, tv_usec: 300_000)
+        setsockopt(rs, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
+        let out = ArtNetOutput.shared
+        out.forTests = true
+        out.port = port
+        out.host = "127.0.0.1"
+        out.setMap(m)
+        out.update(pixels: px, width: W, height: H)
+        out.enabled = true
+        var buf = [UInt8](repeating: 0, count: 600)
+        var got = 0
+        let t0 = CACurrentMediaTime()
+        while got <= 0 && CACurrentMediaTime() - t0 < 2 { got = recv(rs, &buf, buf.count, 0); if got <= 0 { wait(0.05) } }
+        out.enabled = false
+        close(rs)
+        check(got >= 18 && Array(buf.prefix(8)) == Array("Art-Net".utf8) + [0], "照明：Art-Net を UDP で送れる（\(got) バイト届いた）")
+    }
+
+    /// 素材をまとめて保存：同じ素材は 1 回だけ、名前がぶつかったら番号、もう一度まとめると使い回す。開き直すとコピーを読む
+    static func testCollect(paths: [String], check: (Bool, String) -> Void) {
+        let fm = FileManager.default
+        let tmp = fm.temporaryDirectory.appendingPathComponent("vjplayer-collect-test", isDirectory: true)
+        try? fm.removeItem(at: tmp)
+        try? fm.createDirectory(at: tmp.appendingPathComponent("other"), withIntermediateDirectories: true)
+        // 別のフォルダの、同じ名前の別の動画
+        let sameName = tmp.appendingPathComponent("other").appendingPathComponent(URL(fileURLWithPath: paths[0]).lastPathComponent)
+        try? fm.copyItem(at: URL(fileURLWithPath: paths[1]), to: sameName)
+        let e = Engine(persistent: false)
+        e.load(urls: [URL(fileURLWithPath: paths[0])], startingAt: 0)
+        e.load(urls: [URL(fileURLWithPath: paths[0])], startingAt: 1)
+        e.load(urls: [sameName], startingAt: 2)
+        _ = e.placeGenerator(.solid, at: 3)
+        let out = tmp.appendingPathComponent("out")
+        let r1 = try? Engine.collect(e.collectPlan(into: out, name: "まとめ"))
+        let r2 = try? Engine.collect(e.collectPlan(into: out, name: "まとめ"))
+        let media = out.appendingPathComponent("まとめ/素材")
+        let names = ((try? fm.contentsOfDirectory(atPath: media.path)) ?? []).sorted()
+        let base = URL(fileURLWithPath: paths[0]).lastPathComponent
+        let stem = URL(fileURLWithPath: paths[0]).deletingPathExtension().lastPathComponent
+        let ext = URL(fileURLWithPath: paths[0]).pathExtension
+        check(r1?.copied == 2 && names == [stem + " 2." + ext, base].sorted() && r2?.copied == 0 && r2?.reused == 2,
+              "素材をまとめて保存：同じ素材は 1 回だけ、同じ名前の別の素材は番号を付けてコピー。もう一度まとめると使い回す（\(names)）")
+        // 開き直すと、まとめたコピーを読む（元の場所に無くても、プロジェクトのフォルダからの場所で）
+        var ok = false
+        if let url = r1?.projectURL, let data = try? Data(contentsOf: url),
+           let st = try? JSONDecoder().decode(Engine.SavedState.self, from: data) {
+            let rel = st.slots.compactMap { $0 }.compactMap(\.relPath)
+            let back = Engine(persistent: false)
+            back.apply(st, baseDir: url.deletingLastPathComponent())
+            ok = rel.filter { $0.hasPrefix("素材/") }.count == 3 && back.slots[0]?.url.path.contains("まとめ/素材/") == true
+                && back.slots[3]?.generator?.kind == .solid
+        }
+        check(ok, "素材をまとめて保存：プロジェクトには「素材/名前」で書き、開き直すとコピーを読む（ジェネレーターもそのまま）")
+        try? fm.removeItem(at: tmp)
+    }
+
+    /// 音の形：スペクトラムで高さの違う音が別の帯に出る。棒・波形が描ける
+    static func testAudioScope(check: (Bool, String) -> Void) {
+        func peakBand(_ hz: Double) -> Int {
+            let an = SpectrumAnalyzer()
+            let x = (0..<4096).map { Float(0.5 * sin(2 * .pi * hz * Double($0) / 48000)) }
+            let r = an.process(x, sampleRate: 48000, autoGain: true)
+            return r.spectrum.indices.max { r.spectrum[$0] < r.spectrum[$1] } ?? -1
+        }
+        let b100 = peakBand(100), b1k = peakBand(1000), b5k = peakBand(5000)
+        check(b100 >= 0 && b100 < b1k && b1k < b5k && b1k > 40 && b1k < 90,
+              "音の形：低い音・高い音が、スペクトラムの別の帯に出る（100 Hz → \(b100)・1 kHz → \(b1k)・5 kHz → \(b5k) / 128）")
+        // 描く：左（低い方）だけ大きいスペクトラム・正弦波の波形
+        AudioScopeSim.testScope = ((0..<128).map { $0 < 64 ? 0.8 : 0 }, (0..<512).map { Float(sin(Double($0) / 512 * 2 * .pi)) })
+        let ctx = MetalContext.shared
+        let W = 160, H = 90
+        let td = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: W, height: H, mipmapped: false)
+        td.usage = [.shaderRead]; td.storageMode = .shared
+        let blank = ctx.device.makeTexture(descriptor: td)!
+        let fxp = EffectProcessor(); fxp.storageMode = .shared
+        func alpha(_ shape: Int) -> [UInt8] {
+            var e = Effect(kind: .audioScope); e.values[0] = Double(shape)
+            let cb = ctx.queue.makeCommandBuffer()!
+            let o = fxp.apply(EffectStack(effects: [e]), to: blank, key: "sc\(shape)", cb: cb, now: 1)
+            cb.commit(); cb.waitUntilCompleted()
+            var q = [UInt8](repeating: 0, count: W * H * 4)
+            o.getBytes(&q, bytesPerRow: W * 4, from: MTLRegionMake2D(0, 0, W, H), mipmapLevel: 0)
+            return stride(from: 3, to: q.count, by: 4).map { q[$0] }
+        }
+        let bars = alpha(0), wave = alpha(2), circle = alpha(3)
+        func lit(_ a: [UInt8], _ x0: Int, _ x1: Int) -> Int { var n = 0; for y in 0..<H { for x in x0..<x1 where a[y * W + x] > 128 { n += 1 } }; return n }
+        AudioScopeSim.testScope = nil
+        check(lit(bars, 0, 70) > 500 && lit(bars, 90, 160) == 0 && lit(wave, 0, 160) > 100 && lit(circle, 0, 160) > 50,
+              "音の形：棒（大きい帯だけ伸びる）・波形・円が描ける（まわりは透明）")
+    }
+
+    /// HAP：Snappy・区切りの読み方と、自前で書いた HAP の動画（.mov）を読んで色が合うか
+    static func testHap(check: (Bool, String) -> Void, wait: (Double) -> Void) {
+        // Snappy：文字のまま（literal）と、前の所の写し（copy）
+        let sn: [UInt8] = [12, (4 - 1) << 2, 97, 98, 99, 100, 0x01 | ((8 - 4) << 2), 4]
+        let un = try? Hap.snappy(sn)
+        check(un.map { String(decoding: $0, as: UTF8.self) } == "abcdabcdabcd" && (try? Hap.snappy([5, 0])) == nil,
+              "HAP：Snappy をほどける（写しも）。壊れたものは読まない")
+        // 自前の HAP の書き方（単色のブロックだけ）
+        func le16(_ v: Int) -> [UInt8] { [UInt8(v & 0xFF), UInt8(v >> 8)] }
+        func le32(_ v: Int) -> [UInt8] { [UInt8(v & 0xFF), UInt8((v >> 8) & 0xFF), UInt8((v >> 16) & 0xFF), UInt8(v >> 24)] }
+        func head(_ type: UInt8, _ n: Int) -> [UInt8] { [UInt8(n & 0xFF), UInt8((n >> 8) & 0xFF), UInt8((n >> 16) & 0xFF), type] }
+        func rgb565(_ r: Double, _ g: Double, _ b: Double) -> Int {
+            Int((r * 31).rounded()) << 11 | Int((g * 63).rounded()) << 5 | Int((b * 31).rounded())
+        }
+        let W = 64, H = 32, blocks = (W / 4) * (H / 4)
+        func dxt1(_ r: Double, _ g: Double, _ b: Double) -> [UInt8] {
+            let c = rgb565(r, g, b)
+            return (0..<blocks).flatMap { _ in le16(c) + le16(c) + [0, 0, 0, 0] }
+        }
+        func dxt5(_ r: Double, _ g: Double, _ b: Double, alpha: Double) -> [UInt8] {
+            let c = rgb565(r, g, b), a = UInt8((alpha * 255).rounded())
+            return (0..<blocks).flatMap { _ in [a, a, 0, 0, 0, 0, 0, 0] + le16(c) + le16(c) + [0, 0, 0, 0] }
+        }
+        func snappyLiteral(_ d: [UInt8]) -> [UInt8] {
+            var out: [UInt8] = []
+            var n = d.count
+            repeat { out.append(UInt8(n & 0x7F) | (n > 0x7F ? 0x80 : 0)); n >>= 7 } while n > 0
+            var i = 0
+            while i < d.count { let k = min(60, d.count - i); out.append(UInt8((k - 1) << 2)); out += d[i..<i + k]; i += k }
+            return out
+        }
+        func frameNone(_ fmt: UInt8, _ d: [UInt8]) -> [UInt8] { head(0xA0 | fmt, d.count) + d }
+        func frameSnappy(_ fmt: UInt8, _ d: [UInt8]) -> [UInt8] { let z = snappyLiteral(d); return head(0xB0 | fmt, z.count) + z }
+        func frameChunked(_ fmt: UInt8, _ d: [UInt8]) -> [UInt8] {
+            let half = d.count / 2
+            let c1 = Array(d[0..<half]), c2 = snappyLiteral(Array(d[half...]))
+            let comps = head(0x02, 2) + [0x0A, 0x0B]
+            let sizes = head(0x03, 8) + le32(c1.count) + le32(c2.count)
+            let instr = head(0x01, comps.count + sizes.count) + comps + sizes
+            let payload = instr + c1 + c2
+            return head(0xC0 | fmt, payload.count) + payload
+        }
+        // .mov に書く（AVFoundation は HAP を読み解けないが、入れ物には入れられる）
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("vjplayer-hap-test", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        func writeMov(_ name: String, codec: String, frames: [[UInt8]]) -> URL? {
+            let url = dir.appendingPathComponent(name)
+            try? FileManager.default.removeItem(at: url)
+            var fd: CMVideoFormatDescription?
+            CMVideoFormatDescriptionCreate(allocator: nil, codecType: Hap.fourCC(codec), width: Int32(W), height: Int32(H),
+                                           extensions: nil, formatDescriptionOut: &fd)
+            guard let fd, let w = try? AVAssetWriter(outputURL: url, fileType: .mov) else { return nil }
+            let input = AVAssetWriterInput(mediaType: .video, outputSettings: nil, sourceFormatHint: fd)
+            guard w.canAdd(input) else { return nil }
+            w.add(input)
+            guard w.startWriting() else { return nil }
+            w.startSession(atSourceTime: .zero)
+            for (k, f) in frames.enumerated() {
+                var bb: CMBlockBuffer?
+                CMBlockBufferCreateWithMemoryBlock(allocator: nil, memoryBlock: nil, blockLength: f.count, blockAllocator: nil,
+                                                   customBlockSource: nil, offsetToData: 0, dataLength: f.count, flags: 0, blockBufferOut: &bb)
+                guard let bb else { return nil }
+                f.withUnsafeBytes { _ = CMBlockBufferReplaceDataBytes(with: $0.baseAddress!, blockBuffer: bb, offsetIntoDestination: 0, dataLength: f.count) }
+                var timing = CMSampleTimingInfo(duration: CMTime(value: 1, timescale: 10), presentationTimeStamp: CMTime(value: CMTimeValue(k), timescale: 10),
+                                                decodeTimeStamp: .invalid)
+                var size = f.count
+                var sb: CMSampleBuffer?
+                CMSampleBufferCreate(allocator: nil, dataBuffer: bb, dataReady: true, makeDataReadyCallback: nil, refcon: nil,
+                                     formatDescription: fd, sampleCount: 1, sampleTimingEntryCount: 1, sampleTimingArray: &timing,
+                                     sampleSizeEntryCount: 1, sampleSizeArray: &size, sampleBufferOut: &sb)
+                guard let sb else { return nil }
+                while !input.isReadyForMoreMediaData { wait(0.01) }
+                input.append(sb)
+            }
+            input.markAsFinished()
+            var done = false
+            w.finishWriting { done = true }
+            let t0 = CACurrentMediaTime()
+            while !done && CACurrentMediaTime() - t0 < 5 { wait(0.02) }
+            return w.status == .completed ? url : nil
+        }
+        /// 動画の k コマ目（0.1 秒ずつ）の真ん中の色（BGRA）
+        func colors(_ url: URL, count: Int) -> [[Int]] {
+            let asset = AVURLAsset(url: url)
+            guard let track = asset.tracks(withMediaType: .video).first, Hap.isHap(track),
+                  let fs = try? FrameStream(asset: asset, track: track, capacity: 8) else { return [] }
+            fs.waitUntilPrimed(timeout: 3)
+            var out: [[Int]] = []
+            for k in 0..<count {
+                let t0 = CACurrentMediaTime()
+                var f = fs.frame(at: Double(k) / 10 + 0.01)
+                while (f == nil || abs(f!.pts - Double(k) / 10) > 0.02) && CACurrentMediaTime() - t0 < 2 { wait(0.02); f = fs.frame(at: Double(k) / 10 + 0.01) }
+                guard let pb = f?.buffer else { out.append([]); continue }
+                CVPixelBufferLockBaseAddress(pb, .readOnly)
+                let base = CVPixelBufferGetBaseAddress(pb)!.assumingMemoryBound(to: UInt8.self)
+                let bpr = CVPixelBufferGetBytesPerRow(pb)
+                let i = (H / 2) * bpr + (W / 2) * 4
+                out.append([Int(base[i]), Int(base[i + 1]), Int(base[i + 2]), Int(base[i + 3])])
+                CVPixelBufferUnlockBaseAddress(pb, .readOnly)
+            }
+            fs.cancel()
+            return out
+        }
+        func near(_ c: [Int], _ e: [Int], _ tol: Int = 12) -> Bool { c.count == 4 && zip(c, e).allSatisfy { abs($0 - $1) <= tol } }
+        // Hap（DXT1）：そのまま・Snappy・分けて圧縮 の 3 コマ（赤・緑・青）
+        let hap1 = writeMov("hap1.mov", codec: "Hap1", frames: [frameNone(0x0B, dxt1(1, 0, 0)), frameSnappy(0x0B, dxt1(0, 1, 0)),
+                                                                 frameChunked(0x0B, dxt1(0, 0, 1))])
+        let c1 = hap1.map { colors($0, count: 3) } ?? []
+        check(c1.count == 3 && near(c1[0], [0, 0, 255, 255]) && near(c1[1], [0, 255, 0, 255]) && near(c1[2], [255, 0, 0, 255]),
+              "HAP：Hap（DXT1）の動画を読んで、そのまま・Snappy・分けて圧縮のコマがどれも正しい色（\(c1)）")
+        // Hap Alpha（DXT5）：半分透明
+        let hap5 = writeMov("hap5.mov", codec: "Hap5", frames: [frameSnappy(0x0E, dxt5(1, 1, 1, alpha: 0.5))])
+        let c5 = hap5.map { colors($0, count: 1) } ?? []
+        check(c5.count == 1 && near(c5[0], [255, 255, 255, 128]), "HAP：Hap Alpha（DXT5）は透明も読める（\(c5)）")
+        // Hap Q（YCoCg）：(0.6, 0.5, 0.4) → Y 0.5・Co 0.1・Cg 0
+        let y = 0.5, co = 0.1, cg = 0.0
+        let hapQ = writeMov("hapq.mov", codec: "HapY", frames: [frameNone(0x0F, dxt5(co + 0.5 * 256 / 255, cg + 0.5 * 256 / 255, 0, alpha: y))])
+        let cq = hapQ.map { colors($0, count: 1) } ?? []
+        check(cq.count == 1 && near(cq[0], [102, 128, 153, 255], 16), "HAP：Hap Q（YCoCg）を元の色に戻せる（\(cq)）")
+        try? FileManager.default.removeItem(at: dir)
+    }
+
+    /// 切り替え方：形ごとの現れ方と、切り替えの途中の重ね方
+    static func testTransitions(check: (Bool, String) -> Void, wait: (Double) -> Void) {
+        let ctx = MetalContext.shared
+        let W = 160, H = 90
+        let td = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: W, height: H, mipmapped: false)
+        td.usage = [.shaderRead, .renderTarget]; td.storageMode = .shared
+        let src = ctx.device.makeTexture(descriptor: td)!
+        var px = [UInt8](repeating: 255, count: W * H * 4)
+        for y in 0..<H { for x in 0..<W { let i = (y * W + x) * 4; let v = UInt8(x * 255 / W); px[i] = v; px[i + 1] = v; px[i + 2] = v } }
+        src.replace(region: MTLRegionMake2D(0, 0, W, H), mipmapLevel: 0, withBytes: px, bytesPerRow: W * 4)
+        let fxp = EffectProcessor(); fxp.storageMode = .shared
+        func alpha(_ kind: Transition, _ p: Double) -> [UInt8] {
+            var m = Effect(kind: .transitionMask); m.values = [Double(kind.rawValue), p, 0.08, 3]
+            let cb = ctx.queue.makeCommandBuffer()!
+            let o = fxp.apply(EffectStack(effects: [m]), to: src, key: "tr", cb: cb, now: 1)
+            cb.commit(); cb.waitUntilCompleted()
+            var q = [UInt8](repeating: 0, count: W * H * 4)
+            o.getBytes(&q, bytesPerRow: W * 4, from: MTLRegionMake2D(0, 0, W, H), mipmapLevel: 0)
+            return stride(from: 3, to: q.count, by: 4).map { q[$0] }
+        }
+        func a(_ m: [UInt8], _ x: Int, _ y: Int) -> UInt8 { m[y * W + x] }
+        func shown(_ m: [UInt8]) -> Double { Double(m.filter { $0 > 128 }.count) / Double(m.count) }
+        let w = alpha(.wipe, 0.5), c = alpha(.circle, 0.5)
+        var ok = a(w, 20, 45) > 240 && a(w, 140, 45) < 10 && a(c, 80, 45) > 240 && a(c, 2, 2) < 10
+        var lines: [String] = []
+        for k in [Transition.wipe, .circle, .noise, .luma, .glitch] {
+            let s0 = shown(alpha(k, 0)), s5 = shown(alpha(k, 0.5)), s1 = shown(alpha(k, 1))
+            ok = ok && s0 < 0.02 && s1 > 0.98 && s5 > 0.15 && s5 < 0.85
+            lines.append(String(format: "%@ %.0f%%", k.label, s5 * 100))
+        }
+        check(ok, "切り替え方：0% で何も、100% で全部、途中は形のとおりに現れる（半分の所：" + lines.joined(separator: "・") + "）")
+        // 切り替えの途中：消えていく絵はそのまま、新しい絵に形をかける
+        let e = Engine(persistent: false)
+        _ = e.placeGenerator(.solid, at: 0)
+        _ = e.placeGenerator(.noise, at: 1)
+        e.layers[0].fadeTime = 2
+        e.layers[0].transition = .wipe
+        e.trigger(0)
+        wait(0.3)
+        e.trigger(1)
+        wait(0.3)
+        _ = e.updateFrame()
+        let g = e.layerGroups().first
+        let draws = g?.draws ?? []
+        check(draws.count == 2 && draws[0].opacity == 1 && draws[1].opacity == 1
+              && draws[1].effects.effects.last?.kind == .transitionMask && (draws[1].effects.effects.last?.values[1] ?? 0) > 0,
+              "切り替え方：切り替えの途中、前のクリップはそのまま残り、新しいクリップにワイプの形がかかる（\(draws.map { "\($0.opacity) \($0.effects.effects.map(\.kind.rawValue))" })）")
+        let back = Engine(persistent: false)
+        back.apply(e.makeState(relativeTo: nil), baseDir: nil)
+        check(back.layers[0].transition == .wipe && Engine(persistent: false).layers[0].transition == .crossfade,
+              "切り替え方：保存して読み込める（はじめはクロス）")
+        e.stopAll()
+    }
+
+    /// 出力の分割：ひな形の数・スライスの取る所と映す所・エッジブレンド・保存
+    static func testOutputMap(check: (Bool, String) -> Void) {
+        // ひな形：2 台を 15% 重ねると、取る所は端から端まで、重なりは 1 台の 15%
+        let two = OutputMap.preset(count: 2, overlap: 0.15, separate: true)
+        let end = two[1].input[0] + two[1].input[2]
+        let overlapW = two[0].input[0] + two[0].input[2] - two[1].input[0]
+        check(two.count == 2 && abs(two[0].input[0]) < 1e-9 && abs(end - 1) < 1e-9 && abs(overlapW - 0.15 * two[0].input[2]) < 1e-9
+              && two[0].feather[1] == 0.15 && two[1].feather[0] == 0.15 && two[0].output == 0 && two[1].output == 1,
+              "出力の分割：横に 2 台・15% 重ねるひな形は、端から端まで取り、重なった側だけなじませ、出力 1・2 へ")
+        let ctx = MetalContext.shared
+        func tex(_ w: Int, _ h: Int, _ f: ((Int, Int) -> (UInt8, UInt8, UInt8))? = nil) -> MTLTexture {
+            let td = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: w, height: h, mipmapped: false)
+            td.usage = [.shaderRead, .renderTarget]; td.storageMode = .shared
+            let t = ctx.device.makeTexture(descriptor: td)!
+            if let f {
+                var px = [UInt8](repeating: 255, count: w * h * 4)
+                for y in 0..<h { for x in 0..<w { let (r, g, b) = f(x, y); let i = (y * w + x) * 4; px[i] = b; px[i + 1] = g; px[i + 2] = r } }
+                t.replace(region: MTLRegionMake2D(0, 0, w, h), mipmapLevel: 0, withBytes: px, bytesPerRow: w * 4)
+            }
+            return t
+        }
+        let comp = tex(200, 100) { x, _ in x < 100 ? (255, 0, 0) : (0, 0, 255) }
+        func render(_ map: OutputMap, output: Int, test: Bool = false) -> [UInt8] {
+            let dst = tex(160, 90)
+            let cb = ctx.queue.makeCommandBuffer()!
+            SliceRenderer.shared.draw(map, output: output, composite: comp, master: 1, testPattern: test, into: dst, cb: cb)
+            cb.commit(); cb.waitUntilCompleted()
+            var px = [UInt8](repeating: 0, count: 160 * 90 * 4)
+            dst.getBytes(&px, bytesPerRow: 160 * 4, from: MTLRegionMake2D(0, 0, 160, 90), mipmapLevel: 0)
+            return px
+        }
+        func rgb(_ p: [UInt8], _ x: Int, _ y: Int) -> (Int, Int, Int) { let i = (y * 160 + x) * 4; return (Int(p[i + 2]), Int(p[i + 1]), Int(p[i])) }
+        // 1 つの出力に横に 2 つ：左の半分に、合成の左の半分（赤）。右に右の半分（青）
+        var m = OutputMap(); m.enabled = true; m.slices = OutputMap.preset(count: 2)
+        // 取る所を入れ替えると、出る所も入れ替わる
+        var swapped = m; swapped.slices[0].input = [0.5, 0, 0.5, 1]; swapped.slices[1].input = [0, 0, 0.5, 1]
+        let a = render(m, output: 0), b = render(swapped, output: 0)
+        check(rgb(a, 20, 45).0 > 200 && rgb(a, 140, 45).2 > 200 && rgb(b, 20, 45).2 > 200 && rgb(b, 140, 45).0 > 200
+              && rgb(render(m, output: 1), 80, 45) == (0, 0, 0),
+              "出力の分割：スライスの取る所を、映す所へ出す（取る所を入れ替えると入れ替わる）。ほかの出力には出さない")
+        // エッジブレンド：2 台・重ねる。出力 1 の右の端は暗く、重なった所は 2 台を足すと元の明るさ
+        var e = OutputMap(); e.enabled = true
+        e.slices = OutputMap.preset(count: 2, overlap: 0.3, separate: true)
+        let gray = tex(200, 100) { _, _ in (180, 180, 180) }
+        func renderG(_ out: Int) -> [UInt8] {
+            let dst = tex(160, 90)
+            let cb = ctx.queue.makeCommandBuffer()!
+            SliceRenderer.shared.draw(e, output: out, composite: gray, master: 1, testPattern: false, into: dst, cb: cb)
+            cb.commit(); cb.waitUntilCompleted()
+            var px = [UInt8](repeating: 0, count: 160 * 90 * 4)
+            dst.getBytes(&px, bytesPerRow: 160 * 4, from: MTLRegionMake2D(0, 0, 160, 90), mipmapLevel: 0)
+            return px
+        }
+        let o1 = renderG(0), o2 = renderG(1)
+        // 重なりのまん中：出力 1 の右から 15%（= 重なり 30% の半分）と、出力 2 の左から 15%
+        let x1 = Int(160 * (1 - 0.15)), x2 = Int(160 * 0.15)
+        let l1 = pow(Double(rgb(o1, x1, 45).0) / 255, 2.2), l2 = pow(Double(rgb(o2, x2, 45).0) / 255, 2.2)
+        let full = pow(180.0 / 255, 2.2)
+        check(rgb(o1, 20, 45).0 > 170 && rgb(o1, 158, 45).0 < 60 && abs((l1 + l2) / full - 1) < 0.08,
+              String(format: "出力の分割：エッジブレンドで重なった所は暗くなり、2 台を足すと元の明るさ（%.0f%%）", (l1 + l2) / full * 100))
+        // テストパターン・保存
+        let tp = render(m, output: 0, test: true)
+        let eng = Engine(persistent: false)
+        eng.outputMap = m
+        let back = Engine(persistent: false)
+        back.apply(eng.makeState(relativeTo: nil), baseDir: nil)
+        check(tp.contains { $0 > 100 } && back.outputMap == m, "出力の分割：テストパターンが出る。保存して読み込める")
+    }
+
+    /// カメラ・Syphon の絵を置く：合わせ方・左右反転。カメラを選んでいなければ透明
+    static func testSourceDraw(check: (Bool, String) -> Void) {
+        let ctx = MetalContext.shared
+        func tex(_ w: Int, _ h: Int, shared: Bool, _ f: ((Int, Int) -> (UInt8, UInt8, UInt8))? = nil) -> MTLTexture {
+            let td = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: w, height: h, mipmapped: false)
+            td.usage = [.shaderRead, .renderTarget]; td.storageMode = .shared
+            let t = ctx.device.makeTexture(descriptor: td)!
+            if let f {
+                var px = [UInt8](repeating: 255, count: w * h * 4)
+                for y in 0..<h { for x in 0..<w { let (r, g, b) = f(x, y); let i = (y * w + x) * 4; px[i] = b; px[i + 1] = g; px[i + 2] = r } }
+                t.replace(region: MTLRegionMake2D(0, 0, w, h), mipmapLevel: 0, withBytes: px, bytesPerRow: w * 4)
+            }
+            return t
+        }
+        // 横長（4:1）の、左が赤・右が青の絵を、16:9 に置く
+        let src = tex(64, 16, shared: true) { x, _ in x < 32 ? (255, 0, 0) : (0, 0, 255) }
+        func draw(fit: Float, mirror: Bool) -> [UInt8] {
+            let dst = tex(160, 90, shared: true)
+            let cb = ctx.queue.makeCommandBuffer()!
+            SyphonDraw.shared.draw(src, fit: fit, opacity: 1, mirror: mirror, premultiply: false, into: dst, cb: cb)
+            cb.commit(); cb.waitUntilCompleted()
+            var px = [UInt8](repeating: 0, count: 160 * 90 * 4)
+            dst.getBytes(&px, bytesPerRow: 160 * 4, from: MTLRegionMake2D(0, 0, 160, 90), mipmapLevel: 0)
+            return px
+        }
+        func at(_ p: [UInt8], _ x: Int, _ y: Int) -> (Int, Int, Int) { let i = (y * 160 + x) * 4; return (Int(p[i + 2]), Int(p[i]), Int(p[i + 3])) }
+        let fit = draw(fit: 0, mirror: false), fill = draw(fit: 1, mirror: false), mir = draw(fit: 2, mirror: true)
+        // 収める：上下は透明、真ん中の左は赤。いっぱいに：上も絵がある。反転：左が青
+        check(at(fit, 20, 5).2 == 0 && at(fit, 20, 45).0 > 200 && at(fill, 20, 5).2 > 200 && at(mir, 20, 45).1 > 200 && at(mir, 140, 45).0 > 200,
+              "カメラ・Syphon の置き方：収める（上下は透明）・いっぱいに・左右反転")
+        // カメラを選んでいなければ透明（落ちない）
+        let fxp = EffectProcessor(); fxp.storageMode = .shared
+        let blank = tex(160, 90, shared: true)
+        let cb = ctx.queue.makeCommandBuffer()!
+        let out = fxp.apply(EffectStack(effects: [Effect(kind: .camera)]), to: blank, key: "cam", cb: cb, now: 1)
+        cb.commit(); cb.waitUntilCompleted()
+        var px = [UInt8](repeating: 1, count: 160 * 90 * 4)
+        out.getBytes(&px, bytesPerRow: 160 * 4, from: MTLRegionMake2D(0, 0, 160, 90), mipmapLevel: 0)
+        _ = CameraDevice.list()
+        check(px.allSatisfy { $0 == 0 } && Effect(kind: .camera).text.isEmpty && EffectKind.camera.generatorCategory == .external,
+              "カメラから：カメラを選んでいなければ透明。「ほかのアプリ・カメラから」の分類")
+    }
+
+    /// BPM の自動検出：キック・ハイハットの並びから BPM と拍の頭が分かる。何回か続けて同じなら合わせる
+    static func testBeatDetect(check: (Bool, String) -> Void, wait: (Double) -> Void) {
+        let sr = 48000.0
+        func run(bpm: Double, offset: Double, seconds: Double) -> (BeatEstimator.Result?, Double) {
+            var an = AudioAnalyzer()
+            var rng = SplitMix(seed: 7)
+            let spb = 60 / bpm
+            var onsets: [Double] = []
+            let n = 1024
+            var t = 0.0
+            while t < seconds {
+                var buf = [Float](repeating: 0, count: n)
+                for i in 0..<n {
+                    let tt = t + Double(i) / sr
+                    // キック（拍の頭）、ハイハット（裏）、うすいノイズ
+                    let kb = (tt - offset) / spb
+                    let kp = (kb - floor(kb)) * spb
+                    var v = kb >= 0 ? 0.8 * sin(2 * .pi * 55 * kp) * exp(-kp * 18) : 0
+                    let hp = ((kb + 0.5) - floor(kb + 0.5)) * spb
+                    v += 0.15 * (rng.next() * 2 - 1) * exp(-hp * 60)
+                    v += 0.02 * (rng.next() * 2 - 1)
+                    buf[i] = Float(v)
+                }
+                _ = buf.withUnsafeBufferPointer { an.process($0.baseAddress!, count: n, sampleRate: sr, time: t, release: 0.15, autoGain: true) }
+                onsets += an.onsets
+                an.onsets.removeAll()
+                t += Double(n) / sr
+            }
+            let rate = sr / Double(AudioAnalyzer.onsetHop)
+            let win = Array(onsets.suffix(Int(rate * 8)))
+            let end = Double(onsets.count) / rate
+            return (BeatEstimator.estimate(win, rate: rate), end)
+        }
+        var lines: [String] = []
+        var ok = true
+        for (bpm, off) in [(128.0, 0.11), (95.0, 0.3), (140.0, 0.05)] {
+            let (r, end) = run(bpm: bpm, offset: off, seconds: 10)
+            guard let r else { ok = false; lines.append("\(Int(bpm)) → なし"); continue }
+            // 本当の最後の拍の頭との違い（拍の長さで回り込む）
+            let spb = 60 / bpm
+            let lastTrue = off + floor((end - off) / spb) * spb
+            var d = (end - r.lastBeatAgo) - lastTrue
+            d -= (d / spb).rounded() * spb
+            let good = abs(r.bpm - bpm) / bpm < 0.01 && abs(d) < 0.035
+            ok = ok && good
+            lines.append(String(format: "%.0f → %.1f（拍の頭 %+.0f ms）", bpm, r.bpm, d * 1000))
+        }
+        check(ok, "BPM の自動検出：キックとハイハットの音から BPM と拍の頭が分かる（" + lines.joined(separator: "・") + "）")
+        // 3 回続けて同じくらいなら合わせる（保存・元に戻すには数えない）
+        let e = Engine(persistent: false)
+        e.bpm = 120
+        e.commitUndoStep()
+        let det = BeatDetector.shared
+        det.forTests = true
+        let now = CACurrentMediaTime()
+        det.apply(BeatEstimator.Result(bpm: 127.9, lastBeatAgo: 0.1, confidence: 0.5), endTime: now, engine: e)
+        let afterOne = e.bpm
+        det.apply(BeatEstimator.Result(bpm: 128.1, lastBeatAgo: 0.1, confidence: 0.5), endTime: now, engine: e)
+        det.apply(BeatEstimator.Result(bpm: 128.0, lastBeatAgo: 0.1, confidence: 0.5), endTime: now, engine: e)
+        let b = e.beatClockForEditing().beat(at: now - 0.1)
+        check(afterOne == 120 && abs(e.bpm - 128) < 0.15 && abs(b - b.rounded()) < 0.01 && !e.commitUndoStep(),
+              String(format: "BPM の自動検出：3 回続けて同じくらいなら BPM（%.1f）と拍の頭を合わせる。1 回だけでは変えない。元に戻す歩にならない", e.bpm))
+    }
+
+    /// 元に戻す：設定・クリップの削除・段の追加を戻せる。再生中のクリップは止まらない
+    static func testUndo(check: (Bool, String) -> Void, wait: (Double) -> Void) {
+        let e = Engine(persistent: false)
+        _ = e.placeGenerator(.solid, at: 0)
+        _ = e.placeGenerator(.noise, at: 1)
+        e.commitUndoStep()
+        let gen = e.slots[0]
+        e.trigger(0)
+        wait(0.1)
+        // 値を変えて戻す（再生は止まらない・同じクリップのまま）
+        e.layers[0].opacity = 0.4
+        e.slots[0]?.effects = [Effect(kind: .invert)]
+        e.commitUndoStep()
+        e.undo()
+        check(abs(e.layers[0].opacity - 1) < 1e-9 && e.slots[0]?.effects.isEmpty == true && e.slots[0] === gen
+              && e.activeByLayer[0] == 0,
+              "元に戻す：レイヤーの不透明度・クリップのエフェクトが戻り、再生中のクリップはそのまま（止まらない・作り直さない）")
+        e.redo()
+        check(abs(e.layers[0].opacity - 0.4) < 1e-9 && e.slots[0]?.effects.count == 1 && e.activeByLayer[0] == 0,
+              "やり直す：戻した変更をもう一度")
+        // クリップを消して戻す（同じ目印・同じ種類で戻る）
+        let id1 = e.slots[1]?.id
+        e.clear(1)
+        e.commitUndoStep()
+        let gone = e.slots[1] == nil
+        e.undo()
+        check(gone && e.slots[1]?.id == id1 && e.slots[1]?.generator?.kind == .noise, "元に戻す：消したクリップが戻る")
+        // 段を足して戻す（形が変わる操作は、全体を作り直して戻す）
+        let n = e.layers.count
+        e.insertLayer(at: 0)
+        e.commitUndoStep()
+        e.undo()
+        check(e.layers.count == n && e.slots[1]?.generator?.kind == .noise && e.undoHistory.canRedo,
+              "元に戻す：足した段が消えて、クリップは元の場所に戻る")
+        // 細かな変化（ドラッグ）はまとめて 1 歩
+        e.commitUndoStep()
+        for k in 0..<10 { e.layers[0].opacity = Double(k) / 10 }
+        e.commitUndoStep()
+        let before = e.layers[0].opacity
+        e.undo()
+        check(abs(before - 0.9) < 1e-9 && abs(e.layers[0].opacity - 0.4) < 1e-9, "元に戻す：続けて動かした値は、まとめて 1 歩で戻る")
+        // 見ているデッキを変えただけでは歩にならない
+        let steps = e.undoHistory.canUndo
+        _ = e.addDeck()
+        e.commitUndoStep()
+        let added = e.undoHistory.canUndo
+        e.currentDeck = 0
+        let changed = e.commitUndoStep()
+        check(added && !changed && (steps || true), "元に戻す：見ているデッキを変えただけでは、戻す歩にならない")
+        e.stopAll()
+    }
+
+    /// MIDI・キーの割り当て：覚える・つまみの値・本物の CoreMIDI を通る・光らせる判断
+    static func testControls(check: (Bool, String) -> Void, wait: (Double) -> Void) {
+        let hub = ControlHub.shared
+        hub.forTests = true
+        OSCHub.shared.forTests = true
+        let saved = hub.bindings
+        for b in saved { hub.remove(b.id) }
+        // 覚える：ノートを押すと割り当たる。離したのでは覚えない
+        hub.learn("/halo/layer/1/clip/2", title: "テスト")
+        hub.handle(status: 0x80, d1: 36, d2: 0, device: "Test")      // 離した
+        wait(0.05)
+        let stillLearning = hub.learning != nil
+        hub.handle(status: 0x91, d1: 36, d2: 100, device: "Test")    // ch2 で押した
+        wait(0.05)
+        let b = hub.bindings.first
+        check(stillLearning && hub.learning == nil && b?.trigger.kind == .note && b?.trigger.number == 36 && b?.trigger.channel == 2
+              && b?.address == "/halo/layer/1/clip/2",
+              "MIDI：「覚える」のあと押したボタン（ノート 36・ch2）が割り当たる。離したのでは覚えない")
+        // 同じボタンに別のものを覚えさせると、前の割り当ては外れる
+        hub.learn("/halo/cue/next", title: "次へ")
+        hub.handle(status: 0x91, d1: 36, d2: 90, device: "Test")
+        wait(0.05)
+        check(hub.bindings.count == 1 && hub.bindings[0].address == "/halo/cue/next", "MIDI：同じボタンに覚えさせ直すと、前の割り当ては外れる")
+        // つまみ（CC）の値は、OSC と同じ置き場所に入り、動かし方「OSC・MIDI」で使える
+        hub.handle(status: 0xB0, d1: 7, d2: 127, device: "Test")
+        var pa = ParamAnim(range: 0...10); pa.mode = .osc; pa.osc = OSCLink(address: "/midi/1/cc/7")
+        check(OSCHub.shared.value("/midi/1/cc/7") == 1 && pa.value(base: 0, at: 1, beat: BeatClock()) == 10,
+              "MIDI：つまみ（CC 7）の値で、パラメーターが動く")
+        // 本物の CoreMIDI を通る：仮の MIDI 機器から送ったノートが届く
+        hub.startIfNeeded()
+        var src = MIDIEndpointRef()
+        var client = MIDIClientRef()
+        MIDIClientCreateWithBlock("HaloVJ selftest" as CFString, &client, nil)
+        MIDISourceCreateWithProtocol(client, "HaloVJ selftest source" as CFString, ._1_0, &src)
+        wait(0.6)
+        var list = MIDIEventList()
+        let pk = MIDIEventListInit(&list, ._1_0)
+        _ = MIDIEventListAdd(&list, MemoryLayout<MIDIEventList>.size, pk, 0, 1, [0x20B0_1540])   // CC 21 = 64（ch1）
+        MIDIReceivedEventList(src, &list)
+        var got: Double?
+        let t0 = CACurrentMediaTime()
+        while got == nil && CACurrentMediaTime() - t0 < 3 { wait(0.05); got = OSCHub.shared.value("/midi/1/cc/21") }
+        check(got.map { abs($0 - 64.0 / 127) < 0.01 } ?? false && hub.devices.contains { $0.contains("HaloVJ selftest") },
+              "MIDI：つないだ機器（仮の機器）から送った CC が、CoreMIDI を通って届く")
+        MIDIEndpointDispose(src)
+        MIDIClientDispose(client)
+        // 光らせる判断：出しているクリップ・押しているパッド
+        let e = Engine(persistent: false)
+        check(!ControlHub.isOn("/halo/layer/1/clip/1", engine: e) && ControlHub.isOn("/halo/nothing", engine: e) == false,
+              "MIDI：止まっているクリップのボタンは消えたまま")
+        for b in hub.bindings { hub.remove(b.id) }
+    }
+
+    /// OSC（読み書き・受信・値で動かす・決まったアドレス）と Syphon（出す・受け取る）
+    static func testLink(check: (Bool, String) -> Void, wait: (Double) -> Void) {
+        // 読み書き
+        let m = OSCMessage(address: "/1/fader1", args: [.float(0.25), .int(3), .string("abc")])
+        let back = OSCMessage.decode(m.encode())
+        // バンドル（中にメッセージ 2 つ）と、T（true）
+        var bundle = Data("#bundle".utf8); bundle.append(0)
+        bundle.append(Data(repeating: 0, count: 8))
+        for mm in [OSCMessage(address: "/a", args: [.int(1)]), OSCMessage(address: "/b", args: [.float(0.5)])] {
+            let d = mm.encode()
+            withUnsafeBytes(of: UInt32(d.count).bigEndian) { bundle.append(contentsOf: $0) }
+            bundle.append(d)
+        }
+        var tPacket = Data("/t".utf8); tPacket.append(contentsOf: [0, 0]); tPacket.append(Data(",T".utf8)); tPacket.append(contentsOf: [0, 0])
+        let bm = OSCMessage.decode(bundle), tm = OSCMessage.decode(tPacket)
+        check(back == [m] && bm.map(\.address) == ["/a", "/b"] && bm[1].number == 0.5 && tm.first?.number == 1
+              && OSCMessage.decode(Data([1, 2, 3])).isEmpty,
+              "OSC：書いて読める（数・文字・バンドル・true）。壊れたデータは無視")
+        // 受信：ネットワークで届いた値で、パラメーターが動く
+        let hub = OSCHub.shared
+        hub.forTests = true
+        let port = 39_000 + Int.random(in: 0..<500)
+        hub.receivePort = port
+        hub.receiveOn = true
+        wait(0.3)
+        let conn = NWConnection(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: UInt16(port))!, using: .udp)
+        conn.start(queue: .global())
+        wait(0.2)
+        conn.send(content: OSCMessage(address: "/test/fader", args: [.float(0.75)]).encode(), completion: .idempotent)
+        var got: Double?
+        let t0 = CACurrentMediaTime()
+        while got == nil && CACurrentMediaTime() - t0 < 3 { wait(0.05); got = hub.value("/test/fader") }
+        var pa = ParamAnim(range: 0...100)
+        pa.mode = .osc
+        pa.osc = OSCLink(address: "/test/fader")
+        let pv = pa.value(base: 5, at: 1, beat: BeatClock())
+        pa.osc = OSCLink(address: "/nothing")
+        let none = pa.value(base: 5, at: 1, beat: BeatClock())
+        check(got == 0.75 && pv == 75 && none == 5,
+              "OSC：ネットワークで届いた値（\(got.map { String($0) } ?? "なし")）でパラメーターが動く。まだ届いていないアドレスは元の値のまま")
+        // 覚える：次に届いたアドレスを渡す
+        var learned: String?
+        hub.learn { learned = $0 }
+        conn.send(content: OSCMessage(address: "/2/rotary3", args: [.float(0.1)]).encode(), completion: .idempotent)
+        let t1 = CACurrentMediaTime()
+        while learned == nil && CACurrentMediaTime() - t1 < 3 { wait(0.05) }
+        check(learned == "/2/rotary3" && !hub.learning, "OSC：「覚える」を押してから届いたアドレスを覚える")
+        conn.cancel()
+        hub.receiveOn = false
+        // 決まったアドレス（テスト用のエンジンで）
+        let e = Engine(persistent: false)
+        OSCCommands.run(OSCMessage(address: "/halo/layer/1/opacity", args: [.float(0.3)]), engine: e)
+        OSCCommands.run(OSCMessage(address: "/halo/master/opacity", args: [.float(0.6)]), engine: e)
+        OSCCommands.run(OSCMessage(address: "/halo/bpm", args: [.float(128)]), engine: e)
+        OSCCommands.run(OSCMessage(address: "/halo/blackout", args: [.int(1)]), engine: e)
+        let bo = e.isBlackout
+        OSCCommands.run(OSCMessage(address: "/halo/blackout", args: [.int(1)]), engine: e)
+        check(abs(e.layers[0].opacity - 0.3) < 1e-6 && abs(e.masterOpacity - 0.6) < 1e-6 && abs(e.bpm - 128) < 1e-9 && bo && e.isBlackout,
+              "OSC：決まったアドレスで、レイヤーの不透明度・マスター・BPM・ブラックアウトを動かせる（ブラックアウト 1 を 2 回送っても点いたまま）")
+        // Syphon：自分で出した絵を、自分で受け取れる（上下も正しい）
+        let ctx = MetalContext.shared
+        let W = 64, H = 32
+        let td = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: W, height: H, mipmapped: false)
+        td.usage = [.shaderRead, .renderTarget]; td.storageMode = .shared
+        let src = ctx.device.makeTexture(descriptor: td)!
+        var px = [UInt8](repeating: 255, count: W * H * 4)
+        for y in 0..<H { for x in 0..<W { let i = (y * W + x) * 4; px[i] = y < H / 2 ? 0 : 255; px[i + 1] = 0; px[i + 2] = y < H / 2 ? 255 : 0 } }
+        src.replace(region: MTLRegionMake2D(0, 0, W, H), mipmapLevel: 0, withBytes: px, bytesPerRow: W * 4)
+        let out = SyphonOutput.shared
+        out.forTests = true
+        out.name = "HaloVJ selftest"
+        out.enabled = true
+        var frame: MTLTexture?
+        let key = SyphonSource.key(app: SyphonSource.selfAppName, name: "HaloVJ selftest")
+        let t2 = CACurrentMediaTime()
+        while frame == nil && CACurrentMediaTime() - t2 < 5 {
+            let cb = ctx.queue.makeCommandBuffer()!
+            out.publish(src, cb: cb)
+            cb.commit(); cb.waitUntilCompleted()
+            wait(0.1)
+            frame = SyphonInputs.shared.frame(key)
+        }
+        // 受け取った絵を「Syphon から」で描いて、上が赤・下が青か見る
+        var topRed = false, bottomBlue = false
+        if frame != nil {
+            let fxp = EffectProcessor(); fxp.storageMode = .shared
+            var g = Effect(kind: .syphonIn); g.text = key; g.values[0] = 2
+            let blank = ctx.device.makeTexture(descriptor: td)!
+            let cb = ctx.queue.makeCommandBuffer()!
+            let o = fxp.apply(EffectStack(effects: [g]), to: blank, key: "sy", cb: cb, now: 1)
+            cb.commit(); cb.waitUntilCompleted()
+            var q = [UInt8](repeating: 0, count: W * H * 4)
+            o.getBytes(&q, bytesPerRow: W * 4, from: MTLRegionMake2D(0, 0, W, H), mipmapLevel: 0)
+            let top = (4 * W + W / 2) * 4, bottom = ((H - 4) * W + W / 2) * 4
+            topRed = q[top + 2] > 200 && q[top] < 60
+            bottomBlue = q[bottom] > 200 && q[bottom + 2] < 60
+        }
+        out.enabled = false
+        let servers = SyphonServerDirectory.shared().servers.map {
+            "\(($0[SyphonServerDescriptionAppNameKey] as? String) ?? "?")/\(($0[SyphonServerDescriptionNameKey] as? String) ?? "?")"
+        }
+        check(frame != nil && topRed && bottomBlue,
+              "Syphon：出した絵を受け取れて、「Syphon から」で上下が正しく描ける（受け取り \(frame != nil)・上 \(topRed)・下 \(bottomBlue)・見えるサーバー \(servers)）")
+    }
+
     /// 音に反応させる：音の解析（低音・高音・アタック）と、パラメーターが音で動くこと
     static func testAudioReactive(check: (Bool, String) -> Void, wait: (Double) -> Void) {
         let sr = 48000.0
@@ -3433,6 +4213,21 @@ enum SelfTest {
         }
         var e = Effect(kind: kind)
         for (i, v) in values.enumerated() where i < e.values.count { e.values[i] = v }
+        if kind == .audioScope {
+            // 見本の音：低い方が大きく、高い方へ下がるスペクトラムと、2 つの波が重なった波形
+            var sp = [Float](), wv = [Float]()
+            for i in 0..<128 {
+                let d = Double(i)
+                let v: Double = 0.95 - d / 160 + 0.15 * sin(d * 0.4)
+                sp.append(Float(max(0, v)))
+            }
+            for i in 0..<512 {
+                let t = Double(i) / 512
+                let v: Double = 0.6 * sin(t * 6 * .pi) + 0.3 * sin(t * 31 * .pi)
+                wv.append(Float(v))
+            }
+            AudioScopeSim.testScope = (sp, wv)
+        }
         if let random, e.values.count > 8 { e.values[8] = random }
         let fxp = EffectProcessor(); fxp.storageMode = .shared
         var out = blank

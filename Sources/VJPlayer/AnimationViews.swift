@@ -193,6 +193,8 @@ struct AnimEditor: View {
             .controlSize(.large)
             if anim.mode == .audio {
                 AudioAnimControls(anim: $anim)
+            } else if anim.mode == .osc {
+                OSCAnimControls(anim: $anim)
             } else if anim.isOn {
                 ChoiceButtons(selection: $anim.motion, items: AnimMotion.allCases.map { ($0, $0.label) })
                 if anim.mode == .time {
@@ -283,6 +285,7 @@ struct BPMControl: View {
             }
             .controlSize(.large)
             .help("今を 1 拍目（小節の頭）にする")
+            BPMAutoButton()
             BeatLights()
                 .frame(height: 40)
         }
@@ -558,11 +561,15 @@ struct EffectCard: View {
                 }
             }
             if effect.kind == .polyMask { PolyMaskControls(effect: $effect) }
+            if effect.kind == .syphonIn { SyphonSourcePicker(effect: $effect) }
+            if effect.kind == .camera { CameraSourcePicker(effect: $effect) }
+            if effect.kind == .ndiIn { NDISourcePicker(effect: $effect) }
             if effect.kind.usesColor && !(effect.kind.isText && effect.value(5) > 0.5)
                 && !(effect.kind == .tunnel && effect.value(13) > 0.5)
                 && !(effect.kind == .physarum && effect.value(8) > 0.5)
                 && !(effect.kind == .attractor && effect.value(11) > 0.5)
-                && !(effect.kind == .rasterScan && abs(effect.value(4) - 1) > 0.5) {
+                && !(effect.kind == .rasterScan && abs(effect.value(4) - 1) > 0.5)
+                && !(effect.kind == .audioScope && effect.value(4) > 0.5) {
                 HStack(spacing: 10) {
                     Text("色").font(.system(size: 12)).foregroundStyle(.secondary)
                     ColorWell(color: $effect.color)
@@ -581,7 +588,8 @@ struct EffectCard: View {
                 || (effect.kind == .tunnel && effect.value(13) > 0.5 && effect.value(13) < 1.5)
                 || (effect.kind == .physarum && effect.value(8) > 0.5)
                 || (effect.kind == .particleLife && effect.value(9) > 0.5)
-                || (effect.kind == .attractor && effect.value(11) > 0.5 && effect.value(11) < 1.5) {
+                || (effect.kind == .attractor && effect.value(11) > 0.5 && effect.value(11) < 1.5)
+                || (effect.kind == .audioScope && effect.value(4) > 1.5) {
                 PaletteEditor(palette: $effect.palette)
             }
             if effect.kind == .strobe && effect.value(0) < 0.5 {

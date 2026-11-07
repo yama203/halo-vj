@@ -413,6 +413,40 @@ static float4 effectBody(VOut in, constant EffectUniforms& u, texture2d<float> t
     float2 uv = px / u.size;
     if (u.kind == 20) return tunnelBody(px, u);
     if (u.kind == 21) return warpBody(px, u, tex, s);
+    if (u.kind == 22) {
+        // 切り替えの形：a = 形（1 ワイプ / 2 円 / 3 ノイズ / 4 明るさ / 5 グリッチ）, 進み具合, ぼかし, 種
+        int k = int(u.a.x + 0.5);
+        float p = u.a.y, sft = max(u.a.z, 0.001);
+        float2 q = uv;
+        if (k == 5) {
+            // グリッチ：切り替えの途中だけ、行ごとに横へずれる
+            float row = floor(uv.y * 40.0);
+            float amt = 1.0 - abs(2.0 * p - 1.0);
+            q.x = fract(q.x + (ghash(float2(row, floor(u.a.w + p * 20.0))) - 0.5) * 0.15 * amt);
+        }
+        float4 c = tex.sample(s, q);
+        float v;
+        if (k == 1) v = uv.x;
+        else if (k == 2) {
+            float2 d = (uv - 0.5) * float2(u.size.x / u.size.y, 1.0);
+            v = length(d) / (0.5 * length(float2(u.size.x / u.size.y, 1.0)));
+        } else if (k == 3) {
+            float2 nq = uv * float2(u.size.x / u.size.y, 1.0) * 6.0 + u.a.w;
+            v = gnoise(nq) * 0.6 + gnoise(nq * 2.7 + 3.1) * 0.4;
+        } else if (k == 4) {
+            float a = max(c.a, 1e-4);
+            v = 1.0 - saturate(dot(c.rgb / a, float3(0.2126, 0.7152, 0.0722)));
+        } else if (k == 5) {
+            v = ghash(floor(uv * float2(16.0, 9.0)) + u.a.w);
+            sft = 0.001;
+        } else {
+            return c * p;
+        }
+        // 進み具合 p で、v の小さい所から現れる（ぼかしの幅も入れて、0 で何も・1 で全部）
+        float t = p * (1.0 + sft) - sft;
+        float m = 1.0 - smoothstep(t, t + sft, v);
+        return c * m;
+    }
     if (u.kind == 19) {
         // 光の流れ：a = 動いた量（速さ × 秒）, ぼけ, 帯の数, 帯の太さ / b = うねり, 色のにじみ, 虹色, 粒子感
         // pts[0] = 角度, 明るさ, 色相ずらし, まわりの光 / pts[1] = 大きさ, 経過秒
@@ -1600,6 +1634,15 @@ final class EffectProcessor {
         case .fluid:
             guard let (s, dt) = life.state(key, now: now, origin: o, warm: 0, make: { FluidSim() }) else { return }
             s.render(e, input: input, into: dst, dt: dt, now: now, stack: stack, mixAmt: mixAmt, cb: cb)
+        case .syphonIn:
+            SyphonDraw.shared.render(e, into: dst, now: now, stack: stack, cb: cb)
+        case .camera:
+            SyphonDraw.shared.renderCamera(e, into: dst, now: now, stack: stack, cb: cb)
+        case .ndiIn:
+            SyphonDraw.shared.renderNDI(e, into: dst, now: now, stack: stack, cb: cb)
+        case .audioScope:
+            guard let (s, dt) = life.state(key, now: now, origin: o, warm: 0, make: { AudioScopeSim() }) else { return }
+            s.render(e, into: dst, dt: dt, now: now, stack: stack, cb: cb)
         case .glitchBox, .vhs:
             RetroRenderer.shared.simple(e, input: input, into: dst, now: now, stack: stack, mixAmt: mixAmt, cb: cb)
         case .videoFeedback:
@@ -2176,7 +2219,7 @@ final class RenderLoop {
         /// 編集中のシーン（出力しない）
         case scenePreview
     }
-    private var targets: [ObjectIdentifier: (layer: CAMetalLayer, visible: Bool, kind: TargetKind)] = [:]
+    private var targets: [ObjectIdentifier: (layer: CAMetalLayer, visible: Bool, kind: TargetKind, output: Int)] = [:]
     private var stats = Stats()
     private var lastTick = 0.0
     private var lastNewFrame = 0.0
@@ -2212,13 +2255,18 @@ final class RenderLoop {
         CVDisplayLinkSetCurrentCGDisplay(link, id ?? CGMainDisplayID())
     }
 
-    func add(_ layer: CAMetalLayer, visible: Bool = true, kind: TargetKind = .output) {
-        lock.withLock { targets[ObjectIdentifier(layer)] = (layer, visible, kind) }
+    func add(_ layer: CAMetalLayer, visible: Bool = true, kind: TargetKind = .output, output: Int = 0) {
+        lock.withLock { targets[ObjectIdentifier(layer)] = (layer, visible, kind, output) }
         start()
     }
 
     func remove(_ layer: CAMetalLayer) {
         _ = lock.withLock { targets.removeValue(forKey: ObjectIdentifier(layer)) }
+    }
+
+    /// 出力の画面が、何番の出力か（出力の分割）
+    func setOutput(_ layer: CAMetalLayer, _ output: Int) {
+        lock.withLock { targets[ObjectIdentifier(layer)]?.output = output }
     }
 
     /// 隠れているウィンドウには描かない（描こうとすると次の描画先を待たされて全体が止まるため）
@@ -2261,7 +2309,7 @@ final class RenderLoop {
             if !gate.shouldRender(now: now, fps: fps, halfPeriod: period / 2) { return }
         }
         let updated = engine.updateFrame()
-        let current: [(ObjectIdentifier, CAMetalLayer, TargetKind)] = lock.withLock {
+        let current: [(ObjectIdentifier, CAMetalLayer, TargetKind, Int)] = lock.withLock {
             stats.ticks += 1
             monitorTicks += 1
             if lastTick > 0 {
@@ -2274,7 +2322,7 @@ final class RenderLoop {
                 if lastNewFrame > 0 { stats.maxNewFrameGapMs = max(stats.maxNewFrameGapMs, (now - lastNewFrame) * 1000) }
                 lastNewFrame = now
             }
-            return targets.filter { $0.value.visible }.map { ($0.key, $0.value.layer, $0.value.kind) }
+            return targets.filter { $0.value.visible }.map { ($0.key, $0.value.layer, $0.value.kind, $0.value.output) }
         }
         compositors = compositors.filter { id, _ in current.contains { $0.0 == id } }
 
@@ -2295,7 +2343,14 @@ final class RenderLoop {
         let fixedSize = params.format.size
         func sharedKey(_ w: Int, _ h: Int) -> Int { fixedSize == nil ? Self.aspectKey(w, h) : -1 }
         var shared: [Int: (size: (Int, Int), needs: Bool)] = [:]
-        for (_, layer, kind) in current where kind == .output || kind == .composition {
+        // 出力を分割しているときは、出力の画面は合成の形に関係ない（合成はコンポジションの形で 1 つ作って、そこから取る）
+        let slicing = params.outputMap.active
+        var sliceOutH = 0
+        for (_, layer, kind, _) in current where kind == .output || kind == .composition {
+            if slicing && kind == .output {
+                sliceOutH = max(sliceOutH, Int(layer.drawableSize.height))
+                continue
+            }
             let w = Int(layer.drawableSize.width), h = Int(layer.drawableSize.height)
             guard w > 0, h > 0 else { continue }
             let key = sharedKey(w, h)
@@ -2303,6 +2358,19 @@ final class RenderLoop {
             let old = shared[key]
             let size = fixedSize ?? (old.map { $0.size.0 * $0.size.1 >= w * h ? $0.size : (w, h) } ?? (w, h))
             shared[key] = (size, (old?.needs ?? false) || needs)
+        }
+        var sliceKey: Int?
+        if slicing && sliceOutH > 0 {
+            if let best = shared.max(by: { $0.value.size.0 * $0.value.size.1 < $1.value.size.0 * $1.value.size.1 }) {
+                sliceKey = best.key
+                shared[best.key]?.needs = true
+            } else {
+                let h = min(max(sliceOutH, 720), 2160)
+                let size = fixedSize ?? (max(Int((Double(h) * params.compAspect).rounded()), 2), h)
+                let key = sharedKey(size.0, size.1)
+                shared[key] = (size, true)
+                sliceKey = key
+            }
         }
         // 録画中は、画面が隠れていても合成する（録画の大きさで。同じ縦横比の画面があれば大きい方）
         let recSize = Recorder.shared.activeSize()
@@ -2313,6 +2381,22 @@ final class RenderLoop {
             let old = shared[key]
             let size = fixedSize ?? (old.map { $0.size.0 * $0.size.1 >= rw * rh ? $0.size : (rw, rh) } ?? (rw, rh))
             shared[key] = (size, true)
+        }
+        // Syphon・照明（Art-Net）で出しているときも合成する（出力・コンポジションの画面があれば、そのいちばん大きいものを使う）
+        var syphonKey: Int?
+        let syphonOn = SyphonOutput.shared.activeSize(outputSize: fixedSize, aspect: 16.0 / 9) != nil
+        let dmxOn = ArtNetOutput.shared.isOn
+        let ndiOn = NDIOutput.shared.isOn
+        if syphonOn || dmxOn || ndiOn {
+            if let best = shared.max(by: { $0.value.size.0 * $0.value.size.1 < $1.value.size.0 * $1.value.size.1 }) {
+                syphonKey = best.key
+                shared[best.key]?.needs = true
+            } else {
+                let (sw, sh) = fixedSize ?? (1920, 1080)
+                let key = sharedKey(sw, sh)
+                shared[key] = ((sw, sh), true)
+                syphonKey = key
+            }
         }
         var sharedTextures: [Int: MTLTexture] = [:]
         sharedCompositors = sharedCompositors.filter { shared[$0.key] != nil }
@@ -2344,6 +2428,12 @@ final class RenderLoop {
             }
         }
 
+        if let syphonKey, let tex = sharedTextures[syphonKey], let cb = ctx.queue.makeCommandBuffer() {
+            if syphonOn { SyphonOutput.shared.publish(tex, cb: cb) }
+            if dmxOn { DMXSampler.shared.sample(tex, cb: cb) }
+            if ndiOn { NDIOutput.shared.publish(tex, cb: cb) }
+            cb.commit()
+        }
         if let recKey, let (rw, rh) = recSize {
             // 縦横比が違う（解像度を決めているとき）なら、出力と同じ合わせ方で置く
             let tex = sharedTextures[recKey]
@@ -2351,8 +2441,22 @@ final class RenderLoop {
             Recorder.shared.capture(tex, master: params.compMaster, fit: fitM, now: now)
         }
 
-        for (id, layer, kind) in current {
+        for (id, layer, kind, output) in current {
             switch kind {
+            case .output where slicing:
+                // 出力の分割：この出力へ出すスライスを描く
+                guard let drawable = layer.nextDrawable(), let cb = ctx.queue.makeCommandBuffer() else { continue }
+                SliceRenderer.shared.draw(params.outputMap, output: output, composite: sliceKey.flatMap { sharedTextures[$0] },
+                                          master: params.master, testPattern: params.testPattern, into: drawable.texture, cb: cb)
+                cb.present(drawable)
+                cb.commit()
+            case .output where output != 0:
+                // 分割していないときは、出力 2・3 は黒
+                guard let drawable = layer.nextDrawable(), let cb = ctx.queue.makeCommandBuffer() else { continue }
+                SliceRenderer.shared.draw(OutputMap(), output: output, composite: nil, master: 0, testPattern: false,
+                                          into: drawable.texture, cb: cb)
+                cb.present(drawable)
+                cb.commit()
             case .output, .composition:
                 let dw = Double(layer.drawableSize.width), dh = Double(layer.drawableSize.height)
                 let tex = sharedTextures[sharedKey(Int(dw), Int(dh))]
@@ -2461,10 +2565,13 @@ final class RenderLoop {
 final class MetalLayerView: NSView {
     let metalLayer = CAMetalLayer()
     let kind: RenderLoop.TargetKind
+    /// 何番の出力か（出力の分割。出力の画面のときだけ使う）
+    private(set) var output = 0
     private var occlusionObserver: NSObjectProtocol?
 
-    init(frame: NSRect, kind: RenderLoop.TargetKind = .output) {
+    init(frame: NSRect, kind: RenderLoop.TargetKind = .output, output: Int = 0) {
         self.kind = kind
+        self.output = output
         super.init(frame: frame)
         metalLayer.device = MetalContext.shared.device
         metalLayer.pixelFormat = .bgra8Unorm
@@ -2479,6 +2586,12 @@ final class MetalLayerView: NSView {
     required init?(coder: NSCoder) { fatalError() }
 
     override func makeBackingLayer() -> CALayer { metalLayer }
+
+    func setOutput(_ n: Int) {
+        guard n != output else { return }
+        output = n
+        RenderLoop.shared.setOutput(metalLayer, n)
+    }
 
     override func layout() {
         super.layout()
@@ -2506,7 +2619,7 @@ final class MetalLayerView: NSView {
             return
         }
         updateDrawableSize()
-        RenderLoop.shared.add(metalLayer, visible: window.occlusionState.contains(.visible), kind: kind)
+        RenderLoop.shared.add(metalLayer, visible: window.occlusionState.contains(.visible), kind: kind, output: output)
         occlusionObserver = NotificationCenter.default.addObserver(
             forName: NSWindow.didChangeOcclusionStateNotification, object: window, queue: .main
         ) { [weak self] _ in

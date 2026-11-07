@@ -498,6 +498,10 @@ private struct PadContextMenu: View {
             }
             Button("エフェクトを探して追加…") { showPicker = true }
             Menu("エフェクトを追加") { AddEffectMenuItems { k in pad.addEffectOpened(k) } }
+            if let index {
+                Divider()
+                ControlMenuItems(address: "/halo/pad/\(index + 1)", verb: "押す", title: "パッド \(pad.displayName) を押す")
+            }
             PadTimeMenus(pad: pad)
             Button("空にする") { pad.effects = [] }
                 .disabled(empty)

@@ -18,6 +18,23 @@ final class FrameStream {
     private let capacity: Int
     private var reader: AVAssetReader?
     private var output: AVAssetReaderTrackOutput?
+    /// HAP の動画なら、圧縮されたままの中身を読んで、ここで絵にする
+    private var hap: HapDecoder?
+
+    /// 動画の映像を読む出口（HAP は圧縮されたまま）
+    private static func makeOutput(_ track: AVAssetTrack) -> (AVAssetReaderTrackOutput, HapDecoder?) {
+        if Hap.isHap(track) {
+            let s = track.naturalSize
+            return (AVAssetReaderTrackOutput(track: track, outputSettings: nil),
+                    HapDecoder(width: Int(s.width.rounded()), height: Int(s.height.rounded())))
+        }
+        return (AVAssetReaderTrackOutput(track: track, outputSettings: outputSettings), nil)
+    }
+
+    private func pixelBuffer(_ sb: CMSampleBuffer) -> CVPixelBuffer? {
+        if let hap { return hap.decode(sb) }
+        return CMSampleBufferGetImageBuffer(sb)
+    }
 
     // 逆再生用
     let isReverse: Bool
@@ -60,10 +77,11 @@ final class FrameStream {
             reader.timeRange = CMTimeRange(start: CMTime(seconds: start, preferredTimescale: 6000),
                                            duration: .positiveInfinity)
         }
-        let output = AVAssetReaderTrackOutput(track: track, outputSettings: Self.outputSettings)
+        let (output, hap) = Self.makeOutput(track)
         output.alwaysCopiesSampleData = false
         self.reader = reader
         self.output = output
+        self.hap = hap
         reader.add(output)
         guard reader.startReading() else {
             throw reader.error ?? NSError(domain: "VJPlayer", code: 1, userInfo: [NSLocalizedDescriptionKey: "映像を読み込めません"])
@@ -86,7 +104,7 @@ final class FrameStream {
                 cond.lock(); finished = true; cond.broadcast(); cond.unlock()
                 break
             }
-            guard let pb = CMSampleBufferGetImageBuffer(sb) else { continue }
+            guard let pb = pixelBuffer(sb) else { continue }
             let pts = CMSampleBufferGetPresentationTimeStamp(sb).seconds
             cond.lock()
             if pts <= requestedPos {
@@ -121,12 +139,13 @@ final class FrameStream {
             if let r = try? AVAssetReader(asset: asset) {
                 r.timeRange = CMTimeRange(start: CMTime(seconds: cs, preferredTimescale: 6000),
                                           end: CMTime(seconds: ce, preferredTimescale: 6000))
-                let o = AVAssetReaderTrackOutput(track: track, outputSettings: Self.outputSettings)
+                let (o, hd) = Self.makeOutput(track)
+                if hap == nil { hap = hd }
                 o.alwaysCopiesSampleData = false
                 r.add(o)
                 if r.startReading() {
                     while let sb = o.copyNextSampleBuffer() {
-                        guard let pb = CMSampleBufferGetImageBuffer(sb) else { continue }
+                        guard let pb = pixelBuffer(sb) else { continue }
                         let pts = CMSampleBufferGetPresentationTimeStamp(sb).seconds
                         // 区間の頭より前のコマ（区切りの都合で入ってくる）は次の区間で読む。ただし一番下は含める
                         if pts < ce - 0.00001 && (pts >= cs - 0.00001 || cs <= reverseLower) {

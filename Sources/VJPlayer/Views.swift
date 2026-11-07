@@ -122,6 +122,7 @@ struct ContentView: View {
             Divider()
             StatusBar()
         }
+        .overlay(alignment: .top) { ControlLearnBanner() }
         .background(WindowTitleSync(
             title: (engine.projectURL?.deletingPathExtension().lastPathComponent ?? "名称未設定") + " — " + AppInfo.name,
             url: engine.projectURL, edited: engine.isDirty))
@@ -252,6 +253,7 @@ struct TopBar: View {
             }
             .help("オーディオデバイス一覧を更新")
             AudioInputButton()
+            LinkButton()
 
             Spacer()
 
@@ -879,6 +881,13 @@ struct SlotCell: View {
                 .allowsHitTesting(false)
             }
         }
+        .overlay(alignment: .bottomLeading) {
+            if engine.slots[index] != nil {
+                ControlBadge(address: "/halo/layer/\(engine.layerOf(index) + 1)/clip/\(engine.columnOf(index) + 1)")
+                    .padding(.leading, 4).padding(.bottom, gridSize.stripHeight + 3)
+                    .allowsHitTesting(false)
+            }
+        }
         .overlay(alignment: .topTrailing) {
             if liveHere {
                 Text("出力中")
@@ -1051,6 +1060,9 @@ struct SlotCell: View {
                 Button("速度を 1.0x に戻す") { slot.speed = 1.0 }
                 Button("選択（出力せずに編集）") { engine.selectClip(index) }
                 Button("名前を変える…") { ClipRename.ask(slot) }
+                Divider()
+                ControlMenuItems(address: "/halo/layer/\(engine.layerOf(index) + 1)/clip/\(engine.columnOf(index) + 1)",
+                                 verb: "出す", title: "L\(engine.layerOf(index) + 1) の \(engine.columnOf(index) + 1) 列目のクリップを出す")
                 Button(slot.muted ? "ミュートを解除" : "ミュート（映像と音を出さない）") { slot.muted.toggle() }
                 Button("トランスフォームをリセット") { slot.resetTransform() }
                 if !slot.isGenerator {

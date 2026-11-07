@@ -739,6 +739,13 @@ struct LayerParams: View {
                         .help("このレイヤーでクリップを切り替えるときのクロスフェード時間（映像・音とも）。0 でカット")
                 }
                 .frame(height: UI.rowHeight)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("切り替え方").font(.system(size: 11)).foregroundStyle(.secondary)
+                    ChoiceButtons(selection: $layer.transition, items: Transition.allCases.map { ($0, $0.label) })
+                        .help(Transition.allCases.map { $0.label + "：" + $0.help }.joined(separator: "\n")
+                              + "\n（切り替えフェードの時間をかけて切り替わる。重ね方が「通常」のとき）")
+                }
+                .opacity(layer.fadeTime < 0.005 ? 0.5 : 1)
             }
         }
         if layer.blend.isSpecial {

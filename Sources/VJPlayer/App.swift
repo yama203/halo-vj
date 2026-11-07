@@ -120,11 +120,15 @@ struct VJPlayerApp: App {
                 Divider()
                 Button("見つからない動画を探す…") { ProjectMenu.findMissing() }
             }
+            CommandGroup(replacing: .undoRedo) {
+                UndoMenuItems(history: Engine.shared.undoHistory)
+            }
             CommandGroup(replacing: .saveItem) {
                 Button("保存") { ProjectMenu.save() }
                     .keyboardShortcut("s", modifiers: .command)
                 Button("別名で保存…") { ProjectMenu.saveAs() }
                     .keyboardShortcut("s", modifiers: [.command, .shift])
+                Button("素材をまとめて保存…") { CollectMenu.run() }
             }
             // 使わない標準の項目（英語の「Toggle Sidebar」・空の「表示」の中身）は出さない
             CommandGroup(replacing: .sidebar) {}
@@ -149,6 +153,10 @@ struct VJPlayerApp: App {
                 Button("全レイヤーを停止") { Engine.shared.stopAll() }
                     .keyboardShortcut(.escape, modifiers: [.shift])
                 Divider()
+                Button("出力の分割…") { OutputMapWindow.shared.show() }
+                    .keyboardShortcut("m", modifiers: [.command, .shift])
+                Button("照明（Art-Net / DMX）…") { DMXWindow.shared.show() }
+                Divider()
                 Button("録画を始める／止める") { Recorder.shared.toggle() }
                     .keyboardShortcut("r", modifiers: .command)
             }
@@ -170,6 +178,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             AudioReactive.shared.source = src
         } else {
             AudioReactive.shared.startIfNeeded()
+        }
+        // ほかのアプリとのやりとり（Syphon・OSC）：前の設定で始める（画面確認用の別の起動では始めない）
+        if ProcessInfo.processInfo.environment["VJ_STATE_PATH"] == nil {
+            SyphonOutput.shared.startIfNeeded()
+            OSCHub.shared.startIfNeeded()
+            ControlHub.shared.startIfNeeded()
+            BeatDetector.shared.startIfNeeded()
+            ArtNetOutput.shared.startIfNeeded()
+            NDIOutput.shared.startIfNeeded()
         }
 
         // 本番中にスリープ・App Nap で止まらないようにする
@@ -218,6 +235,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         FileHandle.standardError.write("RECORD done \(u?.path ?? "nil") frames=\(c.frames) dropped=\(c.dropped)\n".data(using: .utf8)!)
                     }
                 }
+            }
+        }
+        // 画面確認用：VJ_OUTPUT_MAP=ひな形の数 で、出力の分割の窓を開く（その数の横並びを入れて）
+        if let v = env["VJ_OUTPUT_MAP"], let n = Int(v) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                Engine.shared.outputMap.slices = OutputMap.preset(count: n, overlap: 0.15)
+                Engine.shared.outputMap.enabled = true
+                OutputMapWindow.shared.show()
             }
         }
         // 画面確認用：VJ_PRINT_MENUS=1 で、メニューバーの項目の名前を書き出す（日本語になっているかの確認）
@@ -301,12 +326,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// （クリップのキー割り当ては、あとで手動で決められるようにする予定。今は割り当てなし）
     private static func handleKey(_ event: NSEvent) -> Bool {
         // FX パッド：キーを離したら（修飾キーに関係なく）離す
-        if event.type == .keyUp { return Engine.shared.padKeyUp(event.keyCode) }
+        if event.type == .keyUp {
+            if ControlHub.shared.key(event, down: false) { return true }
+            return Engine.shared.padKeyUp(event.keyCode)
+        }
         let mods = event.modifierFlags.intersection([.command, .control, .option])
         guard mods.isEmpty else { return false }
         let shift = event.modifierFlags.contains(.shift)
         // テキスト入力中は横取りしない
         if NSApp.keyWindow?.firstResponder is NSTextView { return false }
+        // キーの割り当て（覚えている途中は、どのキーも覚える）
+        if ControlHub.shared.key(event, down: true) { return true }
 
         if event.keyCode == 53 { // Esc
             if event.isARepeat { return true }

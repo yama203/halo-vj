@@ -11,8 +11,10 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
     /// 昔のアナログ映像機材をまねたもの
     case glitchBox, vhs, videoFeedback, rasterScan, crt
     /// ジェネレーター（動画の代わりにクリップとして置く絵）。エフェクト一覧には出さない
-    case solid, gradient, stripes, grid, noise, shapes, text, clock, phyllotaxis, lines, dots, flow, school, tunnel, physarum, particleLife, fireflies, attractor
+    case solid, gradient, stripes, grid, noise, shapes, text, clock, phyllotaxis, lines, dots, flow, school, tunnel, physarum, particleLife, fireflies, attractor, syphonIn, camera, audioScope, ndiIn
     /// 特殊合成（レイヤーの重ね方）の値。エフェクト一覧には出さない
+    /// 切り替えの形（レイヤーの切り替え方で、新しいクリップに内部でかける。一覧には出さない）
+    case transitionMask
     case overdrive, blendRefract, blendLight, blendFlow, blendInterfere, blendBorrow, blendDissolve
     var id: String { rawValue }
 
@@ -30,11 +32,11 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
 
     /// ジェネレーターか（クリップとして置く。エフェクトとしては並べない）
     var isGenerator: Bool { Self.generators.contains(self) }
-    static let generators: [EffectKind] = [.solid, .gradient, .flow, .lines, .dots, .school, .tunnel, .physarum, .particleLife, .fireflies, .attractor, .stripes, .grid, .noise, .shapes, .phyllotaxis, .text, .clock]
+    static let generators: [EffectKind] = [.solid, .gradient, .flow, .lines, .dots, .school, .tunnel, .physarum, .particleLife, .fireflies, .attractor, .audioScope, .syphonIn, .ndiIn, .camera, .stripes, .grid, .noise, .shapes, .phyllotaxis, .text, .clock]
     /// 文字を描くジェネレーター（テキスト・時計。描き方は同じ）
     var isText: Bool { self == .text || self == .clock }
     /// 色を 1 つ使うジェネレーター（「色」を出す）
-    var usesColor: Bool { [.solid, .stripes, .grid, .noise, .shapes, .text, .clock, .phyllotaxis, .lines, .dots, .flow, .school, .tunnel, .physarum, .fireflies, .attractor, .rasterScan].contains(self) }
+    var usesColor: Bool { [.solid, .stripes, .grid, .noise, .shapes, .text, .clock, .phyllotaxis, .lines, .dots, .flow, .school, .tunnel, .physarum, .fireflies, .attractor, .rasterScan, .audioScope].contains(self) }
     /// 「速さ」の値の番号。シェーダーには速さ × 経過時間（動いた量）を渡す
     var speedIndex: Int? {
         switch self {
@@ -74,6 +76,10 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
         case .flow: "光の流れ"
         case .school: "群れ（魚・鳥）"
         case .tunnel: "トンネル"
+        case .syphonIn: "Syphon から"
+        case .camera: "カメラから"
+        case .ndiIn: "NDI から"
+        case .audioScope: "音の形（スペクトラム・波形）"
         case .glitchBox: "グリッチボックス"
         case .vhs: "VHS テープ"
         case .videoFeedback: "ビデオフィードバック"
@@ -86,6 +92,7 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
         case .timeWarp: "時間のずらし（スリットスキャン）"
         case .fluid: "流体（絵の具を流す）"
         case .warp: "うねり（有機的な歪み）"
+        case .transitionMask: "切り替えの形"
         case .overdrive: "オーバードライブ加算"
         case .blendRefract: "屈折（ガラス越し）"
         case .blendLight: "光で照らす"
@@ -104,8 +111,8 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
         case .posterizeTime, .timeWarp, .strobe, .echo: .time
         case .glitchBox, .vhs, .videoFeedback, .rasterScan, .crt: .retro
         case .shapeMask, .polyMask: .mask
-        case .solid, .gradient, .stripes, .grid, .noise, .shapes, .text, .clock, .phyllotaxis, .lines, .dots, .flow, .school, .tunnel, .physarum, .particleLife, .fireflies, .attractor: .generator
-        case .overdrive, .blendRefract, .blendLight, .blendFlow, .blendInterfere, .blendBorrow, .blendDissolve: .blend
+        case .solid, .gradient, .stripes, .grid, .noise, .shapes, .text, .clock, .phyllotaxis, .lines, .dots, .flow, .school, .tunnel, .physarum, .particleLife, .fireflies, .attractor, .syphonIn, .camera, .audioScope, .ndiIn: .generator
+        case .overdrive, .blendRefract, .blendLight, .blendFlow, .blendInterfere, .blendBorrow, .blendDissolve, .transitionMask: .blend
         }
     }
 
@@ -135,6 +142,10 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
         case .flow: "wand.and.rays"
         case .school: "fish"
         case .tunnel: "circle.circle.fill"
+        case .syphonIn: "rectangle.connected.to.line.below"
+        case .camera: "video.fill"
+        case .ndiIn: "network"
+        case .audioScope: "waveform"
         case .glitchBox: "waveform.path.ecg"
         case .vhs: "recordingtape"
         case .videoFeedback: "rectangle.on.rectangle.angled"
@@ -148,6 +159,7 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
         case .fluid: "drop.fill"
         case .warp: "water.waves"
         case .overdrive: "sun.max"
+        case .transitionMask: "rectangle.righthalf.inset.filled"
         case .blendRefract: "drop.circle"
         case .blendLight: "flashlight.on.fill"
         case .blendFlow: "wind"
@@ -192,7 +204,8 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
         case .flow: 19
         case .tunnel: 20
         case .warp: 21
-        case .glitchBox, .vhs, .videoFeedback, .rasterScan, .crt: -1
+        case .glitchBox, .vhs, .videoFeedback, .rasterScan, .crt, .syphonIn, .camera, .audioScope, .ndiIn: -1
+        case .transitionMask: 22
         case .posterizeTime, .overdrive, .blendRefract, .blendLight, .blendFlow, .blendInterfere, .blendBorrow, .blendDissolve, .school, .physarum, .particleLife, .fireflies, .attractor, .timeWarp, .fluid: -1
         }
     }
@@ -291,6 +304,13 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
                 EffectParam(label: "ふちの色相", range: 0...360, defaultValue: 25, perPoint: 1,
                             format: { String(format: "%.0f°", $0) }, animRange: 0...360),
                 EffectParam(label: "ノイズを混ぜる", range: 0...1, defaultValue: 0.3, format: EffectParam.percent),
+            ]
+        case .transitionMask:
+            return [
+                EffectParam(label: "形", range: 0...5, defaultValue: 0),
+                EffectParam(label: "進み具合", range: 0...1, defaultValue: 0),
+                EffectParam(label: "ぼかし", range: 0...0.5, defaultValue: 0.08),
+                EffectParam(label: "種", range: 0...1000, defaultValue: 0),
             ]
         case .overdrive:
             // 加算して 100% を超えた分（あふれ）をどう見せるか
@@ -579,6 +599,30 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
                 EffectParam(label: "まわりを暗く", range: 0...1, defaultValue: 0.4, format: EffectParam.percent),
                 EffectParam(label: "明るさ", range: 0.5...3, defaultValue: 1.35, perPoint: 0.003, format: EffectParam.percent),
                 EffectParam(label: "ちらつき", range: 0...1, defaultValue: 0.05, format: EffectParam.percent),
+            ]
+        case .audioScope:
+            return [
+                EffectParam(label: "形", range: 0...4, defaultValue: 0, choices: ["棒", "線", "波形", "円（棒）", "円（波形）"]),
+                EffectParam(label: "帯の数", range: 4...128, defaultValue: 48, perPoint: 0.1, step: 1,
+                            format: { String(format: "%.0f 本", $0) }),
+                EffectParam(label: "高さ", range: 0...2, defaultValue: 1, perPoint: 0.003, format: EffectParam.percent),
+                EffectParam(label: "太さ", range: 0...1, defaultValue: 0.6, format: EffectParam.percent),
+                EffectParam(label: "色の付け方", range: 0...2, defaultValue: 1, choices: ["1 色", "虹色", "パレット"]),
+                EffectParam(label: "上下対称", range: 0...1, defaultValue: 0, isToggle: true),
+                EffectParam(label: "なめらかさ", range: 0...1, defaultValue: 0.5, format: EffectParam.percent),
+                EffectParam(label: "明るさ", range: 0...3, defaultValue: 1, perPoint: 0.003, format: EffectParam.percent),
+                EffectParam(label: "円の大きさ", range: 0.05...0.45, defaultValue: 0.22, perPoint: 0.001, format: EffectParam.percent),
+            ]
+        case .camera:
+            return [
+                EffectParam(label: "合わせ方", range: 0...2, defaultValue: 1, choices: ["収める", "いっぱいに", "引き伸ばす"]),
+                EffectParam(label: "左右反転（鏡）", range: 0...1, defaultValue: 0, isToggle: true),
+                EffectParam(label: "濃さ", range: 0...1, defaultValue: 1, format: EffectParam.percent),
+            ]
+        case .syphonIn, .ndiIn:
+            return [
+                EffectParam(label: "合わせ方", range: 0...2, defaultValue: 0, choices: ["収める", "いっぱいに", "引き伸ばす"]),
+                EffectParam(label: "濃さ", range: 0...1, defaultValue: 1, format: EffectParam.percent),
             ]
         case .tunnel:
             // トンネル：奥へ進む筒の内側。速さは進んだ量にして渡す
@@ -883,6 +927,10 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
         case .videoFeedback: "カメラで、それを映しているモニターを撮ったように、前のコマを拡大・回転・色相ずれさせて重ね続ける。画面の中に画面が無限に続き、渦やトンネルが生まれる。暗い所を切り抜くと、そこから前の絵が見える"
         case .rasterScan: "70 年代の映像シンセ（Rutt/Etra）のように、絵を横の走査線に分けて、明るい所ほど線を持ち上げる。映像が波打つ線の地形になる（まわりは透明）"
         case .crt: "昔のブラウン管モニターに映したように。走査線・蛍光体の RGB の粒・画面のふくらみ・にじむ光・明るいものが尾を引く残光・まわりの暗さ。ほかのエフェクトの最後にかけると全体がモニターに映る"
+        case .audioScope: "音（上部の「音の入力」）の、周波数ごとの大きさ（スペクトラム）と波形を、そのまま絵にする。棒・線・波形・円（棒）・円（波形）（まわりは透明）"
+        case .ndiIn: "同じネットワークの別の Mac・PC（TouchDesigner・Resolume・OBS など）が NDI で出している映像を、クリップとして置く。映像の選び方はこの欄の下。NDI ランタイム（NDI Tools）が要る"
+        case .camera: "Web カメラ・HDMI キャプチャ・iPhone（連係カメラ）の映像を、クリップとして置く。カメラの選び方はこの欄の下"
+        case .syphonIn: "ほかのアプリ（TouchDesigner など）が Syphon で出している映像を、クリップとして置く。映像の選び方はこの欄の下（透明はそのまま）"
         case .tunnel: "奥へ奥へと進んでいくトンネル。輪・格子・チェッカー・光の筋・もやの模様で、形は円・四角・六角・三角。回す・ねじる・うねって曲がる。奥は暗くなって透ける（まわりは透明）"
         case .warp: "水の中・熱気・渦のように、絵をぬるぬるとゆがませる。ねばりを上げると、ゆがみがゆがみを呼んで生き物のような模様に。色のずれでふちが虹色ににじむ"
         case .school: "イワシやムクドリのような群れ。1 匹ずつが、まわりに寄る・向きをそろえる・ぶつからないように間をあける、だけで動き、群れ全体がうねって形を変える。天敵から逃げると群れが割れてまた集まる。厚みで 3D になり、回るカメラから見る（まわりは透明）"
@@ -902,6 +950,7 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
         case .blendInterfere: "2 つの絵の明るさを波として重ね、ずれた所に動く縞（モアレ）を出す"
         case .blendBorrow: "下の絵の明るさ（形）に、このレイヤーの色を借りて塗る。このレイヤーをパレットとして使うこともできる"
         case .blendDissolve: "下の絵の暗い所（または明るい所・ノイズ）から順に、このレイヤーへ溶けていく。ふちは燃えるように光る"
+        case .transitionMask: "（内部用）"
         case .overdrive: "下のレイヤーに加算して 100% を超えた分を、にじみ（ハレーション）・色相ずれ・波紋に変える"
         }
     }
@@ -909,7 +958,7 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
 
 /// ジェネレーター一覧の分類
 enum GeneratorCategory: Int, CaseIterable, Identifiable {
-    case color, pattern, shape, text
+    case color, pattern, shape, text, external
     var id: Int { rawValue }
     var label: String {
         switch self {
@@ -917,6 +966,7 @@ enum GeneratorCategory: Int, CaseIterable, Identifiable {
         case .pattern: "線・模様"
         case .shape: "図形・粒"
         case .text: "文字・時計"
+        case .external: "ほかのアプリ・カメラから"
         }
     }
     /// この分類のジェネレーター（一覧に出す順）
@@ -930,8 +980,9 @@ extension EffectKind {
         case .solid, .gradient: .color
         case .lines, .dots, .stripes, .grid, .noise: .pattern
         case .shapes, .phyllotaxis, .flow, .school, .tunnel, .particleLife, .fireflies: .shape
-        case .physarum, .attractor: .pattern
+        case .physarum, .attractor, .audioScope: .pattern
         case .text, .clock: .text
+        case .syphonIn, .camera, .ndiIn: .external
         default: nil
         }
     }
@@ -1212,9 +1263,10 @@ struct Effect: Codable, Identifiable, Equatable {
         // 文字は暗い色だと沈むので、明るい色だけのパレット
         if kind == .phyllotaxis { color = RGB.hsb(0.11, 0.55, 1) }
         if kind == .clock { text = ClockText.defaultFinish; values[1] = 0.3; values[6] = 4 }
+        if kind == .syphonIn || kind == .camera || kind == .ndiIn { text = "" }
         if kind == .fireflies { color = RGB(r: 0.78, g: 1.0, b: 0.35) }
         if kind == .physarum { color = RGB(r: 1.0, g: 0.85, b: 0.45) }
-        if kind == .attractor || kind == .physarum { palette = PalettePreset.all[1].colors }
+        if kind == .attractor || kind == .physarum || kind == .audioScope { palette = PalettePreset.all[1].colors }
         if kind.isText || kind == .tunnel || kind == .particleLife { palette = [PalettePreset.hex(0x6A00FF), PalettePreset.hex(0xFF00C8), PalettePreset.hex(0x00F0FF)] }
     }
 

@@ -55,7 +55,7 @@ struct EffectBrowser: View {
                     }
                     if !generators {
                     ForEach(EffectCategory.allCases) { cat in
-                        let items = EffectKind.allCases.filter { $0.category == cat && !$0.isBlend && !$0.isGenerator && matches($0) }
+                        let items = EffectKind.allCases.filter { $0.category == cat && !$0.isBlend && !$0.isGenerator && $0 != .transitionMask && matches($0) }
                         if !items.isEmpty {
                             SectionTitle(cat.label)
                             LazyVGrid(columns: [GridItem(.adaptive(minimum: 190), spacing: 8)], spacing: 8) {
@@ -166,7 +166,7 @@ struct AddEffectMenuItems: View {
     /// 分類と、その中のエフェクト（空の分類は入れない）
     static var groups: [(EffectCategory, [EffectKind])] {
         EffectCategory.allCases.compactMap { cat in
-            let items = EffectKind.allCases.filter { $0.category == cat && !$0.isBlend && !$0.isGenerator }
+            let items = EffectKind.allCases.filter { $0.category == cat && !$0.isBlend && !$0.isGenerator && $0 != .transitionMask }
             return items.isEmpty ? nil : (cat, items)
         }
     }

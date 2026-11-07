@@ -818,6 +818,20 @@ final class ClipSlot: ObservableObject, Identifiable, Animatable, EffectHolder {
         if let (cg, _) = try? await gen.image(at: t) {
             let img = NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
             await MainActor.run { self.thumbnail = img }
+        } else if let vt = videoTrack, Hap.isHap(vt), let s = try? FrameStream(asset: asset, track: vt, capacity: 2, start: min(1.0, duration * 0.1)) {
+            // HAP は AVFoundation が読めないので、自前で 1 コマ読む
+            s.waitUntilPrimed(timeout: 3)
+            let f = s.frame(at: .infinity)
+            s.cancel()
+            if let pb = f?.buffer {
+                let ci = CIImage(cvPixelBuffer: pb)
+                let scale = min(320 / ci.extent.width, 180 / ci.extent.height, 1)
+                let small = ci.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+                if let cg = CIContext().createCGImage(small, from: small.extent) {
+                    let img = NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
+                    await MainActor.run { self.thumbnail = img }
+                }
+            }
         }
     }
 

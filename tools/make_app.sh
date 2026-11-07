@@ -37,6 +37,11 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>NSHighResolutionCapable</key><true/>
   <!-- 音に反応させる：マイク・ライン入力の音を読む -->
+  <!-- OSC：iPad や TouchDesigner と、ネットワークで値をやりとりする -->
+  <key>NSLocalNetworkUsageDescription</key><string>iPad や TouchDesigner と OSC で値をやりとりする・NDI で映像をやりとりする・照明（Art-Net）に送るために使います。</string>
+  <!-- カメラ・キャプチャの入力 -->
+  <key>NSBonjourServices</key><array><string>_ndi._tcp</string></array>
+  <key>NSCameraUsageDescription</key><string>Web カメラ・HDMI キャプチャ・iPhone の映像をクリップとして使うために使います。</string>
   <key>NSMicrophoneUsageDescription</key><string>音（マイク・ライン入力）に合わせて映像を動かすために使います。</string>
   <key>NSSupportsAutomaticGraphicsSwitching</key><false/>
   <!-- プロジェクトファイル（.halovj。以前の .vjproj も）：アイコンと、ダブルクリックで開く -->
@@ -66,6 +71,29 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </dict>
 </plist>
 PLIST
+# NDI：NDI SDK for Apple（ndi.video から落として、使用許諾に同意したもの）が入っていれば、libndi とライセンス文書を同梱する。
+# 無ければ同梱しない（アプリは、入っている NDI ランタイムを探して使う）。ほかのアプリに入っている libndi はコピーしない
+NDI_SDK="${NDI_SDK_DIR:-}"
+if [ -z "$NDI_SDK" ]; then
+  for d in "/Library/NDI SDK for Apple" "/Library/NDI SDK for macOS" "$HOME/NDI SDK for Apple"; do
+    [ -f "$d/lib/macOS/libndi.dylib" ] && NDI_SDK="$d" && break
+  done
+fi
+if [ -n "$NDI_SDK" ] && [ -f "$NDI_SDK/lib/macOS/libndi.dylib" ]; then
+  mkdir -p "$APP/Contents/Frameworks" "$APP/Contents/Resources/NDI"
+  cp "$NDI_SDK/lib/macOS/libndi.dylib" "$APP/Contents/Frameworks/"
+  find "$NDI_SDK" -maxdepth 3 \( -iname '*licen*' -o -iname '*eula*' \) -type f -exec cp {} "$APP/Contents/Resources/NDI/" \;
+  echo "NDI を同梱しました: $NDI_SDK"
+else
+  echo "NDI SDK が見つからないので、NDI は同梱しません（入っている NDI ランタイムを使います）"
+fi
+# About の窓に出す文（NDI の商標の表記・Syphon）
+cat > "$APP/Contents/Resources/Credits.html" <<'CREDITS'
+<div style="font: 11px -apple-system; text-align: center">
+<p>NDI&reg; is a registered trademark of Vizrt NDI AB.<br><a href="https://ndi.video">ndi.video</a></p>
+<p>Syphon &copy; Syphon contributors (BSD License).<br><a href="https://syphon.github.io">syphon.github.io</a></p>
+</div>
+CREDITS
 # 署名：作り直しても同じアプリと見なされるように、指定要件をバンドル ID にする
 # （ふつうのアドホック署名だと、作り直すたびにマイクの許可が外れて、音が 0 のまま届く）
 codesign --force --sign - --requirements '=designated => identifier "local.yama.vjplayer"' "$APP"

@@ -32,6 +32,61 @@ final class OutputController: NSObject, ObservableObject, NSWindowDelegate {
     }
     @Published private(set) var screens: [NSScreen] = NSScreen.screens
 
+    /// 出力の分割で使う出力の数（出力 1 は target、2・3 は extra）
+    static let maxOutputs = 3
+    @Published var extra: [OutputTarget] = [.none, .none] {
+        didSet { for i in extra.indices where i >= oldValue.count || oldValue[i] != extra[i] { applyExtra(i) } }
+    }
+    private var extraWindows: [Int: NSWindow] = [:]
+
+    /// 出力 i（0 = 出力 1）の出力先
+    func binding(_ i: Int) -> Binding<OutputTarget> {
+        Binding(get: { i == 0 ? self.target : self.extra[i - 1] },
+                set: { v in if i == 0 { self.target = v } else { self.extra[i - 1] = v } })
+    }
+
+    /// 出力 i の画面の縦横比（出していなければ 16:9）
+    func aspect(of i: Int) -> CGFloat {
+        let t = i == 0 ? target : extra[i - 1]
+        if case .screen(let id) = t, let s = screens.first(where: { Self.displayID(of: $0) == id }) {
+            return s.frame.width / max(s.frame.height, 1)
+        }
+        if i == 0 { return Engine.shared.screenAspect }
+        return 16.0 / 9.0
+    }
+
+    private func applyExtra(_ i: Int) {
+        extraWindows[i]?.delegate = nil
+        extraWindows[i]?.orderOut(nil)
+        extraWindows[i] = nil
+        let out = i + 1
+        switch extra[i] {
+        case .none:
+            return
+        case .window:
+            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 360),
+                             styleMask: [.titled, .resizable, .closable, .miniaturizable], backing: .buffered, defer: false)
+            w.title = "出力 \(out + 1)"
+            w.isReleasedWhenClosed = false
+            w.contentView = MetalLayerView(frame: w.contentLayoutRect, kind: .output, output: out)
+            w.center()
+            extraWindows[i] = w
+            w.makeKeyAndOrderFront(nil)
+        case .screen(let id):
+            guard let screen = screens.first(where: { Self.displayID(of: $0) == id }) else { extra[i] = .none; return }
+            let w = NSWindow(contentRect: screen.frame, styleMask: [.borderless], backing: .buffered, defer: false, screen: screen)
+            w.setFrame(screen.frame, display: true)
+            w.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.mainMenuWindow)) + 1)
+            w.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
+            w.backgroundColor = .black
+            w.hasShadow = false
+            w.isReleasedWhenClosed = false
+            w.contentView = MetalLayerView(frame: w.contentLayoutRect, kind: .output, output: out)
+            extraWindows[i] = w
+            w.orderFrontRegardless()
+        }
+    }
+
     private var window: NSWindow?
 
     private override init() {
@@ -55,6 +110,9 @@ final class OutputController: NSObject, ObservableObject, NSWindowDelegate {
 
     private func screensChanged() {
         screens = NSScreen.screens
+        for i in extra.indices {
+            if case .screen(let id) = extra[i], !screens.contains(where: { Self.displayID(of: $0) == id }) { extra[i] = .none }
+        }
         // 出力先のディスプレイが抜かれたら出力を閉じる
         if case .screen(let id) = target, !screens.contains(where: { Self.displayID(of: $0) == id }) {
             target = .none
