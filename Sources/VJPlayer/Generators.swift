@@ -25,17 +25,8 @@ enum GeneratorThumbnail {
         guard out !== blank else { return nil }
         var px = [UInt8](repeating: 0, count: size.w * size.h * 4)
         out.getBytes(&px, bytesPerRow: size.w * 4, from: MTLRegionMake2D(0, 0, size.w, size.h), mipmapLevel: 0)
-        // 透明な所は市松模様にして、透明だと分かるように
-        for y in 0..<size.h {
-            for x in 0..<size.w {
-                let i = (y * size.w + x) * 4
-                let a = Double(px[i + 3]) / 255
-                let bg: Double = ((x / 8 + y / 8) % 2 == 0) ? 40 : 60
-                for c in 0..<3 { px[i + c] = UInt8(min(Double(px[i + c]) + bg * (1 - a), 255)) }
-                px[i + 3] = 255
-                px.swapAt(i, i + 2)   // BGRA → RGBA
-            }
-        }
+        // 透明はそのまま（色に不透明度が掛かった絵）。地の色・市松模様はグリッドの方で付ける
+        for i in stride(from: 0, to: px.count, by: 4) { px.swapAt(i, i + 2) }   // BGRA → RGBA
         guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: size.w, pixelsHigh: size.h, bitsPerSample: 8,
                                          samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
                                          bytesPerRow: size.w * 4, bitsPerPixel: 32) else { return nil }

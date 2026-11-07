@@ -286,6 +286,8 @@ struct FXPadButton: View {
     let held: Bool
     @State private var pressing = false
     @State private var showSettings = false
+    /// 右クリックの「探して追加…」で開く、エフェクトを探す窓
+    @State private var showPicker = false
     @State private var dropTargeted = false
 
     var body: some View {
@@ -370,14 +372,15 @@ struct FXPadButton: View {
         .onDrop(of: EffectDrop.types, isTargeted: $dropTargeted) { providers in
             EffectDrop.handle(providers) { k in pad.addEffect(k) }
         }
-        .help((empty ? "「エフェクト」パネルからここへドラッグして登録"
+        .help((empty ? "クリックでエフェクトを選んで登録（「エフェクト」パネルからドラッグ・右クリックの「エフェクトを追加」でも）"
                : "押している間だけ「\(pad.displayName)」（右クリックで設定）")
               + (pad.key.map { "\nキー \($0.uppercased()) を押している間も効く" } ?? ""))
         .popover(isPresented: $showSettings, arrowEdge: .top) {
             FXPadSettings(pad: pad)
                 .environmentObject(engine)
         }
-        .contextMenu { PadContextMenu(pad: pad, showSettings: $showSettings) }
+        .effectPickerPopover($showPicker, targetLabel: "パッド \(pad.displayName) に足す") { k in pad.addEffectOpened(k) }
+        .contextMenu { PadContextMenu(pad: pad, showSettings: $showSettings, showPicker: $showPicker) }
     }
 }
 
@@ -473,6 +476,7 @@ private struct PadContextMenu: View {
     @EnvironmentObject var engine: Engine
     @ObservedObject var pad: FXPad
     @Binding var showSettings: Bool
+    @Binding var showPicker: Bool
     private var empty: Bool { pad.effects.isEmpty }
     private var index: Int? { engine.pads.firstIndex { $0.id == pad.id } }
 
@@ -492,6 +496,8 @@ private struct PadContextMenu: View {
                     }
                 }
             }
+            Button("エフェクトを探して追加…") { showPicker = true }
+            Menu("エフェクトを追加") { AddEffectMenuItems { k in pad.addEffectOpened(k) } }
             PadTimeMenus(pad: pad)
             Button("空にする") { pad.effects = [] }
                 .disabled(empty)

@@ -15,12 +15,23 @@ enum UI {
 
 struct SectionTitle: View {
     let text: String
-    init(_ text: String) { self.text = text }
+    var icon: String? = nil
+    /// 色付きの見出し（ジェネレーターは青緑、エフェクトは紫）
+    var tint: Color? = nil
+    init(_ text: String, icon: String? = nil, tint: Color? = nil) { self.text = text; self.icon = icon; self.tint = tint }
     var body: some View {
-        Text(text)
-            .font(.system(size: 12, weight: .semibold))
-            .foregroundStyle(.secondary)
+        HStack(spacing: 5) {
+            if let icon { Image(systemName: icon).font(.system(size: 11, weight: .bold)) }
+            Text(text).font(.system(size: 12, weight: .semibold))
+        }
+        .foregroundStyle(tint.map { AnyShapeStyle($0) } ?? AnyShapeStyle(.secondary))
     }
+}
+
+extension UI {
+    /// ジェネレーター（自分で絵を描く）とエフェクト（絵に手を加える）の色。ぱっと見で見分けられるように
+    static let generatorTint = Color(red: 0.25, green: 0.82, blue: 0.80)
+    static let effectTint = Color(red: 0.72, green: 0.45, blue: 1.0)
 }
 
 struct ContentView: View {
@@ -122,6 +133,8 @@ struct ContentView: View {
 
 /// 右上の出力モニター（コーナーピン後、実際に出る映像）
 struct OutputMonitor: View {
+    /// 右クリックの「探して追加…」で開く、エフェクトを探す窓
+    @State private var showPicker = false
     @EnvironmentObject var engine: Engine
     @ObservedObject var output = OutputController.shared
     @ObservedObject private var layout = LayoutManager.shared
@@ -171,6 +184,19 @@ struct OutputMonitor: View {
                 engine.addEffect(k)
                 engine.inspectorTab = .composition
             }
+            .effectPickerPopover($showPicker, targetLabel: "コンポジションに足す") { k in
+                engine.addEffectOpened(k)
+                engine.inspectorTab = .composition
+            }
+            .contextMenu {
+                Button("コンポジションにエフェクトを探して追加…") { showPicker = true }
+                Menu("コンポジションにエフェクトを追加") {
+                    AddEffectMenuItems { k in
+                        engine.addEffectOpened(k)
+                        engine.inspectorTab = .composition
+                    }
+                }
+            }
             .overlay(Rectangle().stroke(engine.isBlackout || engine.compMuted ? Color.red
                                         : editCorners ? Color.yellow.opacity(0.6) : Color.gray.opacity(0.35),
                                         lineWidth: engine.isBlackout || engine.compMuted ? 2 : 1))
@@ -209,6 +235,7 @@ struct TopBar: View {
             .frame(width: 280)
             .help("出力を閉じる／元に戻す：⌘⇧F")
             OutputFormatButton()
+            RecordButton()
 
             Picker("音声", selection: $engine.audioDeviceUID) {
                 Text("システム既定").tag(String?.none)
@@ -224,6 +251,7 @@ struct TopBar: View {
                 Image(systemName: "arrow.clockwise")
             }
             .help("オーディオデバイス一覧を更新")
+            AudioInputButton()
 
             Spacer()
 
@@ -565,6 +593,8 @@ private struct SlotFramesKey: PreferenceKey {
 /// グリッド左端のレイヤー欄（不透明度フェーダーと停止）。クリックでこのレイヤーを選択。
 /// 重ね方・音量・トランスフォームは下のレイヤータブで。
 struct LayerHeader: View {
+    /// 右クリックの「探して追加…」で開く、エフェクトを探す窓
+    @State private var showPicker = false
     @ObservedObject var layer: Layer
     @EnvironmentObject var engine: Engine
     @EnvironmentObject var drag: SlotDragState
@@ -678,8 +708,21 @@ struct LayerHeader: View {
             engine.selectedLayer = layer.index
             engine.inspectorTab = .layer
         }
+        .effectPickerPopover($showPicker, targetLabel: "レイヤー \(layer.displayName) に足す") { k in
+            layer.addEffectOpened(k)
+            engine.selectedLayer = layer.index
+            engine.inspectorTab = .layer
+        }
         .contextMenu {
             Button("名前を変える…") { renameLayer() }
+            Button("このレイヤーにエフェクトを探して追加…") { showPicker = true }
+            Menu("このレイヤーにエフェクトを追加") {
+                AddEffectMenuItems { k in
+                    layer.addEffectOpened(k)
+                    engine.selectedLayer = layer.index
+                    engine.inspectorTab = .layer
+                }
+            }
             Divider()
             Button("上にレイヤーを追加") { engine.insertLayer(at: layer.index) }
                 .disabled(engine.layerCount >= Engine.maxLayers)
@@ -776,6 +819,8 @@ struct SlotCell: View {
     @State private var stripPress = false
     /// マウスが乗っている所（上の絵 = 出す、下の名前の帯 = 選ぶ）
     @State private var zone: SlotZone?
+    /// 右クリックの「探して追加…」で開く、エフェクトを探す窓
+    @State private var showPicker = false
 
     var body: some View {
         let slot = engine.slots[index]
@@ -970,6 +1015,7 @@ struct SlotCell: View {
                 engine.selectClip(index)
             }
         }
+        .effectPickerPopover($showPicker, targetLabel: pickerTarget, addPicked)
         .contextMenu {
             if picked {
                 let n = engine.multiSelection.count
@@ -989,12 +1035,22 @@ struct SlotCell: View {
                 Divider()
             }
             if let slot {
+                Button("エフェクトを探して追加…") { showPicker = true }
+                Menu("エフェクトを追加") {
+                    AddEffectMenuItems { k in
+                        slot.addEffectOpened(k)
+                        engine.selectClip(index)
+                        engine.inspectorTab = .clip
+                    }
+                }
+                Divider()
                 Picker("終わったら", selection: Binding(get: { slot.endAction }, set: { slot.endAction = $0 })) {
                     ForEach(EndAction.allCases) { Text($0.label).tag($0) }
                 }
                 if slot.hasInOut { Button("再生範囲をリセット") { slot.resetInOut() } }
                 Button("速度を 1.0x に戻す") { slot.speed = 1.0 }
                 Button("選択（出力せずに編集）") { engine.selectClip(index) }
+                Button("名前を変える…") { ClipRename.ask(slot) }
                 Button(slot.muted ? "ミュートを解除" : "ミュート（映像と音を出さない）") { slot.muted.toggle() }
                 Button("トランスフォームをリセット") { slot.resetTransform() }
                 if !slot.isGenerator {
@@ -1011,15 +1067,33 @@ struct SlotCell: View {
                 Button("このスロットを空にする", role: .destructive) { engine.clear(index) }
             } else if adjustmentRow {
                 Button("エフェクトのクリップを作る") { engine.createEffectClip(at: index) }
+                Menu("エフェクトを選んでクリップを作る") {
+                    AddEffectMenuItems { k in if !engine.createEffectClip(at: index, with: k) { NSSound.beep() } }
+                }
             } else {
                 Button("クリップを読み込む…") { engine.openPanel(for: index) }
                 Menu("ジェネレーターを置く") {
-                    ForEach(EffectKind.generators) { k in
-                        Button(k.label) { if engine.placeGenerator(k, at: index) { engine.selectClip(index) } }
+                    ForEach(GeneratorCategory.allCases) { cat in
+                        Section(cat.label) {
+                            ForEach(cat.kinds) { k in
+                                Button(k.label) { if engine.placeGenerator(k, at: index) { engine.selectClip(index) } }
+                            }
+                        }
                     }
                 }
             }
         }
+    }
+
+    /// 探す窓の上に出す、足す先
+    private var pickerTarget: String? { engine.slots[index].map { "クリップ " + $0.name + " に足す" } }
+
+    /// 探す窓で選んだエフェクトを、このクリップに足す
+    private func addPicked(_ k: EffectKind) {
+        guard let slot = engine.slots[index] else { return }
+        slot.addEffectOpened(k)
+        engine.selectClip(index)
+        engine.inspectorTab = .clip
     }
 
     /// 調整レイヤーの行か（シーンの編集中は、そのシーンのレイヤーで見る）
@@ -1118,10 +1192,31 @@ struct SlotContent: View {
                             .padding(.bottom, gridSize.stripHeight)
                         }
                     } else if let img = slot.thumbnail {
-                        Image(nsImage: img).resizable().aspectRatio(contentMode: .fill)
+                        // 黒地（出力と同じ）。暗い透明の素材は灰色の地。小さく描かれた素材は中身に寄せる。
+                        // マウスを乗せている間は、市松模様の上に全体を出して透明の範囲を見せる
+                        let st = slot.thumbStyle
+                        let peek = hoverZone == .top && st.hasAlpha
+                        ZStack {
+                            if peek { CheckerBackground() } else { st.background }
+                            if let z = st.zoomed, !peek {
+                                Image(nsImage: z).resizable().aspectRatio(contentMode: .fit)
+                                    .padding(4)
+                                    .padding(.bottom, gridSize.stripHeight)
+                            } else {
+                                Image(nsImage: img).resizable().aspectRatio(contentMode: .fill)
+                            }
+                        }
                     }
                 }
                 .clipped()
+                .overlay(alignment: .bottomTrailing) {
+                    if !slot.isEffectClip && slot.thumbStyle.hasAlpha {
+                        ThumbBadge(style: slot.thumbStyle)
+                            .padding(.trailing, 3)
+                            .padding(.bottom, gridSize.stripHeight + 3)
+                            .allowsHitTesting(true)
+                    }
+                }
                 .opacity(slot.isReady ? (slot.muted ? 0.35 : 1) : 0.4)
                 .overlay(alignment: .topLeading) {
                     if !slot.isEffectClip { EffectIcons(effects: slot.effects).padding(4) }

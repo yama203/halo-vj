@@ -238,7 +238,7 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
 
     private func applyMasterVolume() {
         let v = blackoutFade.value(at: CACurrentMediaTime())
-        AudioOutput.shared.engine.mainMixerNode.outputVolume = compMuted || masterAudioMuted ? 0 : Float(masterVolume) * v
+        AudioOutput.shared.masterMixer.outputVolume = compMuted || masterAudioMuted ? 0 : Float(masterVolume) * v
     }
 
     // MARK: 音のフェード
@@ -814,6 +814,7 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
             copy = ClipSlot(url: url, speed: src.speed, endAction: src.endAction,
                             inPoint: src.inPoint, outPoint: src.outPoint)
         }
+        copy.title = src.title
         copy.posX = src.posX; copy.posY = src.posY
         copy.scale = src.scale; copy.rotation = src.rotation
         copy.opacity = src.opacity; copy.clipVolume = src.clipVolume
@@ -856,15 +857,24 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
         slots.indices.contains(i) && activeByLayer[layerOf(i)] != i
     }
 
+    /// 今開いているタブの名前（エフェクトを足す先の表示用）
+    var currentTabName: String {
+        switch inspectorTab {
+        case .composition: (sceneDraft != nil ? "シーンの" : "") + "コンポジション"
+        case .layer: (sceneDraft != nil ? "シーンの" : "") + "レイヤー " + layers[selectedLayer].displayName
+        case .clip: inspectedIndex.flatMap { slots[$0]?.name }.map { "クリップ " + $0 } ?? "クリップ（未選択）"
+        }
+    }
+
     /// 今開いているタブ（コンポジション・レイヤー・クリップ）にエフェクトを足す。クリップ未選択なら false
     @discardableResult
     func addEffectToCurrentTab(_ k: EffectKind) -> Bool {
         switch inspectorTab {
-        case .composition: if let d = sceneDraft { d.addEffect(k) } else { addEffect(k) }
-        case .layer: viewLayer(selectedLayer).addEffect(k)
+        case .composition: if let d = sceneDraft { d.addEffectOpened(k) } else { addEffectOpened(k) }
+        case .layer: viewLayer(selectedLayer).addEffectOpened(k)
         case .clip:
             guard let i = inspectedIndex, let s = slots[i] else { return false }
-            s.addEffect(k)
+            s.addEffectOpened(k)
         }
         return true
     }
@@ -1548,7 +1558,7 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
         var generator: Effect?
         /// エフェクトのクリップ（調整レイヤーの枠。絵は持たず、effects がかかる）
         var effectClip: Bool?
-        /// エフェクトのクリップの名前
+        /// クリップに付けた見かけの名前
         var title: String?
         /// クリップの目印（キューがクリップを探すのに使う）
         var id: UUID?
@@ -1783,7 +1793,8 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
             layer.muted = saved.muted ?? false
             layer.audioMuted = saved.audioMuted ?? false
             layer.isAdjustment = saved.isAdjustment ?? false
-            layer.blendFX = saved.blendFX ?? Effect(kind: .overdrive)
+            layer.blendFX = saved.blendFX ?? Effect(kind: layer.blend.effectKind ?? .overdrive)
+            if let k = layer.blend.effectKind, layer.blendFX.kind != k { layer.blendFX = Effect(kind: k) }
             layer.title = saved.title ?? ""
         }
         for (i, saved) in state.slots.enumerated() {
@@ -1799,6 +1810,7 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
             let slot = saved.effectClip == true ? ClipSlot(effects: [], title: saved.title ?? "")
                 : saved.generator.map { ClipSlot(generator: $0) }
                 ?? ClipSlot(url: url, speed: saved.speed, endAction: end, inPoint: saved.inPoint ?? 0, outPoint: saved.outPoint)
+            slot.title = saved.title ?? ""
             slot.posX = saved.x ?? 0
             slot.posY = saved.y ?? 0
             slot.scale = saved.scale ?? 1

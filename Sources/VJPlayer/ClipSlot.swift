@@ -528,12 +528,19 @@ final class ClipSlot: ObservableObject, Identifiable, Animatable, EffectHolder {
     @Published private(set) var isReady = false
     @Published private(set) var currentTime: Double = 0
     @Published private(set) var duration: Double = 0
-    @Published private(set) var thumbnail: NSImage?
+    @Published private(set) var thumbnail: NSImage? {
+        didSet { thumbStyle = ThumbStyle.make(thumbnail) }
+    }
+    /// グリッドでの見せ方（透明・暗さ・中身に寄せた絵。サムネイルから自動で決める）
+    @Published private(set) var thumbStyle = ThumbStyle.none
     @Published private(set) var errorMessage: String?
 
-    var name: String {
+    /// 見かけの名前（付けた名前があればそれ、無ければ元の名前）
+    var name: String { title.isEmpty ? autoName : title }
+
+    /// 元の名前（ファイル名・ジェネレーターの種類・エフェクト名）
+    var autoName: String {
         if isEffectClip {
-            if !title.isEmpty { return title }
             return effects.isEmpty ? "エフェクト（空）" : effects.map(\.kind.label).joined(separator: "＋")
         }
         if let g = generator, g.kind == .text {
@@ -550,7 +557,7 @@ final class ClipSlot: ObservableObject, Identifiable, Animatable, EffectHolder {
 
     /// エフェクトのクリップ（調整レイヤーの枠に置く、エフェクトのセット。絵は持たない）
     private(set) var isEffectClip = false
-    /// エフェクトのクリップに付けた名前（空ならエフェクト名を並べる）
+    /// クリップに付けた見かけの名前（空なら元の名前。ファイル名・ジェネレーターの種類・エフェクト名）
     @Published var title = "" { didSet { if oldValue != title { onSettingsChanged?() } } }
 
     /// エフェクトのクリップを作る。読み込みは要らないので、すぐ使える

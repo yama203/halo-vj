@@ -1,6 +1,7 @@
 import AVFoundation
 import AppKit
 import Metal
+import MetalKit
 import QuartzCore
 import simd
 
@@ -14,7 +15,8 @@ enum SelfTest {
         setvbuf(stdout, nil, _IOLBF, 0)   // ログと順番が混ざらないように 1 行ずつ出す
         // テストの音はスピーカーに出さない（マスター音量を上げて確かめる項目があるため）
         AudioOutput.shared.silenceForTests()
-        AudioOutput.shared.engine.mainMixerNode.outputVolume = 0
+        AudioReactive.shared.forTests = true
+        AudioOutput.shared.masterMixer.outputVolume = 0
         let a = ClipSlot(url: URL(fileURLWithPath: paths[0]), endAction: .hold)
         let b = ClipSlot(url: URL(fileURLWithPath: paths[1]), endAction: .hold)
         var failures = 0
@@ -415,9 +417,15 @@ enum SelfTest {
         // 17. プロジェクトファイル
         testProject(paths: paths, check: check, wait: wait)
 
+        // 18. 録画
+        testRecording(check: check, wait: wait)
+
+        // 19. 音に反応させる
+        testAudioReactive(check: check, wait: wait)
+
         let out = AudioOutput.shared.engine.outputNode
         let feeding = AudioOutput.shared.engine.inputConnectionPoint(for: out, inputBus: 0)?.node as? AVAudioMixerNode
-        check(AudioOutput.shared.silenced && feeding !== AudioOutput.shared.engine.mainMixerNode && feeding?.outputVolume == 0,
+        check(AudioOutput.shared.silenced && feeding !== AudioOutput.shared.masterMixer && feeding?.outputVolume == 0,
               "テスト中の音はスピーカーに出ていない（出力の手前に音量 0 のミキサー）")
         print(failures == 0 ? "ALL PASS" : "\(failures) FAILED")
         exit(failures == 0 ? 0 : 1)
@@ -463,10 +471,114 @@ enum SelfTest {
             case .maskLuma, .maskInvert:
                 let l = min(max(simd_dot(s, SIMD3(0.2126, 0.7152, 0.0722)), 0), 1)
                 exp = d * (1 - op + op * (mode == .maskLuma ? l : 1 - l))
-            case .overdrive: continue
+            case .difference: exp = d * (1 - op) + simd_abs(d - s) * op
+            case .overlay:
+                let f = SIMD3((0..<3).map { i in d[i] < 0.5 ? 2 * d[i] * s[i] : 1 - 2 * (1 - d[i]) * (1 - s[i]) })
+                exp = d * (1 - op) + f * op
+            case .softLight: exp = d * (1 - op) + ((one - 2 * s) * d * d + 2 * s * d) * op
+            case .colorDodge: exp = d * (1 - op) + simd_min(d / simd_max(one - s, SIMD3(repeating: 1e-3)), one) * op
+            case .hueOnly, .lumOnly:
+                func lum(_ c: SIMD3<Float>) -> Float { simd_dot(c, SIMD3(0.2126, 0.7152, 0.0722)) }
+                func setLum(_ c0: SIMD3<Float>, _ l: Float) -> SIMD3<Float> {
+                    var c = c0 + (l - lum(c0))
+                    let L = lum(c), n = c.min(), x = c.max()
+                    if n < 0 { c = L + (c - L) * L / max(L - n, 1e-5) }
+                    if x > 1 { c = L + (c - L) * (1 - L) / max(x - L, 1e-5) }
+                    return c
+                }
+                func sat(_ c: SIMD3<Float>) -> Float { c.max() - c.min() }
+                func setSat(_ c: SIMD3<Float>, _ v: Float) -> SIMD3<Float> {
+                    c.max() - c.min() < 1e-5 ? .zero : (c - c.min()) * v / (c.max() - c.min())
+                }
+                let f = mode == .hueOnly ? setLum(setSat(s, sat(d)), lum(d)) : setLum(d, lum(s))
+                exp = d * (1 - op) + f * op
+            case .overdrive, .refract, .light, .flowInto, .interfere, .borrowColor, .dissolve: continue
             }
             let err = simd_reduce_max(simd_abs(got - exp))
             check(err < 3.0 / 255, String(format: "合成モード「%@」不透明度50%%: 誤差 %.1f/255", mode.label, err * 255))
+        }
+
+        // 絡み合う重ね方：下 = 横のしま、上 = 真ん中の白い丸（まわりは透明）
+        do {
+            let W = 96, H = 54
+            func tex(_ f: (Int, Int) -> (UInt8, UInt8, UInt8, UInt8)) -> MTLTexture {
+                let td = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: W, height: H, mipmapped: false)
+                td.usage = [.shaderRead]; td.storageMode = .shared
+                let t = ctx.device.makeTexture(descriptor: td)!
+                var px = [UInt8](repeating: 0, count: W * H * 4)
+                for y in 0..<H { for x in 0..<W {
+                    let (r, g, b, a) = f(x, y); let i = (y * W + x) * 4
+                    px[i] = b; px[i + 1] = g; px[i + 2] = r; px[i + 3] = a
+                } }
+                t.replace(region: MTLRegionMake2D(0, 0, W, H), mipmapLevel: 0, withBytes: px, bytesPerRow: W * 4)
+                return t
+            }
+            let stripes = tex { x, _ in (x / 6) % 2 == 0 ? (200, 120, 40, 255) : (40, 90, 200, 255) }
+            func disc(_ cx: Int, _ col: (UInt8, UInt8, UInt8)) -> MTLTexture {
+                tex { x, y in
+                    let d = hypot(Double(x - cx), Double(y - H / 2))
+                    return d < 14 ? (col.0, col.1, col.2, 255) : (0, 0, 0, 0)
+                }
+            }
+            let white = disc(W / 2, (255, 255, 255))
+            func run(_ mode: BlendMode, top: MTLTexture, fx: Effect? = nil, comp: Compositor = Compositor(), now: Double = 1) -> [UInt8] {
+                comp.storageMode = .shared
+                let cb = ctx.queue.makeCommandBuffer()!
+                var g = LayerGroup(draws: [LayerDraw(texture: top, opacity: 1, blend: mode, holder: nil)], opacity: 1, blend: mode, key: 1)
+                g.blendFX = EffectStack(effects: [fx ?? Effect(kind: mode.effectKind ?? .overdrive)])
+                let t = comp.composite([LayerGroup(draws: [LayerDraw(texture: stripes, opacity: 1, blend: .normal, holder: nil)],
+                                                   opacity: 1, blend: .normal, key: 0), g],
+                                       effects: EffectStack(), width: W, height: H, cb: cb, now: now)!
+                cb.commit(); cb.waitUntilCompleted()
+                var px = [UInt8](repeating: 0, count: W * H * 4)
+                t.getBytes(&px, bytesPerRow: W * 4, from: MTLRegionMake2D(0, 0, W, H), mipmapLevel: 0)
+                return px
+            }
+            let base = run(.normal, top: tex { _, _ in (0, 0, 0, 0) })
+            func at(_ p: [UInt8], _ x: Int, _ y: Int) -> SIMD3<Int> { let i = (y * W + x) * 4; return SIMD3(Int(p[i + 2]), Int(p[i + 1]), Int(p[i])) }
+            func diff(_ p: [UInt8], _ x0: Int, _ x1: Int) -> Int {
+                var m = 0
+                for y in 0..<H { for x in x0..<x1 { m = max(m, simd_reduce_max(simd_abs(at(p, x, y) &- at(base, x, y)))) } }
+                return m
+            }
+            // 屈折：丸のふちで下のしまが曲がり、丸から離れた所は元のまま。丸そのもの（白）は見えない
+            let rf = run(.refract, top: white)
+            check(diff(rf, 30, 66) > 40 && diff(rf, 0, 10) <= 2 && at(rf, W / 2, H / 2).x < 230,
+                  "重ね方「屈折」：丸のふちで下の絵が曲がり、離れた所は元のまま（丸そのものは見えない）")
+            // 光で照らす：丸から離れた所は暗く、丸の所は明るい
+            let li = run(.light, top: white)
+            let far = simd_reduce_add(at(li, 2, 2)), near = simd_reduce_add(at(li, W / 2, H / 2)), orig = simd_reduce_add(at(base, 2, 2))
+            check(far < orig / 3 && near > far * 3, "重ね方「光で照らす」：照らされない所は暗く（\(orig)→\(far)）、光の所は明るい（\(near)）")
+            // 干渉：下の絵と違う縞が出る
+            check(diff(run(.interfere, top: white), 0, W) > 40, "重ね方「干渉」：縞が出て絵が変わる")
+            // 色を借りる：丸の所は上の色（赤）、まわりは元のまま
+            let red = disc(W / 2, (255, 30, 30))
+            let br = run(.borrowColor, top: red)
+            let c = at(br, W / 2, H / 2)
+            check(c.x > c.y + 40 && c.x > c.z + 40 && diff(br, 0, 10) <= 2, "重ね方「色を借りる」：下の形に上の色が付き、上が無い所は元のまま")
+            // 溶け込む：量 0 なら元のまま、量 100% なら丸の所は上の絵（白）
+            var d0 = Effect(kind: .blendDissolve); d0.values[0] = 0
+            var d1 = d0; d1.values[0] = 1
+            let dz = run(.dissolve, top: white, fx: d0), df = run(.dissolve, top: white, fx: d1)
+            check(diff(dz, 0, W) <= 2 && simd_reduce_min(at(df, W / 2, H / 2)) > 240 && diff(df, 0, 10) <= 2,
+                  "重ね方「溶け込む」：量 0 で元のまま、100% で上の絵に変わる（上が無い所は元のまま）")
+            // 流し込む：動く丸が、下のしまをかき混ぜる（流れは合成ごとに続く）
+            let fc = Compositor()
+            var last: [UInt8] = []
+            var t = 1.0
+            for k in 0..<45 {
+                last = run(.flowInto, top: disc(20 + k, (255, 255, 255)), comp: fc, now: t)
+                t += 1.0 / 30
+            }
+            check(diff(last, 0, W) > 40, "重ね方「流し込む」：動く丸が、下の絵を押し流してかき混ぜる")
+            // 重ね方を変えると、値もその種類のものになる。保存して読み込める
+            let l = Layer(index: 0)
+            l.blend = .refract
+            let k1 = l.blendFX.kind
+            l.blend = .dissolve
+            check(k1 == .blendRefract && l.blendFX.kind == .blendDissolve && BlendMode.entangle.allSatisfy { $0.readsBelow && $0.isSpecial }
+                  && BlendMode.simpleBelow.allSatisfy { $0.readsBelow && !$0.isSpecial },
+                  "重ね方：特殊合成を変えると、値もその種類のものになる")
         }
     }
 
@@ -931,6 +1043,41 @@ enum SelfTest {
             check(edge == 0 && mid > 200, "ジェネレーター（図形）：数 1 なら 1 つだけ（端に出ない）")
         }
         check(EffectKind.generators.allSatisfy { GeneratorThumbnail.image(Effect(kind: $0)) != nil }, "ジェネレーター：サムネイルを描ける")
+        // グリッドのサムネイルの見せ方：透明の有無・暗さ・中身に寄せる
+        do {
+            func img(_ w: Int, _ h: Int, _ f: (Int, Int) -> (UInt8, UInt8, UInt8, UInt8)) -> NSImage {
+                var px = [UInt8](repeating: 0, count: w * h * 4)
+                for y in 0..<h { for x in 0..<w {
+                    let (r, g, b, a) = f(x, y); let i = (y * w + x) * 4
+                    px[i] = r; px[i + 1] = g; px[i + 2] = b; px[i + 3] = a
+                } }
+                let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: w, pixelsHigh: h, bitsPerSample: 8, samplesPerPixel: 4,
+                                           hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: w * 4, bitsPerPixel: 32)!
+                px.withUnsafeBufferPointer { memcpy(rep.bitmapData!, $0.baseAddress!, px.count) }
+                let im = NSImage(size: NSSize(width: w, height: h)); im.addRepresentation(rep)
+                return im
+            }
+            let opaque = ThumbStyle.make(img(160, 90) { x, _ in (UInt8(x), 100, 50, 255) })
+            // 右上に小さな白い丸（まわりは透明）
+            let small = img(320, 180) { x, y in hypot(Double(x - 250), Double(y - 40)) < 15 ? (255, 255, 255, 255) : (0, 0, 0, 0) }
+            let ss = ThumbStyle.make(small)
+            // 真ん中に小さな暗い四角
+            let darkImg = ThumbStyle.make(img(320, 180) { x, y in abs(x - 160) < 25 && abs(y - 90) < 18 ? (25, 25, 25, 255) : (0, 0, 0, 0) })
+            // 透明があっても全体に明るく描かれた絵は、寄せない・暗くない
+            let wide = ThumbStyle.make(img(320, 180) { x, y in (x + y) % 9 == 0 ? (0, 0, 0, 0) : (230, 200, 90, 255) })
+            var zoomLit = false
+            if let z = ss.zoomed?.cgImage(forProposedRect: nil, context: nil, hints: nil) {
+                // 寄せた絵の真ん中は白い丸
+                var p = [UInt8](repeating: 0, count: 4)
+                let c = CGContext(data: &p, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4, space: CGColorSpaceCreateDeviceRGB(),
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+                c.draw(z, in: CGRect(x: -z.width / 2, y: -z.height / 2, width: z.width, height: z.height))
+                zoomLit = p[3] > 200 && p[0] > 200 && z.width < 120
+            }
+            check(!opaque.hasAlpha && opaque.zoomed == nil && ss.hasAlpha && !ss.dark && zoomLit
+                  && darkImg.hasAlpha && darkImg.dark && darkImg.zoomed != nil && wide.hasAlpha && !wide.dark && wide.zoomed == nil,
+                  "サムネイル：透明があれば印、暗い素材は灰色の地、小さく描かれた素材は描かれた所に寄せる")
+        }
         // テキスト：文字を CoreText で描いて出す
         do {
             let W = 160, H = 90
@@ -1101,6 +1248,463 @@ enum SelfTest {
                 let center = lit(a5, x0: 60, x1: 100, y0: 25, y1: 65), all = lit(a5, x0: 0, x1: W)
                 check(lit(a0, x0: 0, x1: W) == 0 && center > 0 && all > 20 && a5 != a6 && ph.values.count == 9,
                       "フィロタキシス：出したときは空、時間がたつと中心から粒が広がる（\(all) px）")
+            }
+            // ライン：0° で縦の線、本数は高さあたり。太さは px
+            do {
+                var ln = Effect(kind: .lines); ln.values = [4, 60, 0, 0, 0]   // 60 px（1080p）= 高さ 90 では 5 px
+                let la = alpha(ln)
+                let col = (0..<W).map { x in la[45 * W + x] > 128 }
+                let starts = (1..<W).filter { col[$0] && !col[$0 - 1] }.count + (col[0] ? 1 : 0)
+                let vertical = (0..<H).allSatisfy { la[$0 * W + 80] == la[0 * W + 80] }
+                // 横長 160×90 で高さに 4 本 → 横には 160/90×4 ≈ 7 本
+                check(starts >= 6 && starts <= 8 && vertical, "ライン：0° で縦の線、本数は画面の高さに入る数（横に \(starts) 本）")
+                var ln1 = ln; ln1.values[1] = 5   // 高さ 90 では 0.4 px
+                check(lit(alpha(ln1), x0: 0, x1: W) == 0 && alpha(ln1).contains { $0 > 0 }, "ライン：1 px より細い線は薄くして出す")
+                // 波：時間でうねりが動く。線ごとのずれがあっても線は途切れない（どの行にも同じくらい線がある）
+                var wv = ln; wv.values[1] = 40; wv.values += [0.05, 2, 1, 0.5, 0, 0, 0.5]
+                let w0 = alpha(wv, now: 0.1), w1 = alpha(wv, now: 0.35)
+                let rows = stride(from: 5, to: H, by: 10).map { y in lit(w0, x0: 0, x1: W, y0: y, y1: y + 1) }
+                check(w0 != w1 && rows.allSatisfy { $0 > 0 } && (rows.max() ?? 0) <= (rows.min() ?? 0) * 3 + 6,
+                      "ライン（波）：時間でうねり、線ごとにずらしても途切れない（行ごと \(rows)）")
+                // 奥への傾き：横の線を床のように倒すと、上（奥）ほど線が詰まる
+                var fl = Effect(kind: .lines); fl.values[0] = 6; fl.values[1] = 40; fl.values[2] = 90; fl.values[3] = 0
+                fl.values[9] = 60; fl.values[11] = 0
+                let fa = alpha(fl)
+                func crossings(_ y0: Int, _ y1: Int) -> Int {
+                    (y0 + 1..<y1).filter { (fa[$0 * W + 80] > 100) && !(fa[($0 - 1) * W + 80] > 100) }.count
+                }
+                let upper = crossings(10, 45), lower = crossings(45, 90)
+                check(upper > lower, "ライン（奥への傾き）：上が奥になって、奥ほど線が詰まる（上 \(upper) 本・下 \(lower) 本）")
+                let oldLines = try? JSONDecoder().decode(Effect.self, from: Data(#"{"kind":"lines","values":[10,4,0,0.5,0]}"#.utf8))
+                check(oldLines?.values.count == 16 && oldLines?.value(9) == 0 && oldLines?.value(12) == 0, "ライン：波・傾き・高さの無い前の保存データも読める")
+                // 波の高さ（3D の地形）：線が持ち上がって形が変わる。黒く塗ると、山の下は不透明になる
+                var tr = Effect(kind: .lines); tr.values[0] = 12; tr.values[1] = 30
+                let flatA = alpha(tr)
+                tr.values[12] = 0.25; tr.values[13] = 0
+                let ta = alpha(tr)
+                tr.values[15] = 1
+                let tf = alpha(tr)
+                let opaque = tf.filter { $0 == 255 }.count
+                check(ta != flatA && lit(ta, x0: 0, x1: W) > 100 && opaque > W * H / 4 && opaque > ta.filter { $0 == 255 }.count,
+                      "ライン（波の高さ）：線が山のように持ち上がり、黒く塗ると山の下が隠れる（不透明 \(opaque) px）")
+                // ドット：格子に並ぶ（波なしなら同じ大きさの粒が等間隔）。ばらばら・3D で形が変わる
+                var dt = Effect(kind: .dots); dt.values[0] = 4; dt.values[1] = 90; dt.values[9] = 0
+                let da = alpha(dt)
+                // 真ん中は粒の列のあいだ。列の真ん中（高さ 90 に 4 列 → 真ん中から 11 px 下）で数える
+                let mid = (0..<W).map { da[(H / 2 + 11) * W + $0] > 128 }
+                let blobs = (1..<W).filter { mid[$0] && !mid[$0 - 1] }.count + (mid[0] ? 1 : 0)
+                var sc = dt; sc.values[3] = 2
+                var cl = dt; cl.values[16] = 0.2; cl.values[13] = 60
+                var wv2 = dt; wv2.values[9] = 0.8
+                check(blobs >= 6 && blobs <= 8 && alpha(sc) != da && alpha(cl) != da && alpha(wv2) != da
+                      && lit(alpha(cl), x0: 0, x1: W) > 0,
+                      "ドット：格子に並び（横に \(blobs) 個）、ばらばら・波・3D の点の雲で形が変わる")
+                // ふらふら：時間で粒の場所が変わる（ふらふら 0 なら止まったまま）。光のにじみで光る所が広がる
+                do {
+                    var still = dt; still.values[9] = 0
+                    var fly = still; fly.values[18] = 1; fly.values[19] = 1
+                    var glow = still; glow.values[20] = 1
+                    check(alpha(still, now: 1) == alpha(still, now: 3) && alpha(fly, now: 1) != alpha(fly, now: 3)
+                          && lit(alpha(glow), x0: 0, x1: W) > lit(da, x0: 0, x1: W),
+                          "ドット：ふらふらで粒が別々に飛び回り、光のにじみで光が広がる")
+                    check(EffectKind.dots.looks.allSatisfy { $0.values.keys.allSatisfy { EffectKind.dots.params.indices.contains($0) } },
+                          "ドット：見た目のひな形はどれも、ある値だけを変える")
+                }
+                // 群れ：魚が描かれ、時間で動く（同じ時刻なら止まったまま）。そろえると向きがそろい、画面の外へ出ていかない
+                do {
+                    var sc = Effect(kind: .school); sc.values[0] = 300; sc.values[14] = 0
+                    let s1 = alpha(sc, now: 1), s1b = alpha(sc, now: 1), s2 = alpha(sc, now: 1.4)
+                    check(lit(s1, x0: 0, x1: W) > 0 && s1 == s1b && s1 != s2, "群れ：魚が描かれ、時間で動き、同じ時刻では止まる")
+                    func polar(_ e: Effect) -> (order: Double, inside: Bool) {
+                        var t = 1.0
+                        _ = alpha(e, now: t)
+                        for _ in 0..<80 { t += 0.1; _ = alpha(e, now: t) }
+                        let ps = fxp.schoolFish("t/" + e.id.uuidString, count: 300) ?? []
+                        let A = Float(W) / Float(H), D = Float(e.values[14]) * 1.2
+                        var m = SIMD3<Float>.zero
+                        for f in ps { m += f.v / max(simd_length(f.v), 1e-6) }
+                        let inside = !ps.isEmpty && ps.allSatisfy {
+                            $0.p.x > -0.1 && $0.p.x < A + 0.1 && $0.p.y > -0.1 && $0.p.y < 1.1 && abs($0.p.z) <= D / 2 + 0.06
+                        }
+                        return (Double(simd_length(m)) / Double(max(ps.count, 1)), inside)
+                    }
+                    var al = sc; al.values[5] = 1; al.values[8] = 0; al.values[10] = 0
+                    var no = al; no.values[5] = 0; no.values[4] = 0; no.values[10] = 1
+                    let pa = polar(al), pn = polar(no)
+                    check(pa.order > 0.45 && pa.order > pn.order + 0.2 && pa.inside && pn.inside,
+                          String(format: "群れ：そろえると向きがそろい（%.2f、そろえないと %.2f）、画面の中にいる", pa.order, pn.order))
+                    // 3D：厚みがあると奥行きに広がって泳ぎ、カメラの向きで絵が変わる
+                    var s3 = sc; s3.values[14] = 0.8; s3.values[16] = 0; s3.values[19] = 1.2
+                    let p3 = polar(s3)
+                    let zs = (fxp.schoolFish("t/" + s3.id.uuidString, count: 300) ?? []).map(\.p.z)
+                    let zSpread = (zs.max() ?? 0) - (zs.min() ?? 0)
+                    var s3b = s3; s3b.values[17] = 90
+                    let i3 = alpha(s3, now: 9), i3b = alpha(s3b, now: 9)
+                    check(p3.inside && zSpread > 0.2 && lit(i3, x0: 0, x1: W) > 0 && i3 != i3b,
+                          String(format: "群れ（3D）：奥行きに広がって泳ぎ（%.2f）、箱から出ず、カメラの向きで見え方が変わる", zSpread))
+                    check(EffectKind.school.looks.allSatisfy { $0.values.keys.allSatisfy { EffectKind.school.params.indices.contains($0) } }
+                          && EffectKind.school.isGenerator && EffectKind.school.generatorCategory == .shape,
+                          "群れ：見た目のひな形はどれも、ある値だけを変える・図形・粒の分類")
+                }
+                // トンネル：輪が描かれて奥へ進む（速さ・回転・うねり 0 なら止まる）。模様・形で絵が変わる。真ん中（奥）は暗い
+                do {
+                    let tn = Effect(kind: .tunnel)
+                    let t1 = alpha(tn, now: 1), t2 = alpha(tn, now: 1.3)
+                    var still = tn; still.values[0] = 0; still.values[5] = 0; still.values[8] = 0
+                    let center = lit(t1, x0: 75, x1: 85, y0: 40, y1: 50)
+                    check(lit(t1, x0: 0, x1: W) > 300 && t1.contains(0) && t1 != t2
+                          && alpha(still, now: 1) == alpha(still, now: 3) && center < 60,
+                          "トンネル：輪が描かれて奥へ進み（止めれば止まる）、まわりは透明、奥は暗い（真ん中 \(center)/100）")
+                    var imgs: [[UInt8]] = []
+                    for pat in 0..<5 {
+                        for sh in 0..<4 {
+                            var e = tn; e.values[2] = Double(pat); e.values[1] = Double(sh); e.values[8] = 0
+                            imgs.append(alpha(e))
+                        }
+                    }
+                    check(imgs.allSatisfy { lit($0, x0: 0, x1: W) > 50 } && Set(imgs.map { $0.hashValue }).count == imgs.count,
+                          "トンネル：模様 5 つ × 形 4 つ、どれも描けて見え方が違う")
+                    // うねり（曲がる）を強くしても、奥（暗い所）は 1 か所だけ（ほかの所に穴が出ない）
+                    do {
+                        var cv = tn; cv.values[2] = 0; cv.values[4] = 0.95; cv.values[7] = 1.5; cv.values[8] = 2
+                        var blobs: [Int] = []
+                        for t in [1.0, 3.0, 5.0, 7.0, 9.0] {
+                            // 格子のすき間は数えないように、ぼかしてから暗い所を探す
+                            let raw = alpha(cv, now: t)
+                            var a = raw
+                            for y in 0..<H {
+                                for x in 0..<W {
+                                    var sum = 0, cnt = 0
+                                    for yy in max(y - 3, 0)...min(y + 3, H - 1) {
+                                        for xx in max(x - 3, 0)...min(x + 3, W - 1) { sum += Int(raw[yy * W + xx]); cnt += 1 }
+                                    }
+                                    a[y * W + x] = UInt8(sum / cnt)
+                                }
+                            }
+                            var seen = [Bool](repeating: false, count: W * H)
+                            var n = 0
+                            // 画面の端にかかる暗い所（手前の太い輪のすき間）は数えない
+                            for i in 0..<(W * H) where a[i] < 30 && !seen[i] {
+                                var edge = false
+                                var stack = [i]; seen[i] = true
+                                while let j = stack.popLast() {
+                                    let x = j % W, y = j / W
+                                    if x == 0 || y == 0 || x == W - 1 || y == H - 1 { edge = true }
+                                    for (dx, dy) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
+                                        let nx = x + dx, ny = y + dy
+                                        guard nx >= 0, nx < W, ny >= 0, ny < H else { continue }
+                                        let k = ny * W + nx
+                                        if a[k] < 30 && !seen[k] { seen[k] = true; stack.append(k) }
+                                    }
+                                }
+                                if !edge { n += 1 }
+                            }
+                            blobs.append(n)
+                        }
+                        check(blobs.allSatisfy { $0 == 1 }, "トンネル：うねりを強くしても、奥の暗い所は 1 か所だけ（\(blobs)）")
+                    }
+                    // 線の太さをいっぱいにすると、どの模様もすき間なく埋まる（奥の暗さ 0 なら全部不透明）。チェッカーは 50% 以下ならふつうの市松
+                    do {
+                        let full = (0..<5).map { pat -> UInt8 in
+                            var e = tn; e.values[2] = Double(pat); e.values[4] = 1; e.values[7] = 0
+                            return alpha(e).min() ?? 0
+                        }
+                        var ck = tn; ck.values[2] = 2; ck.values[7] = 0
+                        var ck2 = ck; ck.values[4] = 0.18; ck2.values[4] = 0.5
+                        var ck3 = ck; ck3.values[4] = 0.8
+                        let half = lit(alpha(ck), x0: 0, x1: W), more = lit(alpha(ck3), x0: 0, x1: W)
+                        check(full.allSatisfy { $0 >= 250 } && alpha(ck) == alpha(ck2) && more > half,
+                              "トンネル：線の太さ 100% でどの模様も埋まり（いちばん薄い所 \(full)）、チェッカーは 50% より上でマスが埋まっていく")
+                    }
+                    // ねじれ：三角・四角でも模様が崩れない（細かい羽のような乱れが出ない）。絵の変わり目の数がねじれなしと同じくらい
+                    do {
+                        func edges(_ a: [UInt8]) -> Int {
+                            var n = 0
+                            for y in 0..<H { for x in 1..<W where (a[y * W + x] > 128) != (a[y * W + x - 1] > 128) { n += 1 } }
+                            return n
+                        }
+                        var res: [String] = []
+                        var ok = true
+                        for sh in [1.0, 3.0] {
+                            var e = tn; e.values[1] = sh; e.values[2] = 2; e.values[12] = 16; e.values[7] = 0.5
+                            let flat = edges(alpha(e))
+                            e.values[6] = 2
+                            let tw = edges(alpha(e))
+                            ok = ok && tw < flat * 3
+                            res.append("\(flat)→\(tw)")
+                        }
+                        check(ok, "トンネル：三角・四角をねじっても模様が崩れない（変わり目 \(res.joined(separator: "、"))）")
+                    }
+                    var pal = tn; pal.values[13] = 1
+                    var rainbow = tn; rainbow.values[13] = 2
+                    check(EffectKind.tunnel.looks.allSatisfy { $0.values.keys.allSatisfy { EffectKind.tunnel.params.indices.contains($0) } }
+                          && EffectKind.tunnel.isGenerator && EffectKind.tunnel.generatorCategory == .shape
+                          && lit(alpha(pal), x0: 0, x1: W) > 300 && lit(alpha(rainbow), x0: 0, x1: W) > 300,
+                          "トンネル：見た目のひな形はどれも、ある値だけを変える・パレット・虹色でも描ける・図形・粒の分類")
+                }
+                // 動き続けるジェネレーター：描けて、時間で動き、同じ時刻なら止まったまま。見た目のひな形はどれも、ある値だけを変える
+                do {
+                    var res: [String] = []
+                    var ok = true
+                    for k in [EffectKind.physarum, .particleLife, .fireflies, .attractor] {
+                        let e = Effect(kind: k)
+                        let a1 = alpha(e, now: 5), a1b = alpha(e, now: 5), a2 = alpha(e, now: 5.5)
+                        let n = lit(a1, x0: 0, x1: W) + lit(a2, x0: 0, x1: W)
+                        let good = n > 0 && a1 == a1b && a1 != a2 && a1.contains(0)
+                            && k.looks.allSatisfy { $0.values.keys.allSatisfy { k.params.indices.contains($0) } }
+                            && k.isGenerator && k.isStateful
+                        ok = ok && good
+                        res.append("\(k.label) \(good ? "○" : "×\([n > 0, a1 == a1b, a1 != a2, a1.contains(0)]) max \(a1.max() ?? 0) mean \(a1.reduce(0) { $0 + Int($1) } / a1.count)")")
+                    }
+                    check(ok, "動き続けるジェネレーター：描けて、時間で動き、同じ時刻では止まる（\(res.joined(separator: "・"))）")
+                }
+                // アトラクター：変身で係数が大きく動き続けても、点が 1 か所に集まってしまわない（光の筋のまま）
+                do {
+                    var e = Effect(kind: .attractor); e.values[5] = 2; e.values[6] = 1
+                    var t = 1.0
+                    for _ in 0..<900 { _ = alpha(e, now: t); t += 1.0 / 30 }
+                    let sim: AttractorSim? = fxp.life.peek("t/" + e.id.uuidString)
+                    let spread = sim?.distinctWalkers() ?? 0
+                    check(spread > AttractorSim.walkers / 2,
+                          "アトラクター：長く変身させても、点が集まって消えない（\(spread) / \(AttractorSim.walkers) か所に分かれている）")
+                }
+                // 粘菌：はじめの形を変えると、作り直して違う絵になる。えさを置くと、えさの所に集まる
+                do {
+                    var a = Effect(kind: .physarum); a.values[12] = 0
+                    var b = a; b.values[12] = 1; b.id = UUID()
+                    check(alpha(a, now: 3) != alpha(b, now: 3), "粘菌：はじめの形（ばらばら・円）で違う網になる")
+                }
+                // パーティクル・ライフ：たねで性格が変わる（同じ時刻でも違う絵）。好き嫌いの表は -1〜1
+                do {
+                    var a = Effect(kind: .particleLife); a.values[2] = 1
+                    var b = a; b.values[2] = 2; b.id = UUID()
+                    let m = ParticleLifeSim.matrix(seed: 5)
+                    check(alpha(a, now: 3) != alpha(b, now: 3) && m.count == 64 && m.allSatisfy { abs($0) <= 1 }
+                          && ParticleLifeSim.matrix(seed: 5) == m && ParticleLifeSim.matrix(seed: 6) != m,
+                          "パーティクル・ライフ：たねで性格（好き嫌いの表）が決まり、違う動きになる")
+                }
+                // ホタル：そろう強さがあると位相がそろう（そろい具合 r が上がる）。0 ならばらばらのまま
+                do {
+                    func order(_ K: Double) -> Double {
+                        var e = Effect(kind: .fireflies); e.values[1] = K; e.values[2] = 1; e.values[4] = 0.2
+                        _ = alpha(e, now: 4)
+                        guard let sim: FireflySim = fxp.life.peek("t/" + e.id.uuidString) else { return -1 }
+                        let ph = sim.phases(Int(e.values[0]))
+                        let c = ph.reduce(0.0) { $0 + cos(Double($1)) } / Double(ph.count)
+                        let s = ph.reduce(0.0) { $0 + sin(Double($1)) } / Double(ph.count)
+                        return (c * c + s * s).squareRoot()
+                    }
+                    let r0 = order(0), r1 = order(2.5)
+                    check(r0 >= 0 && r0 < 0.3 && r1 > 0.8,
+                          String(format: "ホタル：そろう強さで光るタイミングがそろう（そろい具合 %.2f → %.2f）", r0, r1))
+                }
+                // 時間のずらし：縦（上ほど過去）なら、赤 → 青に変えたあと、上はまだ赤・下はもう青
+                do {
+                    func solid(_ r: UInt8, _ g: UInt8, _ b: UInt8) -> MTLTexture {
+                        let td = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: W, height: H, mipmapped: false)
+                        td.usage = [.shaderRead]; td.storageMode = .shared
+                        let t = ctx.device.makeTexture(descriptor: td)!
+                        var px = [UInt8](repeating: 255, count: W * H * 4)
+                        for i in stride(from: 0, to: px.count, by: 4) { px[i] = b; px[i + 1] = g; px[i + 2] = r }
+                        t.replace(region: MTLRegionMake2D(0, 0, W, H), mipmapLevel: 0, withBytes: px, bytesPerRow: W * 4)
+                        return t
+                    }
+                    let red = solid(255, 0, 0), blue = solid(0, 0, 255)
+                    let tw = Effect(kind: .timeWarp)
+                    let twp = EffectProcessor(); twp.storageMode = .shared
+                    func run(_ input: MTLTexture, _ t: Double) -> [UInt8] {
+                        let cb = ctx.queue.makeCommandBuffer()!
+                        let out = twp.apply(EffectStack(effects: [tw]), to: input, key: "tw", cb: cb, now: t)
+                        cb.commit(); cb.waitUntilCompleted()
+                        var px = [UInt8](repeating: 0, count: W * H * 4)
+                        out.getBytes(&px, bytesPerRow: W * 4, from: MTLRegionMake2D(0, 0, W, H), mipmapLevel: 0)
+                        return px
+                    }
+                    var t = 0.0
+                    while t < 1.2 { _ = run(red, t); t += 1.0 / 30 }
+                    var last: [UInt8] = []
+                    while t < 1.6 { last = run(blue, t); t += 1.0 / 30 }
+                    let top = (2 * W + 80) * 4, bottom = ((H - 2) * W + 80) * 4
+                    check(last[top + 2] > 200 && last[top] < 60 && last[bottom] > 200 && last[bottom + 2] < 60,
+                          "時間のずらし：上ほど過去（上はまだ赤、下はもう青）")
+                }
+                // 流体：動く絵から絵の具が流れて、元の絵と違う絵になる。絵の具を足さず元の絵 100% なら、元の絵のまま
+                do {
+                    var grid2 = Effect(kind: .grid); grid2.values = [1, 6, 0.2, 1.5]; grid2.color = RGB.hsb(0.1, 0.8, 1)
+                    let fp = EffectProcessor(); fp.storageMode = .shared
+                    func run(_ fl: Effect, _ t: Double, alone: Bool = false) -> [UInt8] {
+                        let cb = ctx.queue.makeCommandBuffer()!
+                        let out = fp.apply(EffectStack(effects: alone ? [grid2] : [grid2, fl], origin: 0), to: blankT,
+                                           key: alone ? "g" : "fl" + fl.id.uuidString, cb: cb, now: t)
+                        cb.commit(); cb.waitUntilCompleted()
+                        var px = [UInt8](repeating: 0, count: W * H * 4)
+                        out.getBytes(&px, bytesPerRow: W * 4, from: MTLRegionMake2D(0, 0, W, H), mipmapLevel: 0)
+                        return px
+                    }
+                    let fl = Effect(kind: .fluid)
+                    var none = fl; none.values[1] = 0; none.values[7] = 1; none.values[0] = 3; none.id = UUID()
+                    var a: [UInt8] = [], b: [UInt8] = []
+                    var t = 1.0
+                    for _ in 0..<40 { a = run(fl, t); b = run(none, t); t += 1.0 / 30 }
+                    let orig = run(fl, t - 1.0 / 30, alone: true)
+                    let diff = zip(a, orig).map { abs(Int($0) - Int($1)) }.reduce(0, +)
+                    let same = zip(b, orig).map { abs(Int($0) - Int($1)) }.max() ?? 255
+                    check(diff > W * H * 4 && same <= 2 && EffectKind.fluid.category == .shape && EffectKind.timeWarp.category == .time,
+                          "流体：動きで絵の具が流れて混ざり（差 \(diff)）、足さなければ元の絵のまま（最大の差 \(same)）")
+                }
+                // アナログ機材：グリッチボックス・VHS・ビデオフィードバック・ラスタースキャン・CRT
+                do {
+                    func pic(_ f: (Int, Int) -> (UInt8, UInt8, UInt8, UInt8)) -> MTLTexture {
+                        let td = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: W, height: H, mipmapped: false)
+                        td.usage = [.shaderRead]; td.storageMode = .shared
+                        let t = ctx.device.makeTexture(descriptor: td)!
+                        var px = [UInt8](repeating: 0, count: W * H * 4)
+                        for y in 0..<H { for x in 0..<W {
+                            let (r, g, b, a) = f(x, y); let i = (y * W + x) * 4
+                            px[i] = b; px[i + 1] = g; px[i + 2] = r; px[i + 3] = a
+                        } }
+                        t.replace(region: MTLRegionMake2D(0, 0, W, H), mipmapLevel: 0, withBytes: px, bytesPerRow: W * 4)
+                        return t
+                    }
+                    let bars = pic { x, y in
+                        let c: [(UInt8, UInt8, UInt8)] = [(230, 40, 40), (40, 220, 60), (240, 230, 50), (40, 60, 230)]
+                        let v = c[(x / 40) % 4]
+                        let k = UInt8(clamping: 80 + y * 2)
+                        return (UInt8(Int(v.0) * Int(k) / 255), UInt8(Int(v.1) * Int(k) / 255), UInt8(Int(v.2) * Int(k) / 255), 255)
+                    }
+                    let rp = EffectProcessor(); rp.storageMode = .shared
+                    func run(_ e: Effect, _ input: MTLTexture, now: Double = 2, key: String = "r") -> [UInt8] {
+                        let cb = ctx.queue.makeCommandBuffer()!
+                        let out = rp.apply(EffectStack(effects: [e], origin: 0), to: input, key: key, cb: cb, now: now)
+                        cb.commit(); cb.waitUntilCompleted()
+                        var px = [UInt8](repeating: 0, count: W * H * 4)
+                        out.getBytes(&px, bytesPerRow: W * 4, from: MTLRegionMake2D(0, 0, W, H), mipmapLevel: 0)
+                        return px
+                    }
+                    var src = [UInt8](repeating: 0, count: W * H * 4)
+                    bars.getBytes(&src, bytesPerRow: W * 4, from: MTLRegionMake2D(0, 0, W, H), mipmapLevel: 0)
+                    func maxDiff(_ a: [UInt8], _ b: [UInt8]) -> Int { zip(a, b).map { abs(Int($0) - Int($1)) }.max() ?? 255 }
+                    func sumDiff(_ a: [UInt8], _ b: [UInt8]) -> Int { zip(a, b).map { abs(Int($0) - Int($1)) }.reduce(0, +) }
+                    // グリッチボックス：ツマミを全部 0（ゲイン 100%）にすると元の絵のまま。乱すと変わり、時間で動き、同じ時刻なら同じ
+                    var g0 = Effect(kind: .glitchBox)
+                    g0.values = [0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1]
+                    let g = Effect(kind: .glitchBox)
+                    let ga = run(g, bars), gb = run(g, bars), gc = run(g, bars, now: 2.7)
+                    check(maxDiff(run(g0, bars), src) <= 3 && sumDiff(ga, src) > W * H * 4 && ga == gb && ga != gc,
+                          "グリッチボックス：ツマミを 0 にすると元の絵のまま、回すと乱れて時間で動く（同じ時刻なら同じ絵）")
+                    // VHS：絵が変わり、時間で動く
+                    let v1 = run(Effect(kind: .vhs), bars), v2 = run(Effect(kind: .vhs), bars, now: 2.5)
+                    check(sumDiff(v1, src) > W * H && v1 != v2, "VHS テープ：にじみ・ノイズで絵が変わり、時間で動く")
+                    // ビデオフィードバック：入力が消えても前の絵が残り（拡大して重なる）、残る強さ 0 ならすぐ消える
+                    let dot = pic { x, y in hypot(Double(x - 50), Double(y - 45)) < 10 ? (255, 255, 255, 255) : (0, 0, 0, 0) }
+                    let empty = pic { _, _ in (0, 0, 0, 0) }
+                    func trail(_ keep: Double) -> Int {
+                        var e = Effect(kind: .videoFeedback); e.values[5] = keep
+                        var t = 1.0
+                        for _ in 0..<20 { _ = run(e, dot, now: t, key: "fb\(keep)"); t += 1.0 / 30 }
+                        let after = run(e, empty, now: t, key: "fb\(keep)")
+                        return stride(from: 3, to: after.count, by: 4).filter { after[$0] > 20 }.count
+                    }
+                    let kept = trail(0.6), gone = trail(0)
+                    check(kept > 50 && gone < kept / 4,
+                          "ビデオフィードバック：入力が消えても前の絵が残って重なり（\(kept) px）、残る強さ 0 ならすぐ消える（\(gone) px）")
+                    // ラスタースキャン：線の間は透明。明るい所ほど持ち上がる（高さ 0 と比べて絵が変わる）
+                    var rs = Effect(kind: .rasterScan); rs.values[0] = 20
+                    var flat = rs; flat.values[1] = 0
+                    let ra = run(rs, bars), rf = run(flat, bars)
+                    let clear = stride(from: 3, to: ra.count, by: 4).filter { ra[$0] == 0 }.count
+                    check(clear > W * H / 5 && ra != rf, "ラスタースキャン：線の間は透明で、明るい所ほど線が持ち上がる")
+                    // CRT：角は黒く（ふくらみ）、真ん中は元の絵に近い明るさ。残光：消えたあとも少し残る
+                    let crt = run(Effect(kind: .crt), bars, key: "crt")
+                    let corner = Int(crt[0]) + Int(crt[1]) + Int(crt[2])
+                    let ci = ((H / 2) * W + W / 2) * 4
+                    let center = (Int(crt[ci]) + Int(crt[ci + 1]) + Int(crt[ci + 2])), orig = Int(src[ci]) + Int(src[ci + 1]) + Int(src[ci + 2])
+                    check(corner < 10 && center > orig / 3, "CRT モニター：角は黒く（画面のふくらみ）、真ん中は元の絵が映る（\(orig)→\(center)）")
+                    check(EffectKind.allCases.filter { $0.category == .retro }.count == 5 && !EffectKind.crt.isGenerator,
+                          "アナログ機材：5 つが「アナログ機材」の分類に並ぶ")
+                }
+                // うねり（有機的な歪み）：格子の絵をゆがませる。強さ 0 ならそのまま、時間でゆらぐ（速さ 0 なら止まる）
+                do {
+                    var grid = Effect(kind: .grid); grid.values = [1, 6, 0.15, 0]
+                    func warped(_ w: Effect?, now: Double = 1) -> [UInt8] {
+                        let cb = ctx.queue.makeCommandBuffer()!
+                        let out = fxp.apply(EffectStack(effects: [grid] + (w.map { [$0] } ?? []), origin: 0),
+                                            to: blankT, key: "wp", cb: cb, now: now)
+                        cb.commit(); cb.waitUntilCompleted()
+                        var px = [UInt8](repeating: 0, count: W * H * 4)
+                        out.getBytes(&px, bytesPerRow: W * 4, from: MTLRegionMake2D(0, 0, W, H), mipmapLevel: 0)
+                        return stride(from: 3, to: px.count, by: 4).map { px[$0] }
+                    }
+                    let base = warped(nil)
+                    var w0 = Effect(kind: .warp); w0.values[0] = 0
+                    let wp = Effect(kind: .warp)
+                    var still = wp; still.values[2] = 0
+                    let wa = warped(wp, now: 1), wb = warped(wp, now: 2)
+                    let kinds = (0..<4).map { k -> [UInt8] in var e = wp; e.values[3] = Double(k); e.values[0] = 80; return warped(e) }
+                    let litBase = lit(base, x0: 0, x1: W), litWarp = lit(wa, x0: 0, x1: W)
+                    check(warped(w0) == base && wa != base && wa != wb && warped(still, now: 1) == warped(still, now: 3)
+                          && abs(litWarp - litBase) < litBase / 3 && Set(kinds.map { $0.hashValue }).count == 4
+                          && kinds.allSatisfy { $0 != base } && EffectKind.warp.category == .shape && !EffectKind.warp.isGenerator,
+                          "うねり：強さ 0 ならそのまま、ゆがませても絵の量は同じくらい（\(litBase)→\(litWarp) px）、時間でゆらぎ、4 種類とも違う")
+                    var clear = wp; clear.values[0] = 300; clear.values[7] = 2
+                    var fold = clear; fold.values[7] = 1
+                    var solid = Effect(kind: .solid)
+                    solid.values = [1]
+                    func over(_ w: Effect) -> [UInt8] { let g = grid; grid = solid; defer { grid = g }; return warped(w) }
+                    check(over(clear).contains(0) && !over(fold).contains(0),
+                          "うねり：画面の端を「透明」にすると外は透け、「折り返す」なら透けない")
+                }
+                let oldDots = try? JSONDecoder().decode(Effect.self, from: Data(#"{"kind":"dots","values":[14,16]}"#.utf8))
+                check(oldDots?.values.count == EffectKind.dots.params.count && EffectKind.dots.generatorCategory == .pattern,
+                      "ドット：値が足りない保存データも読める・線・模様の分類")
+                // 光の流れ：光の面と暗い所があり、ゆっくり動く（0.1 秒ではほとんど変わらない）
+                do {
+                    var fl = Effect(kind: .flow); fl.values[7] = 0   // ざらつきなしで比べる
+                    let f0 = alpha(fl, now: 4), f1 = alpha(fl, now: 4.1), f2 = alpha(fl, now: 12)
+                    let bright = f0.filter { $0 > 180 }.count, dark = f0.filter { $0 < 40 }.count
+                    let small = zip(f0, f1).map { abs(Int($0) - Int($1)) }.max() ?? 0
+                    let big = zip(f0, f2).map { abs(Int($0) - Int($1)) }.max() ?? 0
+                    check(bright > 500 && dark > 500 && small < 40 && big > 60,
+                          "光の流れ：光の面と暗い所があり、ゆっくり流れる（0.1 秒で最大 \(small)・8 秒で \(big)）")
+                }
+                check(GeneratorCategory.allCases.flatMap(\.kinds).count == EffectKind.generators.count
+                      && EffectKind.generators.allSatisfy { $0.generatorCategory != nil },
+                      "ジェネレーター：どれもどこかの分類に入っている")
+            }
+            // エフェクトを追加するメニュー：一覧と同じエフェクトが全部ある（ジェネレーター・重ね方の値は無い）。足したものは開いておく
+            do {
+                let listed = AddEffectMenuItems.groups.flatMap(\.1)
+                let all = EffectKind.allCases.filter { !$0.isBlend && !$0.isGenerator }
+                let pad = FXPad()
+                let added = pad.addEffectOpened(.mirror)
+                check(Set(listed) == Set(all) && listed.count == all.count && pad.effects.map(\.kind) == [.mirror]
+                      && EffectUIState.shared.expanded.contains(added.id),
+                      "エフェクトを追加するメニュー：エフェクトが分類ごとに全部並び、選ぶと足して開く（\(listed.count) 個）")
+            }
+            // エフェクトを探す：ひらがな・英語・説明でも当たり、名前に当たるものが先
+            do {
+                let r1 = EffectPicker.results("みらー", includeGenerators: false)
+                let r2 = EffectPicker.results("mask", includeGenerators: false)
+                let r3 = EffectPicker.results("マスク", includeGenerators: false)
+                let r4 = EffectPicker.results("てきすと", includeGenerators: true)
+                let r5 = EffectPicker.results("てきすと", includeGenerators: false)
+                let r6 = EffectPicker.results("残像", includeGenerators: false)
+                check(r1.first == .mirror && Set(r2.prefix(2)) == [.shapeMask, .polyMask] && Set(r3.prefix(2)) == [.shapeMask, .polyMask]
+                      && r4.first == .text && r5.isEmpty && r6.first == .echo
+                      && EffectPicker.results("", includeGenerators: true).count == AddEffectMenuItems.groups.flatMap(\.1).count + EffectKind.generators.count,
+                      "エフェクトを探す：ひらがな・英語・説明でも当たり、名前が当たるものが先（みらー → \(r1.first?.rawValue ?? "-")）")
+            }
+            // 色を選ぶ窓：色相・鮮やかさ・明るさ ⇔ RGB、16 進
+            do {
+                let samples: [RGB] = [.hsb(0.62, 0.7, 1), .hsb(0.1, 1, 0.4), .hsb(0.9, 0.3, 0.8), .white, .black]
+                let round = samples.allSatisfy { c in
+                    let (h, sv, bv) = c.hsb
+                    let back = RGB.hsb(h, sv, bv)
+                    return abs(back.r - c.r) < 1e-9 && abs(back.g - c.g) < 1e-9 && abs(back.b - c.b) < 1e-9
+                }
+                check(round && RGB(hex: "#4D7EFF")?.hex == "#4D7EFF" && RGB(hex: "f80")?.hex == "#FF8800" && RGB(hex: "zz") == nil
+                      && RGB.white.hsb.s == 0 && RGB.hsb(0.25, 1, 1).hsb.h == 0.25,
+                      "色を選ぶ窓：色相・鮮やかさ・明るさと RGB を行き来できる、16 進（#RRGGBB・3 桁）を読める")
             }
             let slot = ClipSlot(generator: te)
             check(slot.name == "「HELLO」", "テキスト：クリップの名前は最初の行（\(slot.name)）")
@@ -1816,6 +2420,20 @@ enum SelfTest {
         e.moveLayer(0, to: 2)
         check(e.layers[2].title == "背景" && e.layers[2].displayName == "L3 背景" && e.layers[0].displayName == "L1",
               "レイヤーの名前：番号は場所で変わり、付けた名前はレイヤーに付いていく")
+        // クリップの見かけの名前：ジェネレーターにも付けられ、複製・保存しても残る。空にすると元の名前
+        if let g = e.slots[2 * c] {
+            g.title = "オープニングの背景"
+            e.duplicateSlot(2 * c, to: 2 * c + 3)
+            let st = e.makeState(relativeTo: nil)
+            let e3 = Engine(persistent: false)
+            e3.apply(st, baseDir: nil)
+            let loaded = e3.slots[2 * c]
+            check(g.name == "オープニングの背景" && e.slots[2 * c + 3]?.name == "オープニングの背景"
+                  && loaded?.name == "オープニングの背景" && loaded?.generator?.kind == .solid,
+                  "クリップの名前：ジェネレーターにも付けられ、複製・保存しても残る")
+            g.title = ""
+            check(g.name == EffectKind.solid.label, "クリップの名前：空にすると元の名前（\(g.name)）")
+        }
         check(e.layers[2] === l0 && l0.index == 2 && abs(e.layers[2].opacity - 0.3) < 1e-9
               && e.slots[2 * c]?.generator?.kind == .solid && e.slots[c + 1 - c]?.generator?.kind == .noise
               && e.slots[c]?.generator?.kind == .stripes,
@@ -2445,7 +3063,7 @@ enum SelfTest {
         check(e.layerDraws().count == 1 && a.isPlaying && a.effectiveVolume == 0, "クリップのミュート：そのクリップの映像と音だけ消える")
         a.muted = false
 
-        let mixer = AudioOutput.shared.engine.mainMixerNode
+        let mixer = AudioOutput.shared.masterMixer
         let saved = mixer.outputVolume
         e.masterVolume = 0.7
         e.compMuted = true
@@ -2579,23 +3197,261 @@ enum SelfTest {
     }
 
     /// 開発用：ジェネレーターを 1 枚（1280×720、暗い下地）書き出す。かかった GPU 時間も出す
-    static func genPreview(kind: EffectKind, path: String, time: Double, values: [Double], random: Double?) {
+    /// 音に反応させる：音の解析（低音・高音・アタック）と、パラメーターが音で動くこと
+    static func testAudioReactive(check: (Bool, String) -> Void, wait: (Double) -> Void) {
+        let sr = 48000.0
+        func run(_ f: (Double) -> Double, seconds: Double, an: inout AudioAnalyzer, t0: Double = 0) -> [Double] {
+            var out: [Double] = []
+            let n = 1024
+            var t = 0.0
+            while t < seconds {
+                let buf = (0..<n).map { Float(f(t + Double($0) / sr)) }
+                out = buf.withUnsafeBufferPointer {
+                    an.process($0.baseAddress!, count: n, sampleRate: sr, time: t0 + t, release: 0.15, autoGain: false)
+                }
+                t += Double(n) / sr
+            }
+            return out
+        }
+        var a1 = AudioAnalyzer(), a2 = AudioAnalyzer(), a3 = AudioAnalyzer()
+        let lowTone = run({ 0.3 * sin(2 * .pi * 60 * $0) }, seconds: 0.5, an: &a1)
+        let highTone = run({ 0.3 * sin(2 * .pi * 6000 * $0) }, seconds: 0.5, an: &a2)
+        let quiet = run({ _ in 0 }, seconds: 0.5, an: &a3)
+        check(lowTone[1] > lowTone[3] * 5 && highTone[3] > highTone[1] * 5 && lowTone[0] > 0.3 && quiet.allSatisfy { $0 == 0 },
+              String(format: "音の解析：低い音は低音に（低 %.2f・高 %.2f）、高い音は高音に（低 %.2f・高 %.2f）、無音は 0",
+                     lowTone[1], lowTone[3], highTone[1], highTone[3]))
+        // アタック：静かなあとに急に低音が来たら、その瞬間を覚える
+        var a4 = AudioAnalyzer()
+        _ = run({ 0.01 * sin(2 * .pi * 60 * $0) }, seconds: 1, an: &a4)
+        let before = a4.lastOnset
+        _ = run({ 0.5 * sin(2 * .pi * 55 * $0) }, seconds: 0.1, an: &a4, t0: 1)
+        check(before < 0.5 && a4.lastOnset >= 1 && a4.lastOnset < 1.1, String(format: "音の解析：キックのように低音が急に来た瞬間を「アタック」にする（前 %.2f・キック %.2f）", before, a4.lastOnset))
+        // 自動で合わせる：小さな音でも、最近の山を 100% として動く
+        var a5 = AudioAnalyzer()
+        var small: [Double] = []
+        let n = 1024
+        var t = 0.0
+        while t < 1 {
+            let buf = (0..<n).map { Float(0.02 * sin(2 * .pi * 60 * (t + Double($0) / sr))) }
+            small = buf.withUnsafeBufferPointer { a5.process($0.baseAddress!, count: n, sampleRate: sr, time: t, release: 0.15, autoGain: true) }
+            t += Double(n) / sr
+        }
+        check(small[0] > 0.8, String(format: "音の解析：自動で合わせると、小さな音でも大きく動く（%.2f）", small[0]))
+
+        // パラメーターが音で動く（値は決め打ち：音量 0.5・低音 1・中音 0・高音 0.25・アタック 0）
+        let ar = AudioReactive.shared
+        ar.setOverrideForTest([0.5, 1, 0, 0.25, 0])
+        var pa = ParamAnim(range: 0...10)
+        pa.mode = .audio
+        pa.audio = AudioLink(band: .low, gain: 1)
+        let vLow = pa.value(base: 3, at: 1, beat: BeatClock())
+        pa.audio = AudioLink(band: .mid, gain: 1)
+        let vMid = pa.value(base: 3, at: 1, beat: BeatClock())
+        pa.audio = AudioLink(band: .level, gain: 1)
+        let vLevel = pa.value(base: 3, at: 1, beat: BeatClock())
+        pa.audio = AudioLink(band: .high, gain: 2)
+        let vHigh = pa.value(base: 3, at: 1, beat: BeatClock())
+        pa.motion = .backward
+        let vRev = pa.value(base: 3, at: 1, beat: BeatClock())
+        check(vLow == 10 && vMid == 0 && vLevel == 5 && abs(vHigh - 5) < 1e-9 && abs(vRev - 5) < 1e-9,
+              "音で動かす：音の大きさ × 感度で「から」〜「まで」を動く（低音 \(vLow)・中音 \(vMid)・音量 \(vLevel)・高音×2 \(vHigh)）")
+        // エフェクトの値も音で動く
+        var e = Effect(kind: .glitchBox)
+        var ga = ParamAnim(range: 0...1); ga.mode = .audio; ga.audio = AudioLink(band: .low, gain: 1)
+        e.anims["0"] = ga
+        let ev = e.value(0, at: 1, beat: BeatClock(), origin: 0)
+        ar.setOverrideForTest([0, 0, 0, 0, 0])
+        let ev0 = e.value(0, at: 1, beat: BeatClock(), origin: 0)
+        check(ev == 1 && ev0 == 0, "音で動かす：エフェクトの値も音で動く（低音 100% → \(ev)、0% → \(ev0)）")
+        ar.setOverrideForTest(nil)
+        // 保存して読み込める。音の設定の無い前の保存データも読める
+        let data = try? JSONEncoder().encode(pa)
+        let back = data.flatMap { try? JSONDecoder().decode(ParamAnim.self, from: $0) }
+        let old = try? JSONDecoder().decode(ParamAnim.self, from: Data(#"{"mode":2,"motion":0,"seconds":4,"beats":4,"lo":0,"hi":1,"seed":7}"#.utf8))
+        check(back?.mode == .audio && back?.audio == AudioLink(band: .high, gain: 2) && old?.mode == .beat && old?.audio == nil,
+              "音で動かす：保存して読み込める（前の保存データも読める）")
+        // アプリの音を聞く：何人聞いても、それぞれに音が届く（録画と音に反応を同時に使える）
+        var c1 = 0, c2 = 0
+        let l1 = AudioOutput.shared.addMixerListener { _, _ in c1 += 1 }
+        let l2 = AudioOutput.shared.addMixerListener { _, _ in c2 += 1 }
+        wait(0.4)
+        AudioOutput.shared.removeMixerListener(l1)
+        AudioOutput.shared.removeMixerListener(l2)
+        check(c1 > 0 && c2 > 0, "アプリの音：録画と音に反応の両方に、同じ音が届く（\(c1)・\(c2) 回）")
+    }
+
+    /// 録画：決めた大きさの動画ファイルができ、渡した絵が入っている。音も録れる。アプリの設定は書き換えない
+    static func testRecording(check: (Bool, String) -> Void, wait: (Double) -> Void) {
+        let ctx = MetalContext.shared
+        let rec = Recorder.shared
+        let savedDefaults = UserDefaults.standard.dictionary(forKey: "recordSettings")
+        rec.forTests = true
+        var st = rec.settings
+        st.codec = .h264; st.fps = 30; st.size = .p720; st.audio = false
+        rec.settings = st
+        let red: MTLTexture = {
+            let td = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: 64, height: 36, mipmapped: false)
+            td.usage = [.shaderRead]; td.storageMode = .shared
+            let t = ctx.device.makeTexture(descriptor: td)!
+            var px = [UInt8](repeating: 0, count: 64 * 36 * 4)
+            for i in stride(from: 0, to: px.count, by: 4) { px[i] = 0; px[i + 1] = 0; px[i + 2] = 255; px[i + 3] = 255 }
+            t.replace(region: MTLRegionMake2D(0, 0, 64, 36), mipmapLevel: 0, withBytes: px, bytesPerRow: 64 * 4)
+            return t
+        }()
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("vjplayer-rec-test", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+
+        func record(_ url: URL, frames: Int, realTime: Bool) -> URL? {
+            guard rec.start(outputSize: nil, aspect: 16.0 / 9, to: url) else { return nil }
+            let base = CACurrentMediaTime()
+            for k in 0..<frames {
+                rec.capture(red, master: 1, now: realTime ? CACurrentMediaTime() : base + (Double(k) + 0.5) / 30)
+                wait(realTime ? 1.0 / 30 : 0.01)
+            }
+            var out: URL?? = nil
+            rec.stop { out = .some($0) }
+            let t0 = CACurrentMediaTime()
+            while out == nil && CACurrentMediaTime() - t0 < 10 { wait(0.02) }
+            return out ?? nil
+        }
+
+        func inspect(_ url: URL) -> (size: CGSize, duration: Double, audio: Bool, center: (Int, Int, Int))? {
+            var result: (CGSize, Double, Bool, (Int, Int, Int))?
+            var done = false
+            Task {
+                defer { done = true }
+                let asset = AVURLAsset(url: url)
+                guard let v = try? await asset.loadTracks(withMediaType: .video).first,
+                      let size = try? await v.load(.naturalSize),
+                      let dur = try? await asset.load(.duration) else { return }
+                let audio = (try? await asset.loadTracks(withMediaType: .audio))?.isEmpty == false
+                let gen = AVAssetImageGenerator(asset: asset)
+                gen.requestedTimeToleranceBefore = .zero; gen.requestedTimeToleranceAfter = .zero
+                guard let img = try? await gen.image(at: CMTime(value: 5, timescale: 30)).image else { return }
+                var px = [UInt8](repeating: 0, count: 4)
+                let cs = CGColorSpaceCreateDeviceRGB()
+                if let c = CGContext(data: &px, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4, space: cs,
+                                     bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) {
+                    c.draw(img, in: CGRect(x: -img.width / 2, y: -img.height / 2, width: img.width, height: img.height))
+                }
+                result = (size, dur.seconds, audio, (Int(px[0]), Int(px[1]), Int(px[2])))
+            }
+            let t0 = CACurrentMediaTime()
+            while !done && CACurrentMediaTime() - t0 < 10 { wait(0.02) }
+            return result.map { (size: $0.0, duration: $0.1, audio: $0.2, center: $0.3) }
+        }
+
+        let u1 = dir.appendingPathComponent("rec.mp4")
+        let f1 = record(u1, frames: 20, realTime: false)
+        let i1 = f1.flatMap(inspect)
+        check(f1 == u1 && i1?.size == CGSize(width: 1280, height: 720) && abs((i1?.duration ?? 0) - 20.0 / 30) < 0.05
+              && (i1?.center.0 ?? 0) > 200 && (i1?.center.1 ?? 255) < 50 && (i1?.center.2 ?? 255) < 50 && i1?.audio == false,
+              String(format: "録画：1280×720・30 fps の動画になり、渡した絵（赤）が入る（%.2f 秒・真ん中 %@）",
+                     i1?.duration ?? -1, i1.map { "\($0.center)" } ?? "-"))
+        check(rec.activeSize() == nil && !rec.isRecording, "録画：止めたら合成の大きさの指定も消える")
+
+        st.audio = true; st.codec = .prores422; st.size = .p720
+        rec.settings = st
+        let u2 = dir.appendingPathComponent("rec.mov")
+        let f2 = record(u2, frames: 24, realTime: true)
+        let i2 = f2.flatMap(inspect)
+        check(f2 == u2 && i2?.audio == true && i2?.size == CGSize(width: 1280, height: 720) && (i2?.duration ?? 0) > 0.6,
+              String(format: "録画：ProRes でも書け、音（ミキサーの出口）も入る（%.2f 秒）", i2?.duration ?? -1))
+        // 大きさ：出力と同じ・決めた高さ（縦横比は出力）・H.264 の上限
+        var sz = RecordSettings(); sz.size = .output
+        let a = sz.pixelSize(outputSize: (1920, 1080), aspect: 16.0 / 9)
+        sz.size = .p1080
+        let b = sz.pixelSize(outputSize: nil, aspect: 4.0 / 3)
+        sz.size = .output
+        let c = sz.pixelSize(outputSize: (7680, 2160), aspect: 7680.0 / 2160)
+        check(a == (1920, 1080) && b == (1440, 1080) && c.0 <= 4096 && c.0 % 2 == 0 && c.1 % 2 == 0,
+              "録画：大きさは出力と同じ・決めた高さ（縦横比は出力）。H.264 の上限を超えると縮める（\(c)）")
+        let after = UserDefaults.standard.dictionary(forKey: "recordSettings")
+        check(NSDictionary(dictionary: savedDefaults ?? [:]).isEqual(to: after ?? [:]), "録画：テストではアプリの録画の設定を書き換えない")
+        try? FileManager.default.removeItem(at: dir)
+    }
+
+    /// 開発用：重ね方の見え方を 1 枚書き出す（下 = 画像、上 = ジェネレーター。1〜3 秒を 1/30 秒ずつ進めた最後のコマ）
+    static func blendPreview(mode: BlendMode, path: String, top: EffectKind, below: String?, values: [Double]) {
         let ctx = MetalContext.shared
         let W = 1280, H = 720
         let td = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: W, height: H, mipmapped: false)
         td.usage = [.shaderRead]
         let blank = ctx.device.makeTexture(descriptor: td)!
+        var bottom: MTLTexture
+        if let below, let img = NSImage(contentsOfFile: below)?.cgImage(forProposedRect: nil, context: nil, hints: nil) {
+            let loader = MTKTextureLoader(device: ctx.device)
+            bottom = (try? loader.newTexture(cgImage: img, options: [.SRGB: false])) ?? blank
+        } else {
+            bottom = blank
+        }
+        let genP = EffectProcessor()
+        var g = Effect(kind: top)
+        if top == .text { g.text = "HALO"; g.values[1] = 0.5 }
+        var fx = mode.effectKind.map { Effect(kind: $0) }
+        for (i, v) in values.enumerated() where fx != nil && i < fx!.values.count { fx!.values[i] = v }
+        let comp = Compositor()
+        comp.storageMode = .shared
+        var out: MTLTexture?
+        var t = 1.0
+        while t < 3 {
+            let cb = ctx.queue.makeCommandBuffer()!
+            let topTex = genP.apply(EffectStack(effects: [g], origin: 0), to: blank, key: "top", cb: cb, now: t)
+            var groups = [LayerGroup(draws: [LayerDraw(texture: bottom, opacity: 1, blend: .normal, holder: nil)],
+                                     opacity: 1, blend: .normal, key: 0)]
+            var tg = LayerGroup(draws: [LayerDraw(texture: topTex, opacity: 1, blend: mode, holder: nil)], opacity: 1, blend: mode, key: 1)
+            if let fx { tg.blendFX = EffectStack(effects: [fx]) }
+            groups.append(tg)
+            out = comp.composite(groups, effects: EffectStack(), width: W, height: H, cb: cb, now: t)
+            cb.commit(); cb.waitUntilCompleted()
+            t += 1.0 / 30
+        }
+        guard let out else { return }
+        var px = [UInt8](repeating: 0, count: W * H * 4)
+        out.getBytes(&px, bytesPerRow: W * 4, from: MTLRegionMake2D(0, 0, W, H), mipmapLevel: 0)
+        for i in stride(from: 0, to: px.count, by: 4) { px.swapAt(i, i + 2); px[i + 3] = 255 }
+        let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: W, pixelsHigh: H, bitsPerSample: 8, samplesPerPixel: 4,
+                                   hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: W * 4, bitsPerPixel: 32)!
+        px.withUnsafeBufferPointer { memcpy(rep.bitmapData!, $0.baseAddress!, px.count) }
+        try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
+        print("書き出しました: \(path)")
+    }
+
+    static func genPreview(kind: EffectKind, path: String, time: Double, values: [Double], random: Double?) {
+        let ctx = MetalContext.shared
+        let W = 1280, H = 720
+        let td = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: W, height: H, mipmapped: false)
+        td.usage = [.shaderRead]
+        var blank = ctx.device.makeTexture(descriptor: td)!
+        // VJ_PREVIEW_INPUT=画像 で、エフェクトをその画像にかけて見る
+        var hasImage = false
+        if !kind.isGenerator, let path = ProcessInfo.processInfo.environment["VJ_PREVIEW_INPUT"],
+           let img = NSImage(contentsOfFile: path)?.cgImage(forProposedRect: nil, context: nil, hints: nil),
+           let t = try? MTKTextureLoader(device: ctx.device).newTexture(cgImage: img, options: [.SRGB: false]) {
+            blank = t
+            hasImage = true
+        }
         var e = Effect(kind: kind)
         for (i, v) in values.enumerated() where i < e.values.count { e.values[i] = v }
         if let random, e.values.count > 8 { e.values[8] = random }
         let fxp = EffectProcessor(); fxp.storageMode = .shared
         var out = blank
         var ms = 0.0
-        for k in 0..<3 {
+        // GPU の時間は、ほかのアプリとの取り合いでぶれるので、20 回のうちいちばん速いもの
+        ms = .infinity
+        for k in 0..<22 {
             let cb = ctx.queue.makeCommandBuffer()!
-            out = fxp.apply(EffectStack(effects: [e]), to: blank, key: "g", cb: cb, now: time)
+            // 群れは 1 コマずつ進める（動かす分の時間も測る）
+            // エフェクト（ジェネレーターでないもの）は、格子の絵にかけて見る
+            var input = [e]
+            if !kind.isGenerator && !hasImage {
+                var g = Effect(kind: .grid); g.values = [1, 9, 0.1, kind.isStateful ? 0.6 : 0]; g.color = RGB.hsb(0.55, 0.6, 1)
+                input = [g, e]
+            }
+            out = fxp.apply(EffectStack(effects: input), to: blank, key: "g", cb: cb,
+                            now: kind.isStateful ? time + Double(k) / 60 : time)
             cb.commit(); cb.waitUntilCompleted()
-            if k == 2 { ms = (cb.gpuEndTime - cb.gpuStartTime) * 1000 }
+            if k >= 2 { ms = min(ms, (cb.gpuEndTime - cb.gpuStartTime) * 1000) }
         }
         var px = [UInt8](repeating: 0, count: W * H * 4)
         out.getBytes(&px, bytesPerRow: W * 4, from: MTLRegionMake2D(0, 0, W, H), mipmapLevel: 0)
@@ -2934,7 +3790,7 @@ enum SelfTest {
         check(e.renderParams().master == 0.5, "マスター不透明度が描画に渡る")
 
         // ブラックアウト（トグル）：再生は続けたまま、出力の映像と音だけ消す
-        let mixer = AudioOutput.shared.engine.mainMixerNode
+        let mixer = AudioOutput.shared.masterMixer
         let savedVol = mixer.outputVolume
         e.masterVolume = 0.8
         e.blackoutFadeOut = 0

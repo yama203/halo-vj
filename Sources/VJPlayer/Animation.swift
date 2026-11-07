@@ -22,13 +22,14 @@ enum ParamKey: String, Codable, CaseIterable {
 
 /// 何に合わせて動かすか
 enum AnimMode: Int, Codable, CaseIterable, Identifiable {
-    case off, time, beat
+    case off, time, beat, audio
     var id: Int { rawValue }
     var label: String {
         switch self {
         case .off: "固定"
         case .time: "秒"
         case .beat: "BPM"
+        case .audio: "音"
         }
     }
 }
@@ -62,8 +63,10 @@ struct ParamAnim: Codable, Equatable {
     var seed = UInt32.random(in: 0...UInt32.max)
     /// 秒モードで動き始めた時刻（保存しない）
     var start: Double = 0
+    /// 音モード：音のどの部分で、どれだけの感度で動かすか（無ければ音量・感度 100%）
+    var audio: AudioLink?
 
-    enum CodingKeys: String, CodingKey { case mode, motion, seconds, beats, lo, hi, seed }
+    enum CodingKeys: String, CodingKey { case mode, motion, seconds, beats, lo, hi, seed, audio }
 
     init(key: ParamKey) {
         lo = key.defaultRange.lowerBound
@@ -93,6 +96,12 @@ struct ParamAnim: Codable, Equatable {
         case .beat:
             // 拍の頭に揃える（同じ周期のものは全部そろって動く）
             phase = beat.beat(at: t) / max(beats, 0.01)
+        case .audio:
+            // 音の大きさ（0〜1）× 感度で、から〜まで の間。逆なら大きいほど「から」へ
+            let a = audio ?? AudioLink()
+            var k = min(max(AudioReactive.shared.level(a.band, at: t) * a.gain, 0), 1)
+            if motion == .backward { k = 1 - k }
+            return lo + (hi - lo) * k
         }
         let cycle = floor(phase)
         let f = phase - cycle
@@ -125,6 +134,7 @@ struct ParamAnim: Codable, Equatable {
         case .off: return ""
         case .time: return String(format: "%@ %.1f秒", motion.label, seconds)
         case .beat: return "\(motion.label) \(Self.beatsLabel(beats))"
+        case .audio: return "音：" + (audio ?? AudioLink()).band.label
         }
     }
 

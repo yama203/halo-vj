@@ -26,6 +26,15 @@ enum Main {
             SelfTest.genPreview(kind: k, path: args[i + 2], time: nums.first ?? 8, values: Array(nums.dropFirst()), random: rnd)
             exit(0)
         }
+        if let i = args.firstIndex(of: "--blend-preview"), args.count > i + 3, let m = Int(args[i + 1]).flatMap(BlendMode.init) {
+            // 開発用：重ね方を 1 枚書き出す  VJPlayer --blend-preview 番号 out.png 上のジェネレーター [下の画像] [値 値 …]
+            let rest = Array(args.dropFirst(i + 4))
+            let img = rest.first.flatMap { Double($0) == nil ? $0 : nil }
+            let nums = rest.compactMap(Double.init)
+            SelfTest.blendPreview(mode: m, path: args[i + 2], top: EffectKind(rawValue: args[i + 3]) ?? .text, below: img,
+                                  values: nums)
+            exit(0)
+        }
         if let i = args.firstIndex(of: "--od-bench") {
             // 開発用：オーバードライブ加算の GPU 時間を測る  VJPlayer --od-bench [幅 高さ]
             let n = args.dropFirst(i + 1).compactMap(Int.init)
@@ -46,6 +55,21 @@ enum Main {
                 Engine.shared.selectClip(clip)
             }
             CardPreview.writePanel(width: w, path: args[i + 3])
+            exit(0)
+        }
+        if let i = args.firstIndex(of: "--picker-preview"), args.count > i + 2 {
+            // 開発用：エフェクトを探す窓を書き出す  VJPlayer --picker-preview 検索の文字 out.png [gen]
+            _ = NSApplication.shared
+            NSApp.setActivationPolicy(.prohibited)
+            CardPreview.writePicker(query: args[i + 1], generators: args.count > i + 3 && args[i + 3] == "gen", path: args[i + 2])
+            exit(0)
+        }
+        if let i = args.firstIndex(of: "--colorpad-preview"), args.count > i + 1 {
+            // 開発用：色を選ぶ窓を書き出す  VJPlayer --colorpad-preview out.png [#RRGGBB]
+            _ = NSApplication.shared
+            NSApp.setActivationPolicy(.prohibited)
+            let c = args.count > i + 2 ? RGB(hex: args[i + 2]) ?? .white : RGB.hsb(0.62, 0.7, 1)
+            CardPreview.writeView(AnyView(ColorPadPreview(color: c)), path: args[i + 1])
             exit(0)
         }
         if let i = args.firstIndex(of: "--card-preview"), args.count > i + 2, let k = EffectKind(rawValue: args[i + 1]) {
@@ -113,6 +137,10 @@ struct VJPlayerApp: App {
             CommandMenu("レイアウト") {
                 LayoutMenu(layout: LayoutManager.shared)
             }
+            CommandMenu("エフェクト") {
+                Button("エフェクト・ジェネレーターを探して追加…") { EffectSearchPanel.shared.toggle() }
+                    .keyboardShortcut("e", modifiers: .command)
+            }
             CommandMenu("出力") {
                 Button("出力を閉じる／元に戻す") { OutputController.shared.toggle() }
                     .keyboardShortcut("f", modifiers: [.command, .shift])
@@ -120,6 +148,9 @@ struct VJPlayerApp: App {
                     .keyboardShortcut(.escape, modifiers: [])
                 Button("全レイヤーを停止") { Engine.shared.stopAll() }
                     .keyboardShortcut(.escape, modifiers: [.shift])
+                Divider()
+                Button("録画を始める／止める") { Recorder.shared.toggle() }
+                    .keyboardShortcut("r", modifiers: .command)
             }
         }
     }
@@ -132,6 +163,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
+        // 音に反応させる：前に選んでいた音（アプリの音・入力デバイス）を聞き始める
+        // 画面確認用：VJ_AUDIO_SOURCE=app|off で、設定を書き換えずに音の入力を決める
+        if let v = ProcessInfo.processInfo.environment["VJ_AUDIO_SOURCE"], let src = AudioReactive.Source(rawValue: v) {
+            AudioReactive.shared.forTests = true
+            AudioReactive.shared.source = src
+        } else {
+            AudioReactive.shared.startIfNeeded()
+        }
 
         // 本番中にスリープ・App Nap で止まらないようにする
         activity = ProcessInfo.processInfo.beginActivity(
@@ -146,6 +185,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // 画面確認用：VJ_OUTPUT=window で出力ウィンドウ（テスト用）を開く。VJ_FORMAT=幅x高さ[@fps][:fit|fill|stretch] で
         // 2.5 秒後に解像度を変える（開いたウィンドウと縦横比が違うときの見え方の確認）
         let env = ProcessInfo.processInfo.environment
+        // 画面確認用：VJ_EFFECT_SEARCH=1 で ⌘E の「探して追加」の窓を開く
+        if env["VJ_EFFECT_SEARCH"] != nil {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { EffectSearchPanel.shared.show() }
+        }
         if env["VJ_OUTPUT"] == "window" {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1) { OutputController.shared.target = .window }
         }
@@ -160,6 +203,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if sizeFps.count > 1 { f.fps = Double(sizeFps[1]) ?? 0 }
                 if parts.count > 1 { f.fit = ["fit": .fit, "fill": .fill, "stretch": .stretch][String(parts[1])] ?? .fit }
                 Engine.shared.outputFormat = f
+            }
+        }
+        // 画面確認用：VJ_RECORD=保存するファイル:秒 で、3 秒後からその秒数だけ録画する（録画の設定は書き換えない）
+        if let v = env["VJ_RECORD"], let i = v.lastIndex(of: ":"), let secs = Double(v[v.index(after: i)...]) {
+            let url = URL(fileURLWithPath: String(v[..<i]))
+            Recorder.shared.forTests = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                let ok = Recorder.shared.start(to: url)
+                FileHandle.standardError.write("RECORD start \(ok) \(Recorder.shared.lastError ?? "")\n".data(using: .utf8)!)
+                DispatchQueue.main.asyncAfter(deadline: .now() + secs) {
+                    let c = Recorder.shared.counts()
+                    Recorder.shared.stop { u in
+                        FileHandle.standardError.write("RECORD done \(u?.path ?? "nil") frames=\(c.frames) dropped=\(c.dropped)\n".data(using: .utf8)!)
+                    }
+                }
             }
         }
         // 画面確認用：VJ_PRINT_MENUS=1 で、メニューバーの項目の名前を書き出す（日本語になっているかの確認）
@@ -327,6 +385,41 @@ enum CardPreview {
         view.frame = NSRect(origin: .zero, size: size)
         view.layoutSubtreeIfNeeded()
         RunLoop.current.run(until: Date().addingTimeInterval(0.4))
+        guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
+        view.cacheDisplay(in: view.bounds, to: rep)
+        try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
+    }
+
+    /// 開発用：好きな画面を 1 枚の画像に（暗い見た目）
+    static func writeView(_ v: AnyView, path: String) {
+        let view = NSHostingView(rootView: v.background(Color(white: 0.16)).environment(\.colorScheme, .dark))
+        let size = view.fittingSize
+        let win = NSWindow(contentRect: NSRect(x: -10000, y: -10000, width: size.width, height: size.height),
+                           styleMask: [.borderless], backing: .buffered, defer: false)
+        win.appearance = NSAppearance(named: .darkAqua)
+        win.contentView = view
+        view.frame = NSRect(origin: .zero, size: size)
+        view.layoutSubtreeIfNeeded()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.3))
+        guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
+        view.cacheDisplay(in: view.bounds, to: rep)
+        try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
+    }
+
+    /// 開発用：エフェクトを探す窓を画像に（query で絞り込んだところ。gen = ジェネレーターも）
+    static func writePicker(query: String, generators: Bool, path: String) {
+        let root = EffectPickerPreview(query: query, generators: generators)
+            .background(Color(white: 0.16))
+            .environment(\.colorScheme, .dark)
+        let view = NSHostingView(rootView: root)
+        let size = view.fittingSize
+        let win = NSWindow(contentRect: NSRect(x: -10000, y: -10000, width: size.width, height: size.height),
+                           styleMask: [.borderless], backing: .buffered, defer: false)
+        win.appearance = NSAppearance(named: .darkAqua)
+        win.contentView = view
+        view.frame = NSRect(origin: .zero, size: size)
+        view.layoutSubtreeIfNeeded()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.3))
         guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
         view.cacheDisplay(in: view.bounds, to: rep)
         try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))

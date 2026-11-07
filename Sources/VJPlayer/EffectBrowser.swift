@@ -36,16 +36,22 @@ struct EffectBrowser: View {
 
             ScrollView(.vertical) {
                 VStack(alignment: .leading, spacing: 10) {
-                    let gens = generators ? EffectKind.generators.filter(matches) : []
-                    if !gens.isEmpty {
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 190), spacing: 8)], spacing: 8) {
-                            ForEach(gens) { k in
-                                EffectTile(kind: k, tint: .teal) {
-                                    if !engine.placeGeneratorInSelectedLayer(k) { NSSound.beep() }
+                    if generators {
+                    // エフェクトと同じく、分類ごとに見出しを付けて並べる
+                    ForEach(GeneratorCategory.allCases) { cat in
+                        let gens = cat.kinds.filter(matches)
+                        if !gens.isEmpty {
+                            SectionTitle(cat.label)
+                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 190), spacing: 8)], spacing: 8) {
+                                ForEach(gens) { k in
+                                    EffectTile(kind: k, tint: .teal) {
+                                        if !engine.placeGeneratorInSelectedLayer(k) { NSSound.beep() }
+                                    }
+                                    .help(k.help + "\nクリップの枠へドラッグして置く／ダブルクリックで選択中のレイヤーの空いている所に置く")
                                 }
-                                .help(k.help + "\nクリップの枠へドラッグして置く／ダブルクリックで選択中のレイヤーの空いている所に置く")
                             }
                         }
+                    }
                     }
                     if !generators {
                     ForEach(EffectCategory.allCases) { cat in
@@ -75,13 +81,7 @@ struct EffectBrowser: View {
             || k.rawValue.localizedCaseInsensitiveContains(q)
     }
 
-    private var targetName: String {
-        switch engine.inspectorTab {
-        case .composition: (engine.sceneDraft != nil ? "シーンの" : "") + "コンポジション"
-        case .layer: (engine.sceneDraft != nil ? "シーンの" : "") + "レイヤー " + engine.layers[engine.selectedLayer].displayName
-        case .clip: engine.inspectedIndex.flatMap { engine.slots[$0]?.name }.map { "クリップ " + $0 } ?? "クリップ（未選択）"
-        }
-    }
+    private var targetName: String { engine.currentTabName }
 
     private func add(_ k: EffectKind) {
         if !engine.addEffectToCurrentTab(k) { NSSound.beep() }
@@ -156,5 +156,38 @@ private struct EffectDropModifier: ViewModifier {
                 .opacity(targeted ? 1 : 0)
                 .allowsHitTesting(false))
             .onDrop(of: EffectDrop.types, isTargeted: $targeted) { EffectDrop.handle($0, action) }
+    }
+}
+
+/// エフェクトを選んで足すメニューの中身（分類ごと、一覧と同じ並び）。右クリックのメニューの中や、AddEffectMenu で使う
+struct AddEffectMenuItems: View {
+    let action: (EffectKind) -> Void
+
+    /// 分類と、その中のエフェクト（空の分類は入れない）
+    static var groups: [(EffectCategory, [EffectKind])] {
+        EffectCategory.allCases.compactMap { cat in
+            let items = EffectKind.allCases.filter { $0.category == cat && !$0.isBlend && !$0.isGenerator }
+            return items.isEmpty ? nil : (cat, items)
+        }
+    }
+
+    var body: some View {
+        ForEach(Self.groups, id: \.0) { cat, items in
+            Section(cat.label) {
+                ForEach(items) { k in
+                    Button { action(k) } label: { Label(k.label, systemImage: k.icon) }
+                }
+            }
+        }
+    }
+}
+
+extension EffectHolder {
+    /// 最後に足して、カードを開いておく
+    @discardableResult
+    func addEffectOpened(_ kind: EffectKind) -> Effect {
+        let e = insertEffect(kind, at: effects.count)
+        EffectUIState.shared.expanded.insert(e.id)
+        return e
     }
 }

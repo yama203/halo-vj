@@ -8,6 +8,10 @@ enum BlendMode: Int, CaseIterable, Codable, Identifiable {
     case overdrive
     /// マスク：このレイヤーの明るさで、下に重ねた絵を見せる（白 = 見える、黒 = 隠す）／反転（白い所を隠す）
     case maskLuma, maskInvert
+    /// 下の絵を読んで混ぜる、値の無い重ね方
+    case difference, overlay, softLight, colorDodge, hueOnly, lumOnly
+    /// 絡み合う重ね方（下の絵を読んで、このレイヤーで下の絵そのものを変える。値は blendFX）
+    case refract, light, flowInto, interfere, borrowColor, dissolve
 
     var id: Int { rawValue }
 
@@ -20,6 +24,18 @@ enum BlendMode: Int, CaseIterable, Codable, Identifiable {
         case .overdrive: "オーバードライブ加算"
         case .maskLuma: "マスク（白で見せる）"
         case .maskInvert: "マスク（白で隠す）"
+        case .difference: "差分"
+        case .overlay: "オーバーレイ"
+        case .softLight: "ソフトライト"
+        case .colorDodge: "覆い焼き"
+        case .hueOnly: "色相だけ"
+        case .lumOnly: "明るさだけ"
+        case .refract: "屈折"
+        case .light: "光で照らす"
+        case .flowInto: "流し込む"
+        case .interfere: "干渉"
+        case .borrowColor: "色を借りる"
+        case .dissolve: "溶け込む"
         }
     }
 
@@ -29,6 +45,9 @@ enum BlendMode: Int, CaseIterable, Codable, Identifiable {
         case .overdrive: "OD加算"
         case .maskLuma: "マスク"
         case .maskInvert: "反転マスク"
+        case .softLight: "ソフト"
+        case .colorDodge: "覆い焼き"
+        case .light: "照らす"
         default: label
         }
     }
@@ -36,10 +55,26 @@ enum BlendMode: Int, CaseIterable, Codable, Identifiable {
     /// マスクとして使う重ね方か（このレイヤー自体は見えず、下の絵を見せる・隠す）
     var isMask: Bool { self == .maskLuma || self == .maskInvert }
 
-    /// 特殊合成か（下の絵を読む。値は blendFX）
-    var isSpecial: Bool { self == .overdrive }
+    /// 値のある特殊合成か（下の絵を読む。値は blendFX）
+    var isSpecial: Bool { effectKind != nil }
+    /// 下の絵を読んで、シェーダーで混ぜる重ね方か（特殊合成と、差分・オーバーレイなど）
+    var readsBelow: Bool { isSpecial || Self.simpleBelow.contains(self) }
+    static let simpleBelow: [BlendMode] = [.difference, .overlay, .softLight, .colorDodge, .hueOnly, .lumOnly]
+    /// 絡み合う重ね方（オーバードライブ以外の特殊合成）
+    static let entangle: [BlendMode] = [.refract, .light, .flowInto, .interfere, .borrowColor, .dissolve]
     /// 特殊合成の値の種類
-    var effectKind: EffectKind? { self == .overdrive ? .overdrive : nil }
+    var effectKind: EffectKind? {
+        switch self {
+        case .overdrive: .overdrive
+        case .refract: .blendRefract
+        case .light: .blendLight
+        case .flowInto: .blendFlow
+        case .interfere: .blendInterfere
+        case .borrowColor: .blendBorrow
+        case .dissolve: .blendDissolve
+        default: nil
+        }
+    }
 }
 
 /// 時間で 0〜1 の値をなめらかに動かす（フェード用）。描画スレッドからも読む値型。
@@ -109,7 +144,13 @@ final class Layer: ObservableObject, Identifiable, Animatable, EffectHolder {
     var displayName: String { title.isEmpty ? name : name + " " + title }
 
     @Published var opacity: Double = 1 { didSet { onChanged?() } }
-    @Published var blend: BlendMode = .normal { didSet { onChanged?() } }
+    @Published var blend: BlendMode = .normal {
+        didSet {
+            // 特殊合成を変えたら、値もその種類のものにする（前の値は種類が違うので使えない）
+            if let k = blend.effectKind, blendFX.kind != k { blendFX = Effect(kind: k) }
+            onChanged?()
+        }
+    }
     @Published var volume: Double = 1 {
         didSet {
             onVolumeChanged?()

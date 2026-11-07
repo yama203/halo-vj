@@ -67,7 +67,8 @@ extension Engine.SavedLayer {
         l.muted = muted ?? false
         l.audioMuted = audioMuted ?? false
         l.isAdjustment = isAdjustment ?? false
-        l.blendFX = blendFX ?? Effect(kind: .overdrive)
+        l.blendFX = blendFX ?? Effect(kind: l.blend.effectKind ?? .overdrive)
+        if let k = l.blend.effectKind, l.blendFX.kind != k { l.blendFX = Effect(kind: k) }
     }
 }
 
@@ -297,12 +298,11 @@ struct SceneCompParams: View {
         SideBySide {
             ParamColumns {
                 ParamColumn(title: "トランスフォーム") {
-                    MiniButton(icon: "arrow.counterclockwise", label: "リセット", disabled: draft.compTransform.isDefault,
-                               help: "位置・スケール・角度を初期値に戻す") { draft.compTransform.reset() }
+                    MiniButton(icon: "arrow.counterclockwise", label: "リセット",
+                               disabled: draft.compTransform.isDefault && draft.masterOpacity == 1,
+                               help: "位置・スケール・角度・不透明度を初期値に戻す") { draft.compTransform.reset(); draft.masterOpacity = 1 }
                 } content: {
                     TransformFields(t: draft.compTransform)
-                }
-                ParamColumn(title: "マスター") {
                     AnimField(label: "不透明度", value: $draft.masterOpacity, range: 0...1, perPoint: 0.003,
                               defaultValue: 1, showsBar: true, format: { String(format: "%.0f%%", $0 * 100) },
                               key: .opacity, target: draft)

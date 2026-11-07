@@ -14,10 +14,18 @@ final class AudioOutput {
     static let shared = AudioOutput()
 
     let engine = AVAudioEngine()
+    /// マスター音量（ミックスの後ろ）。録画・音に反応させるは、この手前（ミックスの出口）で聞くので、
+    /// マスター音量を下げても・ミュートしても音は届く
+    let masterMixer = AVAudioMixerNode()
     private var deviceUID: String?
 
     private init() {
         _ = engine.mainMixerNode
+        let fmt = engine.mainMixerNode.outputFormat(forBus: 0)
+        engine.attach(masterMixer)
+        engine.disconnectNodeOutput(engine.mainMixerNode)
+        engine.connect(engine.mainMixerNode, to: masterMixer, format: fmt)
+        engine.connect(masterMixer, to: engine.outputNode, format: fmt)
         NotificationCenter.default.addObserver(
             forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main
         ) { [weak self] _ in
@@ -40,12 +48,46 @@ final class AudioOutput {
         engine.stop()
         let silencer = AVAudioMixerNode()
         engine.attach(silencer)
-        let fmt = engine.mainMixerNode.outputFormat(forBus: 0)
-        engine.disconnectNodeOutput(engine.mainMixerNode)
-        engine.connect(engine.mainMixerNode, to: silencer, format: fmt)
+        let fmt = masterMixer.outputFormat(forBus: 0)
+        engine.disconnectNodeOutput(masterMixer)
+        engine.connect(masterMixer, to: silencer, format: fmt)
         engine.connect(silencer, to: engine.outputNode, format: fmt)
         silencer.outputVolume = 0
         startEngine()
+    }
+
+    // ミキサーの出口の音を聞く（録画・音に反応させる）。タップは 1 つにして、聞く人に配る
+    private let listenLock = NSLock()
+    private var listeners: [UUID: (AVAudioPCMBuffer, AVAudioTime) -> Void] = [:]
+    private var tapOn = false
+
+    func addMixerListener(_ f: @escaping (AVAudioPCMBuffer, AVAudioTime) -> Void) -> UUID {
+        let id = UUID()
+        listenLock.withLock { listeners[id] = f }
+        if !tapOn {
+            let mixer = engine.mainMixerNode
+            let fmt = mixer.outputFormat(forBus: 0)
+            if fmt.sampleRate > 0 {
+                mixer.installTap(onBus: 0, bufferSize: 1024, format: fmt) { [weak self] buf, when in
+                    guard let self else { return }
+                    let ls = self.listenLock.withLock { Array(self.listeners.values) }
+                    for l in ls { l(buf, when) }
+                }
+                tapOn = true
+            }
+        }
+        return id
+    }
+
+    func removeMixerListener(_ id: UUID) {
+        let empty = listenLock.withLock { () -> Bool in
+            listeners[id] = nil
+            return listeners.isEmpty
+        }
+        if empty && tapOn {
+            engine.mainMixerNode.removeTap(onBus: 0)
+            tapOn = false
+        }
     }
 
     func ensureRunning() {

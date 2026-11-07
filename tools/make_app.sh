@@ -36,6 +36,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleVersion</key><string>1</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>NSHighResolutionCapable</key><true/>
+  <!-- 音に反応させる：マイク・ライン入力の音を読む -->
+  <key>NSMicrophoneUsageDescription</key><string>音（マイク・ライン入力）に合わせて映像を動かすために使います。</string>
   <key>NSSupportsAutomaticGraphicsSwitching</key><false/>
   <!-- プロジェクトファイル（.halovj。以前の .vjproj も）：アイコンと、ダブルクリックで開く -->
   <key>CFBundleDocumentTypes</key>
@@ -64,7 +66,9 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </dict>
 </plist>
 PLIST
-codesign --force --sign - "$APP"
+# 署名：作り直しても同じアプリと見なされるように、指定要件をバンドル ID にする
+# （ふつうのアドホック署名だと、作り直すたびにマイクの許可が外れて、音が 0 のまま届く）
+codesign --force --sign - --requirements '=designated => identifier "local.yama.vjplayer"' "$APP"
 # ファイルの種類とアイコンを Finder に覚え直させる
 /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$APP" >/dev/null 2>&1 || true
 echo "作成しました: $(pwd)/$APP"

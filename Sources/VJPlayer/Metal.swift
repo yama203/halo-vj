@@ -171,7 +171,7 @@ static float3 pureHue(float h) {
 }
 
 static float4 effectBody(VOut in, constant EffectUniforms& u, texture2d<float> tex, texture2d<float> aux, sampler s);
-static bool isGenerator(int k) { return (k >= 8 && k <= 13) || k == 15 || k == 16; }
+static bool isGenerator(int k) { return (k >= 8 && k <= 13) || (k >= 15 && k <= 20); }
 
 fragment float4 feffect(VOut in [[stage_in]],
                         constant EffectUniforms& u [[buffer(0)]],
@@ -186,6 +186,45 @@ fragment float4 feffect(VOut in [[stage_in]],
 
 static float pmod(float x, float m) { return x - m * floor(x / m); }
 
+// 波長（nm）の色（見える光の範囲をなめらかに近似）
+static float3 spectralColor(float lam) {
+    float r = exp(-pow((lam - 605.0) / 48.0, 2.0)) + 0.28 * exp(-pow((lam - 430.0) / 22.0, 2.0));
+    float g = exp(-pow((lam - 545.0) / 45.0, 2.0));
+    float b = exp(-pow((lam - 452.0) / 34.0, 2.0));
+    return float3(r, g, b);
+}
+
+// 3D の地形・点の雲：画面の高さ y に、傾き a（横の傾き b は無いとして）の板の上で、平らなら何番目の列が来るか
+// （列の番号 = v × n + 動いた量）。y が地平線より上なら、とても大きな数
+static float terrainRowAt(float y, float a, float b, float n, float moved) {
+    const float D = 1.6;
+    float den = D * cos(a) - y * sin(a);
+    if (den <= 1e-4) return 1e6;
+    float v = y * D / den;
+    // 横にも傾けているときは、ずれる分をゆとりで見る
+    return (v - abs(sin(b)) * 1.5) * n + moved;
+}
+
+// ---- ドット（粒） ----
+static float2 dhash2(float2 p) {
+    return fract(sin(float2(dot(p, float2(127.1, 311.7)), dot(p, float2(269.5, 183.3)))) * 43758.5453);
+}
+// 粒の形の「大きさ」（半径 1 の形のふちで 1）。0 円 / 1 四角 / 2 ひし形 / 3 十字
+static float dotShape(float2 d, int shape) {
+    float2 a = abs(d);
+    if (shape == 1) return max(a.x, a.y) * 1.12;
+    if (shape == 2) return (a.x + a.y) * 0.8;
+    if (shape == 3) return min(max(a.x * 3.0, a.y), max(a.x, a.y * 3.0)) * 0.9;
+    return length(d);
+}
+// 波（-1〜1）。0 横 / 1 中心から / 2 ノイズ。pw は板の上の場所
+static float dotWave(float2 pw, int kind, float freq, float ph) {
+    if (kind == 0) return sin(pw.x * freq * 6.2831853 - ph);
+    if (kind == 1) return sin(length(pw) * freq * 6.2831853 - ph);
+    float2 q = pw * freq * 1.5 + float2(ph * 0.12, ph * 0.07);
+    return (gnoise(q) * 0.68 + gnoise(q * 2.03 + 3.1) * 0.32) * 2.0 - 1.0;
+}
+
 // テキスト：文字のテクスチャ（白）の不透明度。q は文字のかたまりの中心が 0、高さ H・幅 W（画面の高さが 1）
 static float textCover(texture2d<float> aux, float2 q, float W, float H, float lod) {
     constexpr sampler ts(filter::linear, mip_filter::linear, address::clamp_to_zero);
@@ -194,9 +233,560 @@ static float textCover(texture2d<float> aux, float2 q, float W, float H, float l
     return aux.sample(ts, uv, level(lod)).a;
 }
 
+// ---- うねり（有機的な歪み）・トンネル用のノイズ ----
+static float wfbm(float2 p, int oct) {
+    float v = 0.0, amp = 0.5, tot = 0.0;
+    for (int i = 0; i < 6; i++) {
+        if (i >= oct) break;
+        v += gnoise(p) * amp; tot += amp;
+        p = float2(p.x * 1.6 + p.y * 1.2, -p.x * 1.2 + p.y * 1.6) + 7.31;
+        amp *= 0.5;
+    }
+    return v / max(tot, 1e-4);
+}
+// 画面の端の扱い：0 のばす（サンプラーに任せる）/ 1 折り返す / 2 透明（外なら -1）
+static float2 warpEdge(float2 uv, int mode) {
+    if (mode == 1) {
+        float2 m = abs(uv) - 2.0 * floor(abs(uv) * 0.5);
+        return float2(m.x > 1.0 ? 2.0 - m.x : m.x, m.y > 1.0 ? 2.0 - m.y : m.y);
+    }
+    return uv;
+}
+// トンネルの形の「半径」（円・四角・六角・三角。内接円の半径が 1 になる形で 1）
+static float tunnelRadius(float2 v, int shape) {
+    if (shape == 0) return length(v);
+    float n = shape == 1 ? 4.0 : (shape == 2 ? 6.0 : 3.0);
+    float seg = 6.2831853 / n;
+    float a = atan2(v.y, v.x) + (shape == 3 ? 1.5707963 : (shape == 1 ? 0.7853982 : 0.0));
+    float m = pmod(a, seg) - 0.5 * seg;
+    return length(v) * cos(m);
+}
+// 模様の線の 1 本分（0〜1 の中で 0.5 に線）の濃さと、線からの距離
+static float2 tunnelLine(float x, float th, float fw) {
+    float d = abs(fract(x) - 0.5);
+    float dl = d - th * 0.5;
+    return float2(gcover(dl, fw), dl);
+}
+
+static float4 tunnelBody(float2 px, constant EffectUniforms& u) {
+    // a = 進んだ量, 形, 模様, 輪の数 / b = 線の太さ, (回る速さ), ねじれ, 奥の暗さ
+    // pts0 = うねり, うねりの時間, 中心X, 中心Y / pts1 = まわりの区切り, 色の付け方, 明るさ, 光のにじみ / pts2.x = 回った角度（度）
+    float4 q0 = u.pts[0], q1 = u.pts[1];
+    float2 p = (px - 0.5 * u.size) / u.size.y - float2(q0.z, -q0.w);
+    int shape = int(u.a.y + 0.5), pat = int(u.a.z + 0.5);
+    const float R = 0.25;
+    float moved = u.a.x, wt = q0.y;
+    // うねり：奥の端（消える所）が vp へずれて、手前からそこへなめらかに曲がって見える。
+    // 奥ほど vp に近づくだけ（行ったり来たりしない）なので、奥行きの答えは 1 つに決まる（ほかの所に穴が出ない）
+    float2 vp = q0.x * 0.2 * float2(sin(wt * 0.9) + 0.35 * sin(wt * 2.3 + 1.0), cos(wt * 0.7) + 0.35 * cos(wt * 1.9 + 2.0));
+    // 曲がりは丸い筒として求める（形やねじれを入れて求め直すと、三角などで答えが暴れて模様が崩れるため）
+    float z = 1.0, w = 0.5;
+    for (int it = 0; it < 8; it++) {
+        z = R / max(length(p - vp * w), 1e-4);
+        w = mix(w, z / (z + 1.2), 0.7);
+    }
+    // ねじれ：丸い筒の奥行きで回す角度を決めてから、形（四角・三角など）の奥行きを求める
+    float2 pp = grot(p - vp * w, u.pts[2].x + u.b.z * z * 60.0);
+    float r = max(tunnelRadius(pp, shape), 1e-4);
+    z = R / r;
+    float ang = atan2(pp.y, pp.x) / 6.2831853 + 0.5;
+    float depth = z + moved;
+    float U = depth * u.a.w * 0.5;
+    float seg = max(q1.x, 1.0);
+    float V = ang * seg;
+    float fw = max(fwidth(U), 1e-5);
+    // 角度のつなぎ目（0 と 1）で fwidth が跳ねないように
+    float fwv = max(min(fwidth(V), fwidth(fract(ang + 0.5) * seg)), 1e-5);
+    float th = u.b.x;
+    float k, avg, dl = 1.0, dlfw = fw, extraFw = 0.0;
+    if (pat == 0) {
+        float2 l = tunnelLine(U, th, fw);
+        k = l.x; dl = l.y; avg = th;
+    } else if (pat == 1) {
+        float2 lu = tunnelLine(U, th, fw), lv = tunnelLine(V, th, fwv);
+        k = max(lu.x, lv.x);
+        dl = lu.y / fw < lv.y / fwv ? lu.y : lv.y; dlfw = lu.y / fw < lv.y / fwv ? fw : fwv; avg = 1.0 - (1.0 - th) * (1.0 - th);
+    } else if (pat == 2) {
+        float su = clamp((0.25 - abs(fract(U) - 0.5)) / fw, -1.0, 1.0);
+        float sv = clamp((0.25 - abs(fract(V) - 0.5)) / fwv, -1.0, 1.0);
+        float white = 0.5 + 0.5 * su * sv;
+        // 線の太さを 50% より上げると、すき間のマスが真ん中から埋まっていく（100% で全部埋まる）
+        float h = saturate((1.0 - th) * 2.0);
+        float lu = abs(fract(U * 2.0 + 0.5) - 0.5), lv = abs(fract(V * 2.0 + 0.5) - 0.5);
+        float hole = gcover(lu - h * 0.5, fw * 2.0) * gcover(lv - h * 0.5, fwv * 2.0);
+        if (h >= 0.999) hole = 1.0;
+        k = white + (1.0 - white) * (1.0 - hole);
+        avg = 0.5 + 0.5 * (1.0 - h * h);
+    } else if (pat == 3) {
+        // 光の筋：まわりの区切りごとに、長さと場所がばらばらの光が奥から飛んでくる
+        float id = floor(V);
+        float h = ghash(float2(id, 3.1)), h2 = ghash(float2(id, 8.7));
+        float2 lv = tunnelLine(V, th, fwv);
+        float xr = depth * 2.5 * (0.6 + h2) + h * 7.0;
+        float x = fract(xr);
+        extraFw = fwidth(xr);
+        float len = 0.1 + 0.25 * h2;
+        float dash = smoothstep(0.0, 0.08, x) * (1.0 - smoothstep(len - 0.08, len, x));
+        k = lv.x * dash * (0.35 + 0.65 * h); dl = lv.y; dlfw = fwv; avg = th * 0.06;
+    } else {
+        // もや：角度のつなぎ目が出ないように、2 つのノイズを混ぜる
+        float2 a1 = float2(U * 0.8, V), a2 = float2(U * 0.8, V - seg);
+        float n = mix(wfbm(a1, 4), wfbm(a2, 4), ang);
+        k = smoothstep(0.62 - th * 0.5, 0.95 - th * 0.5, n);
+        avg = 0.25;
+    }
+    // 奥（細かすぎる所）は平均の濃さにして、ちらつかないように
+    float fade = saturate(max(max(fw, pat == 0 ? 0.0 : fwv), extraFw * 0.5) * 2.0 - 0.4);
+    k = mix(k, avg, fade);
+    // 線の太さがいっぱいなら、どの模様もすき間なく埋まる（ふちのにじみで細い筋が残らないように、手前から寄せる）
+    k = mix(k, 1.0, smoothstep(0.95, 1.0, th));
+    // 光のにじみ：線のまわりに、画面の上でいつも同じ幅（1080p で約 20px）の光
+    float dpx = max(dl, 0.0) / max(dlfw, 1e-5);
+    float glow = q1.w * exp(-dpx / (20.0 * u.size.y / 1080.0)) * 0.6 * (1.0 - fade);
+    if (pat == 3) glow *= k > 0.0 ? saturate(k * 3.0) : 0.0;
+    if (pat == 2 || pat == 4) glow = q1.w * k * 0.4;
+    float kt = saturate(k + glow);
+    float fog = exp(-u.b.w * z * 0.6);
+    int cm = int(q1.y + 0.5);
+    float3 col = u.color.rgb;
+    if (cm == 1) col = gpal(u.pal, u.palCount, 1.0 - abs(fract(depth * 0.08) * 2.0 - 1.0));
+    else if (cm == 2) col = pureHue(fract(depth * 0.05 + ang));
+    float a = saturate(kt * fog);
+    return float4(col * q1.z * kt * fog, a);
+}
+
+static float4 warpBody(float2 px, constant EffectUniforms& u, texture2d<float> tex, sampler s) {
+    // a = 強さ(px), 大きさ, 時間（速さ × 秒）, 種類 / b = 細かさ, ねばり, 色のずれ, 画面の端
+    float2 p = px / u.size.y / max(u.a.y, 0.01);
+    float t = u.a.z;
+    int kind = int(u.a.w + 0.5);
+    int oct = 2 + int(u.b.x * 4.0 + 0.5);
+    float visc = u.b.y;
+    float2 d;
+    if (kind == 1) {
+        // 熱気：上へ流れながら横にゆらめく
+        float2 q = float2(p.x * 1.4, p.y * 0.8 + t * 1.5);
+        d = float2(wfbm(q, oct) - 0.5, (wfbm(q + float2(4.3, 1.7), oct) - 0.5) * 0.35) * 6.0;
+        d += visc * 3.0 * (float2(wfbm(q * 2.1 + d * 0.7 + 9.1, oct), 0.5) - 0.5);
+    } else if (kind == 2 || kind == 3) {
+        // 渦：ノイズの坂に直角に流す（渦を巻く）／波紋：ノイズの等高線に沿って波打つ
+        float e = 0.02;
+        float2 q = p + visc * float2(wfbm(p * 0.7 + t * 0.2, 3), wfbm(p * 0.7 + 5.2 - t * 0.2, 3));
+        float n0, nx, ny;
+        if (kind == 2) {
+            n0 = wfbm(q + t * 0.25, oct); nx = wfbm(q + float2(e, 0) + t * 0.25, oct); ny = wfbm(q + float2(0, e) + t * 0.25, oct);
+        } else {
+            n0 = sin(wfbm(q, oct) * 14.0 - t * 3.0);
+            nx = sin(wfbm(q + float2(e, 0), oct) * 14.0 - t * 3.0);
+            ny = sin(wfbm(q + float2(0, e), oct) * 14.0 - t * 3.0);
+        }
+        float2 g = float2(nx - n0, ny - n0) / e;
+        d = kind == 2 ? float2(g.y, -g.x) * 0.8 : g * 0.1;
+    } else {
+        // 液体：ゆがんだ場所でノイズを引き直す（ねばりで、ゆがみが重なる）
+        float2 q1 = float2(wfbm(p + t * 0.3, oct), wfbm(p + float2(5.2, 1.3) - t * 0.25, oct));
+        float2 q2 = float2(wfbm(p + 4.0 * visc * q1 + float2(1.7, 9.2) + t * 0.15, oct),
+                           wfbm(p + 4.0 * visc * q1 + float2(8.3, 2.8) - t * 0.12, oct));
+        d = (mix(q1, q2, 0.35 + 0.65 * visc) - 0.5) * 6.0;
+    }
+    float2 off = d * u.a.x * (u.size.y / 1080.0) / u.size;
+    float2 uv = px / u.size;
+    int edge = int(u.b.w + 0.5);
+    float ca = u.b.z;
+    float2 uvg = warpEdge(uv + off, edge);
+    float4 c = tex.sample(s, uvg);
+    if (ca > 0.001) {
+        float2 ur = warpEdge(uv + off * (1.0 + ca * 0.6), edge), ub = warpEdge(uv + off * (1.0 - ca * 0.6), edge);
+        float4 cr = tex.sample(s, ur), cb = tex.sample(s, ub);
+        if (edge == 2) {
+            cr *= all(ur >= 0.0 && ur <= 1.0) ? 1.0 : 0.0;
+            cb *= all(ub >= 0.0 && ub <= 1.0) ? 1.0 : 0.0;
+        }
+        c = float4(cr.r, c.g, cb.b, max(c.a, max(cr.a, cb.a)));
+    }
+    if (edge == 2 && any(uvg < 0.0 || uvg > 1.0)) c = ca > 0.001 ? float4(c.r, 0.0, c.b, max(c.r, c.b)) : float4(0.0);
+    return c;
+}
+
 static float4 effectBody(VOut in, constant EffectUniforms& u, texture2d<float> tex, texture2d<float> aux, sampler s) {
     float2 px = in.pos.xy;
     float2 uv = px / u.size;
+    if (u.kind == 20) return tunnelBody(px, u);
+    if (u.kind == 21) return warpBody(px, u, tex, s);
+    if (u.kind == 19) {
+        // 光の流れ：a = 動いた量（速さ × 秒）, ぼけ, 帯の数, 帯の太さ / b = うねり, 色のにじみ, 虹色, 粒子感
+        // pts[0] = 角度, 明るさ, 色相ずらし, まわりの光 / pts[1] = 大きさ, 経過秒
+        float T = u.a.x;
+        float soft = u.a.y, w = max(u.a.w, 0.01);
+        int count = clamp(int(u.a.z + 0.5), 1, 4);
+        float warp = u.b.x, disp = u.b.y, irid = u.b.z, grain = u.b.w;
+        float2 p = (px - 0.5 * u.size) / u.size.y;
+        p = grot(p, u.pts[0].x) / max(u.pts[1].x, 0.05);
+        // ゆっくり動くノイズで場所をゆがめる（うねり）
+        float2 wq = p * 0.9;
+        float2 wv = float2(gnoise(wq + float2(T * 0.31, 1.7)), gnoise(wq * 1.3 + float2(4.1, T * 0.23))) * 2.0 - 1.0;
+        float2 q = p + wv * warp * 0.32;
+        float hueRot = u.pts[0].z / 360.0;
+        float cx = u.pts[1].z, sf = max(u.pts[1].w, 0.05);
+        float3 sum = float3(0.0);
+        for (int k = 0; k < 4; k++) {
+            if (k >= count) break;
+            float fk = float(k);
+            // 帯のふち（ゆったりした弧）。帯は、ふちの片側（d > 0）へ広がる光の面
+            float off = (fk - float(count - 1) * 0.5) * 0.38;
+            float y = off + 0.18 * sin(q.x * 0.9 + T * 0.35 + fk * 2.1) + 0.08 * sin(q.x * 1.9 - T * 0.27 + fk * 4.3);
+            float d = q.y - y;
+            float wk = w * (1.0 - fk * 0.25);
+            float spread = wk * (1.0 + soft * 4.0);
+            // 分光：6 つの波長で、少しずつずらして光を測る（プリズムのように、ふちと中に虹の帯ができる）
+            float3 I = float3(0.0), norm = float3(0.0);
+            float dispK = disp * wk * (0.04 + cx * 0.05);
+            for (int j = 0; j < 6; j++) {
+                float lam = 420.0 + 52.0 * float(j);
+                float3 sc = spectralColor(lam);
+                float dj = d - (float(j) - 2.5) * dispK;   // 短い波長（青）ほど外へにじむ
+                float ej = smoothstep(-wk * (0.2 + soft * 0.55), wk * 0.3, dj);
+                float bj = exp(-pow(max(dj, 0.0) / (spread * (1.0 + (float(j) - 2.5) * 0.04 * cx)), 1.6));
+                I += ej * bj * sc;
+                norm += sc;
+            }
+            I /= norm;
+            // 色：ふちの近くは白、奥へいくほどベージュ → 青緑 → 深い青（虹色の強さで鮮やかさ）
+            float t = saturate(d / spread);
+            float3 warm = float3(1.0, 0.70, 0.42), teal = float3(0.12, 0.60, 0.95), deep = float3(0.02, 0.16, 0.50);
+            float3 pal = t < 0.2 ? mix(float3(1.0), warm, t / 0.2)
+                       : t < 0.62 ? mix(warm, teal, (t - 0.2) / 0.42) : mix(teal, deep, (t - 0.62) / 0.38);
+            float drift = 0.5 + 0.5 * sin(q.x * 1.1 + T * 0.2 + fk * 1.7);
+            pal = mix(pal, pal.zyx * float3(1.0, 0.9, 1.0), drift * 0.35);
+            float3 tint = mix(float3(1.0), pal, irid);
+            // 光の中の色の重なり（縞にならないように、くり返さない形で）：
+            // ① ぼんやりした色の光がいくつか、ゆっくり動きながら重なる
+            float3 inner = float3(0.0);
+            for (int m = 0; m < 5; m++) {
+                float fm = float(m) + fk * 5.0;
+                float cxm = 0.85 * sin(T * 0.11 * (1.0 + float(m) * 0.27) + fm * 2.31) / sf;
+                float tcm = 0.25 + 0.5 * (0.5 + 0.5 * sin(T * 0.09 * (1.0 + float(m) * 0.19) + fm * 1.73));
+                float2 dq = float2((q.x - cxm) / (0.42 / sf * (1.0 + 0.25 * sin(fm * 1.3))),
+                                   (t - tcm) / (0.2 * (1.0 + 0.3 * cos(fm * 0.9))));
+                // 色は青・青緑・琥珀・橙のあたりから（緑のまん中はさける）。ゆっくり入れ替わる
+                float sel = fract(0.29 * fm + T * 0.008);
+                float lam = sel < 0.5 ? mix(455.0, 495.0, sel * 2.0) : mix(585.0, 625.0, sel * 2.0 - 1.0);
+                inner += exp(-dot(dq, dq)) * spectralColor(lam) * 1.3;
+            }
+            // ② 光のひだ：とてもやわらかい薄い光の面がいくつか、違う曲がり方で重なる（ふちで少し色が分かれる）
+            for (int m = 0; m < 3; m++) {
+                float fm = float(m);
+                // それぞれ傾きを変えて、ふちと平行にならず交わるように
+                float yv = 0.2 + 0.25 * fm + (fm - 1.0) * 0.22 * q.x
+                         + 0.16 * sin(q.x * (0.6 + 0.5 * fm) * sf + T * (0.18 + 0.06 * fm) + fm * 2.0 + fk * 3.1);
+                float wv2 = 0.06 + 0.035 * fm;
+                float3 dv = (float3(t - 0.012, t, t + 0.012) - yv) / wv2;
+                inner += exp(-dv * dv) * spectralColor(fm == 1.0 ? 600.0 : 460.0 + 20.0 * fm) * 0.5;
+            }
+            tint = mix(tint, tint * 0.45 + inner, cx * smoothstep(0.03, 0.3, t));
+            if (abs(hueRot) > 1e-4) tint = hueShift(tint, hueRot);
+            sum += I * tint * (1.0 - fk * 0.3);
+        }
+        // まわりのぼんやりした光（大きくゆっくり動く、青と琥珀色の雲）
+        float2 gq = p * 0.6 + float2(T * 0.09, -T * 0.06);
+        float g1 = smoothstep(0.55, 1.0, gnoise(gq + 7.3)), g2 = smoothstep(0.6, 1.0, gnoise(gq * 1.3 + 2.1));
+        float3 c1 = float3(0.08, 0.35, 0.70), c2 = float3(0.75, 0.48, 0.22);
+        if (abs(hueRot) > 1e-4) { c1 = hueShift(c1, hueRot); c2 = hueShift(c2, hueRot); }
+        sum += (c1 * g1 + c2 * g2 * 0.6) * u.pts[0].w * 0.5;
+        float3 c = (1.0 - exp(-sum * u.pts[0].y * 1.6)) * u.color.rgb;
+        // フィルムのざらつき（明るい所ほど目立つ。コマごとに変わる）
+        uint2 ip = uint2(px) + uint2(uint(u.pts[1].y * 24.0) * 1973u, uint(u.pts[1].y * 24.0) * 9277u);
+        uint hsh = ip.x * 1597334677u ^ ip.y * 3812015801u;
+        hsh = (hsh ^ (hsh >> 16)) * 2246822519u; hsh ^= hsh >> 13;
+        float gr = float(hsh & 0xFFFFu) / 65535.0 - 0.5;
+        c = saturate(c + gr * grain * (0.25 + dot(c, float3(0.33))));
+        float a = max(max(c.r, c.g), c.b);
+        return float4(c, a);
+    }
+    if (u.kind == 18) {
+        // ドット：a = 数（高さあたり）, 大きさ（px・1080p）, 形, 並び / b = 角度, 動いた量（個）, 位置のばらつき, 大きさのばらつき
+        // pts[0] = 明滅, 波の大きさ, 波の細かさ, 波の位相 / pts[1] = 波の形, 傾き（縦・横、度）, 遠くを暗く
+        // pts[2] = 波の高さ, ぼかし（px）, 経過秒 / pts[3] = ふらふら, ふらふらの進んだ量, 光のにじみ
+        float n = max(u.a.x, 0.5);
+        int shape = int(u.a.z + 0.5), layout = int(u.a.w + 0.5);
+        float moved = u.b.y, jitter = layout == 2 ? max(u.b.z, 0.6) : u.b.z, sizeRand = u.b.w;
+        float twinkle = u.pts[0].x, wAmt = u.pts[0].y, wFreq = max(u.pts[0].z, 0.05), wPh = u.pts[0].w;
+        int wKind = int(u.pts[1].x + 0.5);
+        float fog = u.pts[1].w, height = u.pts[2].x, t = u.pts[2].z;
+        float k1080 = u.size.y / 1080.0;
+        float rPx = u.a.y * k1080 * 0.5, blurPx = u.pts[2].y * k1080;
+        float ta = u.pts[1].y * 3.14159265 / 180.0, tb = u.pts[1].z * 3.14159265 / 180.0;
+        const float D = 1.6;
+        // 粒 1 つの大きさ・明るさ（場所 cell の粒。pw は板の上の場所）
+        #define DOT_MOD(cell, wv, R, bright) { \
+            float2 hr = dhash2(cell + 17.0); \
+            R *= 1.0 - sizeRand * hr.x; \
+            R *= max(0.0, 1.0 + wAmt * (wv)); \
+            bright = 1.0 - twinkle * (0.5 + 0.5 * sin(t * (2.0 + hr.y * 5.0) + hr.x * 40.0)); }
+        if (height > 1e-4) {
+            // 3D の点の雲：手前の列から、各列の近くの粒を画面に写して描く（波の高さで上へ持ち上がる）
+            float2 p = (px - 0.5 * u.size) / u.size.y;
+            p.y = -p.y;
+            float3 ax = float3(cos(tb), 0.0, sin(tb));
+            float3 ay = float3(-sin(tb) * sin(ta), cos(ta), cos(tb) * sin(ta));
+            float sx = p.x, py = p.y;
+            float denom = sx * ax.z - D * ax.x;
+            if (abs(denom) < 1e-5) return float4(0.0);
+            float cover = 0.0;
+            float rMax = rPx * 2.0 * (1.0 + wAmt) / u.size.y;
+            int i0 = int(floor(-2.5 * n + moved));
+            // この高さに届きうる列から始める（それより手前の列は、いちばん持ち上がっても届かない）
+            i0 = max(i0, int(floor(terrainRowAt(py - height * 2.5 - rMax * 2.0, ta, tb, n, moved))) - 2);
+            int i1 = min(int(ceil(4.0 * n + moved)), i0 + 400);
+            for (int i = i0; i <= i1; i++) {
+                float v = (float(i) + 0.5 - moved) / n;
+                float u0 = (D * v * ay.x - sx * (v * ay.z + D)) / denom;
+                float depth = u0 * ax.z + v * ay.z + D;
+                if (depth < 0.05) continue;
+                float yFlat = v * ay.y * D / depth;
+                float rU = rMax * clamp(D / depth, 0.25, 2.0) + 2.0 / u.size.y;
+                if (yFlat - rU > py) break;
+                if (yFlat + height * D / depth + rU < py) continue;
+                float shift = layout == 1 && (i & 1) != 0 ? 0.5 : 0.0;
+                // ばらつきが小さければ、いちばん近い粒だけ見る（軽く）
+                int reach = jitter > 0.15 ? 1 : 0;
+                float jc = reach == 0 ? floor(u0 * n - shift) : floor(u0 * n - shift);
+                for (int j = -reach; j <= reach; j++) {
+                    float2 cell = float2(jc + float(j), float(i));
+                    float2 jit = (dhash2(cell) - 0.5) * jitter;
+                    float uu = (cell.x + 0.5 + shift + jit.x) / n;
+                    float vv = (float(i) + 0.5 + jit.y - moved) / n;
+                    float2 pw = float2(uu, (float(i) + 0.5 + jit.y) / n);
+                    float wv = dotWave(pw, wKind, wFreq, wPh);
+                    float h = height * (0.5 + 0.5 * wv);
+                    float3 P = uu * ax + vv * ay + float3(0.0, h, 0.0);
+                    float dep = P.z + D;
+                    if (dep < 0.05) continue;
+                    float2 sp = P.xy * D / dep;
+                    float R = rPx * clamp(D / dep, 0.25, 2.0), bright = 1.0;
+                    DOT_MOD(cell, wv, R, bright)
+                    float d = dotShape((p - sp) * u.size.y, shape);
+                    float c = (1.0 - smoothstep(R - 0.75, R + 0.75 + blurPx, d)) * min(1.0, R * 1.5);
+                    cover = max(cover, c * bright * exp(-max(dep - D, 0.0) * fog * 1.2));
+                }
+            }
+            float k = saturate(cover);
+            return float4(u.color.rgb * k, k);
+        }
+        // 平ら（と、奥への傾き）：板の上の場所を探して、近くの粒（3×3 のます）を描く
+        float2 p = (px - 0.5 * u.size) / u.size.y;
+        float2 q = p;
+        float fogk = 1.0;
+        if (abs(ta) > 1e-4 || abs(tb) > 1e-4) {
+            float tx = -ta;
+            float3 eye = float3(0.0, 0.0, -D);
+            float3 dir = float3(p, D);
+            float3 ax = float3(cos(tb), 0.0, sin(tb));
+            float3 ay = float3(-sin(tb) * sin(tx), cos(tx), cos(tb) * sin(tx));
+            float3 nrm = cross(ax, ay);
+            float dn = dot(dir, nrm);
+            if (abs(dn) < 1e-5) return float4(0.0);
+            float tt = -dot(eye, nrm) / dn;
+            if (tt <= 0.0) return float4(0.0);
+            float3 hit = eye + dir * tt;
+            q = float2(dot(hit, ax), dot(hit, ay));
+            fogk = exp(-max(tt - 1.0, 0.0) * fog * 2.0);
+        }
+        float2 r = grot(q, u.b.x);
+        float2 g = r * n + float2(-moved, 0.0);
+        // 1 ピクセルで何ますぶん動くか（遠くほど大きい）
+        float fw = max(length(fwidth(g)), 1e-5);
+        float unitPx = u.size.y / n;
+        float cover = 0.0, glowSum = 0.0;
+        float2 c0 = floor(g);
+        // ふらふら：粒ごとに違う、なめらかな道すじ（速さの違う波を重ねる）。最大でます 1.5 つ分まで離れる
+        float wander = u.pts[3].x, wT = u.pts[3].y, glow = u.pts[3].z;
+        float wAmp = wander * 1.5;
+        float Rbase = rPx / unitPx;
+        // 光の輪の届く所（ますの数）
+        float haloR = glow > 1e-3 ? Rbase * (2.0 + 9.0 * glow) + blurPx / unitPx * 0.5 : 0.0;
+        // 見るますの広さ：ふらふら・光の輪が大きいほど遠くのますの粒まで見る（最大 7×7）
+        int reach = clamp(int(ceil(wAmp + jitter * 0.5 + max(Rbase * 1.2, haloR) + 0.5)) - 1, 1, 3);
+        for (int dy = -reach; dy <= reach; dy++) {
+            for (int dx = -reach; dx <= reach; dx++) {
+                float2 cell = c0 + float2(dx, dy);
+                float shift = layout == 1 && fmod(abs(cell.y), 2.0) > 0.5 ? 0.5 : 0.0;
+                float2 cellS = float2(floor(g.x - shift) + float(dx), cell.y);
+                float2 center = cellS + float2(0.5 + shift, 0.5) + (dhash2(cellS) - 0.5) * jitter;
+                if (wAmp > 1e-4) {
+                    float2 h1 = dhash2(cellS + 41.7), h2 = dhash2(cellS + 83.1);
+                    float2 f1 = 0.35 + h1 * 0.6, f2 = 0.9 + h2 * 0.9;
+                    float2 o = float2(sin(wT * f1.x + h2.x * 6.283) + 0.45 * sin(wT * f2.x * 1.3 + h1.y * 6.283),
+                                      sin(wT * f1.y + h2.y * 6.283 + 1.7) + 0.45 * sin(wT * f2.y * 1.1 + h1.x * 6.283));
+                    center += o / 1.45 * wAmp;
+                }
+                float2 pw = (center + float2(moved, 0.0)) / n;
+                float R = Rbase, bright = 1.0;
+                float wv = wAmt > 0.0 ? dotWave(pw, wKind, wFreq, wPh) : 0.0;
+                DOT_MOD(cellS, wv, R, bright)
+                float d = dotShape(g - center, shape);
+                float e = fw * 0.75 + blurPx / unitPx * 0.5;
+                float c = (1.0 - smoothstep(R - e, R + e, d)) * min(1.0, 2.0 * R / fw);
+                cover = max(cover, c * bright);
+                if (glow > 1e-3 && R > 1e-5) {
+                    // 光の輪：ふちから外へなだらかに消える（重なると足し合わさる）
+                    float haloW = R * (2.0 + 9.0 * glow) + blurPx / unitPx * 0.5;
+                    float x = max(length(g - center) - R * 0.6, 0.0) / haloW;
+                    glowSum += exp(-x * 3.5) * (1.0 - smoothstep(0.7, 1.0, x)) * bright * (0.35 + 0.5 * glow);
+                }
+            }
+        }
+        cover = max(cover, 1.0 - exp(-glowSum * 1.4));
+        // 粒が細かくなりすぎた所（地平線の近く）は消す
+        cover *= 1.0 - smoothstep(0.3, 0.6, fw);
+        float k = saturate(cover * fogk);
+        return float4(u.color.rgb * k, k);
+        #undef DOT_MOD
+    }
+    if (u.kind == 17 && u.pts[1].y > 1e-4) {
+        // ライン（波の高さ＝3D の地形）：線を描いた板の上の横の線を、上（画面の縦）へ持ち上げて遠近で見る。
+        // 手前の線から順に描いて、手前の山より下に来る奥の線は隠す（地形の見え方）
+        // a = 本数, 太さ（px）, -, 動いた量（本） / b = ぼかし（px）, -, 山の細かさ / pts[0] = 波の位相, -, 傾き（縦・横）
+        // pts[1] = 遠くを暗く, 波の高さ, 山の形, 真ん中 / pts[2].x = 山の下を黒く塗る
+        const float D = 1.6;
+        float2 p = (px - 0.5 * u.size) / u.size.y;
+        p.y = -p.y;   // ここでは上が +
+        float ta = u.pts[0].z * 3.14159265 / 180.0, tb = u.pts[0].w * 3.14159265 / 180.0;
+        float3 ax = float3(cos(tb), 0.0, sin(tb));
+        float3 ay = float3(-sin(tb) * sin(ta), cos(ta), cos(tb) * sin(ta));
+        float n = max(u.a.x, 0.5);
+        float m = u.a.w;
+        float sx = p.x, py = p.y;
+        float denom = sx * ax.z - D * ax.x;
+        if (abs(denom) < 1e-5) return float4(0.0);
+        float k1080 = u.size.y / 1080.0;
+        float wpx = u.a.y * k1080;
+        float thin = saturate(wpx);
+        float halfPx = max(wpx, 1.0) * 0.5;
+        float blurPx = u.b.x * k1080;
+        float height = u.pts[1].y, fog = u.pts[1].x, flat = u.pts[1].w;
+        int shape = int(u.pts[1].z + 0.5);
+        float freq = max(u.b.z, 0.05), ph = u.pts[0].x;
+        float e = 1.0 / u.size.y;
+        float maxPrev = -1e9, cover = 0.0;
+        int i0 = int(floor(-2.5 * n + m));
+        // この高さに届きうる列から始める。手前の列は隠す役に立つこともあるので、その分（線の上の高さ）はゆとりを持つ
+        i0 = max(i0, int(floor(terrainRowAt(py - height * 2.5 - 4.0 / u.size.y, ta, tb, n, m))) - 2);
+        int i1 = int(ceil(4.0 * n + m));
+        i1 = min(i1, i0 + 400);
+        for (int i = i0; i <= i1; i++) {
+            float v = (float(i) - m) / n;
+            float z = float(i) / n;   // 地形の場所（線と一緒に流れる）
+            // この列（画面の x）で、線のどこが見えているか（高さは縦だけなので x と奥行きには効かない）
+            float u0 = (D * v * ay.x - sx * (v * ay.z + D)) / denom;
+            float u1 = (D * v * ay.x - (sx + e) * (v * ay.z + D)) / ((sx + e) * ax.z - D * ax.x);
+            float depth = u0 * ax.z + v * ay.z + D;
+            if (depth < 0.05) continue;
+            // 山の無いときの高さ（線はここより上にしか来ない）。重い山の計算を、届かない線では飛ばす
+            float yFlat = v * ay.y * D / depth;
+            float hwU = halfPx * clamp(D / depth, 0.25, 2.0) / u.size.y + 2.0 / u.size.y;
+            // この線がもう上を通っている → この線もこれより奥の線も、ここには描かれない（手前の山に隠れる）
+            if (yFlat - hwU > py) break;
+            // いちばん高くしてもここまで届かない → 描かれない（隠す役にも立たない）
+            if (yFlat + height * D / depth + hwU < py) { maxPrev = max(maxPrev, yFlat); continue; }
+            float depth1 = u1 * ax.z + v * ay.z + D;
+            float h0, h1;
+            {
+                float xs[2] = { u0, u1 };
+                float hs[2];
+                for (int s2 = 0; s2 < 2; s2++) {
+                    float x = xs[s2], hh;
+                    if (shape == 0) {
+                        hh = 0.5 + 0.5 * sin(x * freq * 6.2831853 + ph) * cos(z * freq * 5.0 + ph * 0.5);
+                    } else {
+                        float2 q = float2(x, z) * freq * 1.5 + float2(ph * 0.15, 0.0);
+                        float nv = gnoise(q) * 0.68 + gnoise(q * 2.03 + 3.1) * 0.32;
+                        if (shape == 2) { float r = 1.0 - abs(nv * 2.0 - 1.0); hh = r * r; }
+                        else hh = smoothstep(0.25, 0.85, nv);
+                    }
+                    // 真ん中：プラスで真ん中を平らに（道のように）、マイナスで真ん中だけ山に
+                    float c = smoothstep(0.05, 0.6, abs(x));
+                    hh *= flat >= 0.0 ? mix(1.0, c, flat) : mix(1.0, 1.0 - c, -flat);
+                    hs[s2] = hh;
+                }
+                h0 = hs[0]; h1 = hs[1];
+            }
+            float y0 = (v * ay.y + height * h0) * D / depth;
+            float y1 = (v * ay.y + height * h1) * D / max(depth1, 0.05);
+            float slope = (y1 - y0) / e;
+            float dpx = abs(py - y0) * u.size.y / sqrt(1.0 + slope * slope);
+            float hw = halfPx * clamp(D / depth, 0.25, 2.0);
+            float c = 1.0 - smoothstep(hw - 0.75 - blurPx * 0.5, hw + 0.75 + blurPx * 0.5, dpx);
+            // 手前の線（の山）より下なら隠れている
+            float vis = smoothstep(-1.0, 1.0, (py - maxPrev) * u.size.y + hw);
+            float fogk = exp(-max(depth - D, 0.0) * fog * 1.2);
+            cover = max(cover, c * vis * fogk * thin);
+            maxPrev = max(maxPrev, y0);
+        }
+        float k = saturate(cover);
+        // 山の下を黒く塗る（下の映像を隠す）
+        float fillA = u.pts[2].x > 0.5 && py < maxPrev ? 1.0 : 0.0;
+        return float4(u.color.rgb * k, max(k, fillA));
+    }
+    if (u.kind == 17) {
+        // ライン：a = 本数（画面の高さあたり）, 太さ（px・1080p）, 角度, 動いた量（本）
+        //         b = ぼかし（px・1080p）, 波の大きさ, 波の細かさ, （波の速さ。動いた量は pts で）
+        //         pts[0] = 波の位相, 線ごとの波のずれ, 奥への傾き（縦・横、度） / pts[1].x = 遠くを暗く
+        float2 p = (px - 0.5 * u.size) / u.size.y;
+        float n = max(u.a.x, 0.001);
+        float2 q = p;
+        float fog = 1.0;
+        float tx = -u.pts[0].z * 3.14159265 / 180.0, ty = u.pts[0].w * 3.14159265 / 180.0;
+        if (abs(tx) > 1e-4 || abs(ty) > 1e-4) {
+            // 3D：線を描いた板（中心が画面の真ん中、大きさは傾けないときと同じ）を傾けて、目から見た所を探す
+            const float D = 1.6;
+            float3 eye = float3(0.0, 0.0, -D);
+            float3 dir = float3(p, D);
+            // 板の向き：横の軸まわりに tx（プラスで上が奥＝床のように）、縦の軸まわりに ty
+            float3 ax = float3(cos(ty), 0.0, sin(ty));
+            float3 ay = float3(-sin(ty) * sin(tx), cos(tx), cos(ty) * sin(tx));
+            float3 nrm = cross(ax, ay);
+            float dn = dot(dir, nrm);
+            if (abs(dn) < 1e-5) return float4(0.0);
+            float t = -dot(eye, nrm) / dn;
+            if (t <= 0.0) return float4(0.0);
+            float3 hit = eye + dir * t;
+            q = float2(dot(hit, ax), dot(hit, ay));
+            // 遠いほど暗く（目からの距離が真ん中より遠い分）
+            fog = exp(-max(t - 1.0, 0.0) * u.pts[1].x * 2.0);
+        }
+        float2 r = grot(q, u.a.z);
+        // 線の位置（線の間隔が 1）。波は線に沿って（r.y の方向に）うねる。線ごとのずれで 1 本ずつ違う形に
+        float x = r.x * n - u.a.w;
+        float amp = u.b.y * n, freq = u.b.z * 6.2831853;
+        float shift = u.pts[0].y * 6.2831853 * 0.37;
+        // 波でずれた線は隣の線の所まで来ることがあるので、近くの何本かを見て、いちばん近い線を探す
+        int reach = min(int(ceil(amp)) + 1, 12);
+        float base = floor(x + 0.5);
+        float best = 1e9, bestSlope = 0.0;
+        for (int j = -reach; j <= reach; j++) {
+            float idx = base + float(j);
+            float ph = r.y * freq + u.pts[0].x + idx * shift;
+            float c = idx + amp * sin(ph);
+            float dx = abs(x - c);
+            if (dx < best) { best = dx; bestSlope = amp * freq / n * cos(ph); }
+        }
+        // 線に対して直角の距離にする（波が急な所で線が細く見えないように）
+        float corr = 1.0 / sqrt(1.0 + bestSlope * bestSlope);
+        float dl = best * corr;
+        float k1080 = u.size.y / 1080.0;
+        float unitPx = u.size.y / n;   // 傾けないときの線の間隔（px）
+        float halfw = u.a.y * k1080 * 0.5 / unitPx;
+        float blur = u.b.x * k1080 / unitPx;
+        // 1 ピクセルで線の位置がどれだけ変わるか（遠くや波で変わる）。細すぎる・遠すぎる線は薄くして、ちらつかないように
+        float fw = max(fwidth(x) * corr, 1e-5);
+        float edge = fw * 0.75 + blur * 0.5;
+        float k = (1.0 - smoothstep(halfw - edge, halfw + edge, dl)) * min(1.0, 2.0 * halfw / fw);
+        // 線が細かくなりすぎた所（地平線の近く）は消す
+        k *= 1.0 - smoothstep(0.25, 0.5, fwidth(x));
+        k = saturate(k * fog);
+        return float4(u.color.rgb * k, k);
+    }
     if (u.kind == 16) {
         // フィロタキシス（Resolume 用の FFGL ジェネレーター Phyllotaxis をそのまま移したもの）
         // a = 生まれる速さ, 広がる速さ, 粒の大きさ, 育つ時間 / b = 外ほど大きく, 光のにじみ, 回った量（回転 × 秒）, 線の長さ
@@ -833,7 +1423,9 @@ final class MetalContext {
             case .normal:   // 下 × (1 - a) + 上
                 ca.sourceRGBBlendFactor = .one
                 ca.destinationRGBBlendFactor = .oneMinusSourceAlpha
-            case .add, .overdrive:      // 下 + 上（オーバードライブは別のシェーダーで混ぜる。これは使わない）
+            case .add, .overdrive, .difference, .overlay, .softLight, .colorDodge, .hueOnly, .lumOnly,
+                 .refract, .light, .flowInto, .interfere, .borrowColor, .dissolve:
+                // 下 + 上（下の絵を読む重ね方は別のシェーダーで混ぜる。これは使わない）
                 ca.sourceRGBBlendFactor = .one
                 ca.destinationRGBBlendFactor = .one
             case .screen:   // 下 + 上 × (1 - 下)
@@ -952,6 +1544,81 @@ final class EffectProcessor {
         return (prev, out, dt)
     }
 
+    /// 群れ（エフェクトごと）。しばらく使っていないものは捨てる
+    private var schools: [String: SchoolSim] = [:]
+
+    private func drawSchool(_ e: Effect, key: String, into dst: MTLTexture, stack: EffectStack, now: Double,
+                            cb: MTLCommandBuffer) {
+        let wall = CACurrentMediaTime()
+        var dt: Double
+        let sim: SchoolSim
+        if let s = schools[key] {
+            sim = s
+            dt = s.last < 0 ? 0 : now - s.last
+            // 止めていた・巻き戻した：その場から続ける
+            if dt < 0 || dt > 0.5 { dt = 0 }
+        } else {
+            schools = schools.filter { wall - $0.value.lastUsed < 30 }
+            guard let s = SchoolSim(device: ctx.device, aspect: Double(dst.width) / Double(max(dst.height, 1))) else { return }
+            schools[key] = s
+            sim = s
+            // はじめから群れらしく見えるように、少し前から動かしておく（経過時間ぶん。2.5〜15 秒）
+            dt = min(max(now - stack.origin, 2.5), 15)
+        }
+        sim.last = now
+        sim.lastUsed = wall
+        SchoolRenderer.shared.render(e, sim: sim, into: dst, dt: dt, now: now, stack: stack, cb: cb)
+    }
+
+    /// 粘菌・パーティクル・ライフ・ホタル・アトラクター・時間のずらし・流体の状態
+    let life = LifeStore()
+
+    private func drawLife(_ e: Effect, key: String, input: MTLTexture, into dst: MTLTexture, stack: EffectStack, now: Double,
+                          mixAmt: Float, cb: MTLCommandBuffer) {
+        let o = stack.origin
+        switch e.kind {
+        case .physarum:
+            let start = Int(e.value(12, at: now, beat: stack.beat, origin: o).rounded())
+            let (gw, gh) = PhysarumSim.gridSize(width: dst.width, height: dst.height)
+            guard let (s, dt) = life.state(key, now: now, origin: o, warm: 4,
+                                           valid: { (s: PhysarumSim) in s.W == gw && s.H == gh && s.start == start },
+                                           make: { PhysarumSim(width: dst.width, height: dst.height, start: start) }) else { return }
+            s.render(e, into: dst, dt: dt, now: now, stack: stack, cb: cb)
+        case .particleLife:
+            guard let (s, dt) = life.state(key, now: now, origin: o, warm: 4, make: { ParticleLifeSim() }) else { return }
+            s.render(e, into: dst, dt: dt, now: now, stack: stack, cb: cb)
+        case .fireflies:
+            let A = Double(dst.width) / Double(max(dst.height, 1))
+            guard let (s, dt) = life.state(key, now: now, origin: o, warm: 4, make: { FireflySim(aspect: A) }) else { return }
+            s.render(e, into: dst, dt: dt, now: now, stack: stack, cb: cb)
+        case .attractor:
+            guard let (s, dt) = life.state(key, now: now, origin: o, warm: 0.5, make: { AttractorSim() }) else { return }
+            s.render(e, into: dst, dt: dt, now: now, stack: stack, cb: cb)
+        case .timeWarp:
+            guard let (s, _) = life.state(key, now: now, origin: o, warm: 0, make: { TimeWarpSim() }) else { return }
+            s.render(e, input: input, into: dst, now: now, stack: stack, mixAmt: mixAmt, cb: cb)
+        case .fluid:
+            guard let (s, dt) = life.state(key, now: now, origin: o, warm: 0, make: { FluidSim() }) else { return }
+            s.render(e, input: input, into: dst, dt: dt, now: now, stack: stack, mixAmt: mixAmt, cb: cb)
+        case .glitchBox, .vhs:
+            RetroRenderer.shared.simple(e, input: input, into: dst, now: now, stack: stack, mixAmt: mixAmt, cb: cb)
+        case .videoFeedback:
+            guard let (s, dt) = life.state(key, now: now, origin: o, warm: 0, make: { FeedbackSim() }) else { return }
+            s.render(e, input: input, into: dst, dt: dt, now: now, stack: stack, mixAmt: mixAmt, cb: cb)
+        case .crt:
+            guard let (s, dt) = life.state(key, now: now, origin: o, warm: 0, make: { CRTSim() }) else { return }
+            s.render(e, input: input, into: dst, dt: dt, now: now, stack: stack, mixAmt: mixAmt, cb: cb)
+        case .rasterScan:
+            guard let (s, _) = life.state(key, now: now, origin: o, warm: 0, make: { RasterSim() }) else { return }
+            s.render(e, input: input, into: dst, now: now, stack: stack, mixAmt: mixAmt, cb: cb)
+        default:
+            break
+        }
+    }
+
+    /// テスト用：群れの魚の場所と速さ
+    func schoolFish(_ key: String, count: Int) -> [(p: SIMD3<Float>, v: SIMD3<Float>)]? { schools[key]?.fish(count) }
+
     /// a と b（同じ大きさ）を k（0 = a、1 = b）で混ぜた絵
     func mix(_ a: MTLTexture, _ b: MTLTexture, k: Float, key: String, cb: MTLCommandBuffer) -> MTLTexture {
         if k >= 0.999 { return b }
@@ -1018,6 +1685,19 @@ final class EffectProcessor {
                 src = dst
                 continue
             }
+            if e.kind == .school {
+                let dst = pool[i % 2]
+                drawSchool(e, key: key + "/" + e.id.uuidString, into: dst, stack: stack, now: now, cb: cb)
+                src = dst
+                continue
+            }
+            if e.kind.isStateful {
+                let dst = pool[i % 2]
+                drawLife(e, key: key + "/" + e.id.uuidString, input: src, into: dst, stack: stack, now: now,
+                         mixAmt: mixAmt, cb: cb)
+                src = dst
+                continue
+            }
             // テキスト：文字のテクスチャ（描き直すときはミップマップ作りを先に積むので、描画の前に用意する）
             var text: (TextRasterCache.Raster, TextFrame)?
             if e.kind.isText {
@@ -1065,6 +1745,39 @@ final class EffectProcessor {
                     packed.withUnsafeBytes { raw.copyMemory(from: $0) }
                 }
                 u.ptCount = Int32(pts.count)
+            }
+            if e.kind == .flow {
+                func v(_ j: Int) -> Double { e.value(j, at: now, beat: stack.beat, origin: stack.origin) }
+                let el = max(now - stack.origin, 0).truncatingRemainder(dividingBy: 10000)
+                u.pts.0 = SIMD4(Float(v(8)), Float(v(9)), Float(v(10)), Float(v(11)))
+                u.pts.1 = SIMD4(Float(v(12)), Float(el), Float(v(13)), Float(v(14)))
+            }
+            if e.kind == .dots {
+                func v(_ j: Int) -> Double { e.value(j, at: now, beat: stack.beat, origin: stack.origin) }
+                let el = max(now - stack.origin, 0)
+                let ph = (v(11) * el * 2 * .pi).truncatingRemainder(dividingBy: 2 * .pi * 1000)
+                u.pts.0 = SIMD4(Float(v(8)), Float(v(9)), Float(v(10)), Float(ph))
+                u.pts.1 = SIMD4(Float(v(12)), Float(v(13)), Float(v(14)), Float(v(15)))
+                u.pts.2 = SIMD4(Float(v(16)), Float(v(17)), Float(el.truncatingRemainder(dividingBy: 10000)), 0)
+                // ふらふらの量・進んだ量（速さ × 秒）・光のにじみ
+                let wanderT = (v(19) * el).truncatingRemainder(dividingBy: 10000)
+                u.pts.3 = SIMD4(Float(v(18)), Float(wanderT), Float(v(20)), 0)
+            }
+            if e.kind == .lines {
+                // 波の位相（波の速さ × 秒）・線ごとのずれ・奥への傾き・遠くを暗く
+                func v(_ j: Int) -> Double { e.value(j, at: now, beat: stack.beat, origin: stack.origin) }
+                let ph = (v(7) * max(now - stack.origin, 0) * 2 * .pi).truncatingRemainder(dividingBy: 2 * .pi * 1000)
+                u.pts.0 = SIMD4(Float(ph), Float(v(8)), Float(v(9)), Float(v(10)))
+                u.pts.1 = SIMD4(Float(v(11)), Float(v(12)), Float(v(13)), Float(v(14)))
+                u.pts.2 = SIMD4(Float(v(15)), 0, 0, 0)
+            }
+            if e.kind == .tunnel {
+                // うねり・うねりの時間・中心 / まわりの区切り・色の付け方・明るさ・光のにじみ / 回った角度
+                func v(_ j: Int) -> Double { e.value(j, at: now, beat: stack.beat, origin: stack.origin) }
+                let el = max(now - stack.origin, 0)
+                u.pts.0 = SIMD4(Float(v(8)), Float((v(9) * el).truncatingRemainder(dividingBy: 10000)), Float(v(10)), Float(v(11)))
+                u.pts.1 = SIMD4(Float(v(12)), Float(v(13)), Float(v(14)), Float(v(15)))
+                u.pts.2 = SIMD4(Float((v(5) * el).truncatingRemainder(dividingBy: 360)), 0, 0, 0)
             }
             if e.kind == .phyllotaxis {
                 // 経過秒（粒の生まれた数はこれ × 生まれる速さ）と色のばらつき
@@ -1190,7 +1903,7 @@ final class Compositor {
                                      layerTransform: d.layerTransform, compTransform: d.compTransform,
                                      holder: d.holder, effects: d.effects, effectKey: d.effectKey, premul: d.premul)
             }
-            if g.effects.isEmpty && !g.blend.isSpecial {
+            if g.effects.isEmpty && !g.blend.readsBelow {
                 for d in draws {
                     let m = d.compTransform.matrix(width: fw, height: fh)
                         * d.layerTransform.matrix(width: fw, height: fh)
@@ -1249,7 +1962,7 @@ final class Compositor {
             if let layerTex {
                 finals.append(Final(texture: layerTex, matrix: comp.matrix(width: fw, height: fh) * uvToPx,
                                     opacity: g.opacity, blend: g.blend, premul: true,
-                                    special: g.blend.isSpecial ? g : nil))
+                                    special: g.blend.readsBelow ? g : nil))
             }
         }
 
@@ -1293,8 +2006,12 @@ final class Compositor {
             if let sp = f.special, let texture {
                 // 特殊合成：下の絵を写し取ってから、シェーダーで混ぜて書き戻す
                 enc.endEncoding()
-                overdrive(sp, layer: texture, matrix: f.matrix, opacity: f.opacity, target: target,
-                          width: w, height: h, cb: cb, now: now)
+                if sp.blend == .overdrive {
+                    overdrive(sp, layer: texture, matrix: f.matrix, opacity: f.opacity, target: target,
+                              width: w, height: h, cb: cb, now: now)
+                } else {
+                    blender.blend(sp, layer: texture, matrix: f.matrix, opacity: f.opacity, target: target, cb: cb, now: now)
+                }
                 guard let e = beginPass(clear: false) else { return nil }
                 enc = e
                 continue
@@ -1325,6 +2042,9 @@ final class Compositor {
         }
         return result
     }
+
+    /// 差分・屈折・光で照らす などの、下の絵を読む重ね方
+    private let blender = SpecialBlender()
 
     /// オーバードライブ加算（下の絵 + このレイヤーで 100% を超えた分を、にじみ・色相ずれ・歪みに）
     private var odBelow: MTLTexture?
@@ -1584,6 +2304,16 @@ final class RenderLoop {
             let size = fixedSize ?? (old.map { $0.size.0 * $0.size.1 >= w * h ? $0.size : (w, h) } ?? (w, h))
             shared[key] = (size, (old?.needs ?? false) || needs)
         }
+        // 録画中は、画面が隠れていても合成する（録画の大きさで。同じ縦横比の画面があれば大きい方）
+        let recSize = Recorder.shared.activeSize()
+        var recKey: Int?
+        if let (rw, rh) = recSize {
+            let key = sharedKey(rw, rh)
+            recKey = key
+            let old = shared[key]
+            let size = fixedSize ?? (old.map { $0.size.0 * $0.size.1 >= rw * rh ? $0.size : (rw, rh) } ?? (rw, rh))
+            shared[key] = (size, true)
+        }
         var sharedTextures: [Int: MTLTexture] = [:]
         sharedCompositors = sharedCompositors.filter { shared[$0.key] != nil }
         padProcessors = padProcessors.filter { shared[$0.key] != nil }
@@ -1612,6 +2342,13 @@ final class RenderLoop {
                 cb.addCompletedHandler { _ in _ = groups }
                 cb.commit()
             }
+        }
+
+        if let recKey, let (rw, rh) = recSize {
+            // 縦横比が違う（解像度を決めているとき）なら、出力と同じ合わせ方で置く
+            let tex = sharedTextures[recKey]
+            let fitM = params.format.fitMatrix(screenAspect: Double(rw) / Double(rh))
+            Recorder.shared.capture(tex, master: params.compMaster, fit: fitM, now: now)
         }
 
         for (id, layer, kind) in current {
@@ -1687,9 +2424,22 @@ final class RenderLoop {
     }
 
     private func draw(_ drawable: CAMetalDrawable, composite: MTLTexture?, params: RenderParams, cb: MTLCommandBuffer) {
-        let w = drawable.texture.width, h = drawable.texture.height
+        encodeDraw(into: drawable.texture, composite: composite, params: params, cb: cb)
+        cb.present(drawable)
+        cb.commit()
+    }
+
+    /// 録画用：合成の絵を、録画の絵（target）にそのまま描く（コーナーピンなし。コミットは呼んだ側で）
+    func drawComposite(_ composite: MTLTexture?, into target: MTLTexture, master: Float, fit: simd_float3x3,
+                       cb: MTLCommandBuffer) {
+        let p = RenderParams(homographyInverse: fit, testPattern: false, master: master)
+        encodeDraw(into: target, composite: composite, params: p, cb: cb)
+    }
+
+    private func encodeDraw(into target: MTLTexture, composite: MTLTexture?, params: RenderParams, cb: MTLCommandBuffer) {
+        let w = target.width, h = target.height
         let rpd = MTLRenderPassDescriptor()
-        rpd.colorAttachments[0].texture = drawable.texture
+        rpd.colorAttachments[0].texture = target
         rpd.colorAttachments[0].loadAction = .clear
         rpd.colorAttachments[0].storeAction = .store
         rpd.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
@@ -1704,8 +2454,6 @@ final class RenderLoop {
         enc.setFragmentSamplerState(ctx.sampler, index: 0)
         enc.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
         enc.endEncoding()
-        cb.present(drawable)
-        cb.commit()
     }
 }
 

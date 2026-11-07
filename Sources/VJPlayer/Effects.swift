@@ -7,11 +7,13 @@ import QuartzCore
 // 出力を、指定したフレームレートでしか更新しない（並び順には関係なく、その段全体にかかる）。
 
 enum EffectKind: String, Codable, CaseIterable, Identifiable {
-    case mirror, colorize, levels, posterize, invert, posterizeTime, strobe, echo, shapeMask, polyMask
+    case mirror, warp, fluid, colorize, levels, posterize, invert, posterizeTime, timeWarp, strobe, echo, shapeMask, polyMask
+    /// 昔のアナログ映像機材をまねたもの
+    case glitchBox, vhs, videoFeedback, rasterScan, crt
     /// ジェネレーター（動画の代わりにクリップとして置く絵）。エフェクト一覧には出さない
-    case solid, gradient, stripes, grid, noise, shapes, text, clock, phyllotaxis
+    case solid, gradient, stripes, grid, noise, shapes, text, clock, phyllotaxis, lines, dots, flow, school, tunnel, physarum, particleLife, fireflies, attractor
     /// 特殊合成（レイヤーの重ね方）の値。エフェクト一覧には出さない
-    case overdrive
+    case overdrive, blendRefract, blendLight, blendFlow, blendInterfere, blendBorrow, blendDissolve
     var id: String { rawValue }
 
     /// エフェクトの不透明度と同じ働きの値（以前の「かかり具合」）の番号。画面には出さない
@@ -24,21 +26,24 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
     }
 
     /// 重ね方の値か（エフェクトとしては並べない）
-    var isBlend: Bool { self == .overdrive }
+    var isBlend: Bool { [.overdrive, .blendRefract, .blendLight, .blendFlow, .blendInterfere, .blendBorrow, .blendDissolve].contains(self) }
 
     /// ジェネレーターか（クリップとして置く。エフェクトとしては並べない）
     var isGenerator: Bool { Self.generators.contains(self) }
-    static let generators: [EffectKind] = [.solid, .gradient, .stripes, .grid, .noise, .shapes, .phyllotaxis, .text, .clock]
+    static let generators: [EffectKind] = [.solid, .gradient, .flow, .lines, .dots, .school, .tunnel, .physarum, .particleLife, .fireflies, .attractor, .stripes, .grid, .noise, .shapes, .phyllotaxis, .text, .clock]
     /// 文字を描くジェネレーター（テキスト・時計。描き方は同じ）
     var isText: Bool { self == .text || self == .clock }
     /// 色を 1 つ使うジェネレーター（「色」を出す）
-    var usesColor: Bool { [.solid, .stripes, .grid, .noise, .shapes, .text, .clock, .phyllotaxis].contains(self) }
+    var usesColor: Bool { [.solid, .stripes, .grid, .noise, .shapes, .text, .clock, .phyllotaxis, .lines, .dots, .flow, .school, .tunnel, .physarum, .fireflies, .attractor, .rasterScan].contains(self) }
     /// 「速さ」の値の番号。シェーダーには速さ × 経過時間（動いた量）を渡す
     var speedIndex: Int? {
         switch self {
-        case .gradient, .stripes, .grid: 3
+        case .gradient, .stripes, .grid, .lines: 3
         case .noise, .text, .clock: 2
         case .phyllotaxis: 6
+        case .dots: 5
+        case .flow, .tunnel: 0
+        case .warp: 2
         default: nil
         }
     }
@@ -64,19 +69,43 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
         case .text: "テキスト"
         case .clock: "時計・カウントダウン"
         case .phyllotaxis: "フィロタキシス（ひまわり）"
+        case .lines: "ライン"
+        case .dots: "ドット（粒）"
+        case .flow: "光の流れ"
+        case .school: "群れ（魚・鳥）"
+        case .tunnel: "トンネル"
+        case .glitchBox: "グリッチボックス"
+        case .vhs: "VHS テープ"
+        case .videoFeedback: "ビデオフィードバック"
+        case .rasterScan: "ラスタースキャン（Rutt/Etra 風）"
+        case .crt: "CRT モニター"
+        case .physarum: "粘菌（フィジャルム）"
+        case .particleLife: "パーティクル・ライフ"
+        case .fireflies: "ホタルの同期"
+        case .attractor: "ストレンジ・アトラクター"
+        case .timeWarp: "時間のずらし（スリットスキャン）"
+        case .fluid: "流体（絵の具を流す）"
+        case .warp: "うねり（有機的な歪み）"
         case .overdrive: "オーバードライブ加算"
+        case .blendRefract: "屈折（ガラス越し）"
+        case .blendLight: "光で照らす"
+        case .blendFlow: "流し込む"
+        case .blendInterfere: "干渉（モアレ）"
+        case .blendBorrow: "色を借りる"
+        case .blendDissolve: "明るさで溶け込む"
         }
     }
 
     /// 一覧での分類（エフェクトを足すときはここに入れる）
     var category: EffectCategory {
         switch self {
-        case .mirror: .shape
+        case .mirror, .warp, .fluid: .shape
         case .colorize, .levels, .posterize, .invert: .color
-        case .posterizeTime, .strobe, .echo: .time
+        case .posterizeTime, .timeWarp, .strobe, .echo: .time
+        case .glitchBox, .vhs, .videoFeedback, .rasterScan, .crt: .retro
         case .shapeMask, .polyMask: .mask
-        case .solid, .gradient, .stripes, .grid, .noise, .shapes, .text, .clock, .phyllotaxis: .generator
-        case .overdrive: .blend
+        case .solid, .gradient, .stripes, .grid, .noise, .shapes, .text, .clock, .phyllotaxis, .lines, .dots, .flow, .school, .tunnel, .physarum, .particleLife, .fireflies, .attractor: .generator
+        case .overdrive, .blendRefract, .blendLight, .blendFlow, .blendInterfere, .blendBorrow, .blendDissolve: .blend
         }
     }
 
@@ -101,7 +130,30 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
         case .text: "textformat"
         case .clock: "clock"
         case .phyllotaxis: "sun.max.circle"
+        case .lines: "line.3.horizontal.decrease"
+        case .dots: "circle.grid.3x3.fill"
+        case .flow: "wand.and.rays"
+        case .school: "fish"
+        case .tunnel: "circle.circle.fill"
+        case .glitchBox: "waveform.path.ecg"
+        case .vhs: "recordingtape"
+        case .videoFeedback: "rectangle.on.rectangle.angled"
+        case .rasterScan: "water.waves"
+        case .crt: "tv"
+        case .physarum: "point.3.filled.connected.trianglepath.dotted"
+        case .particleLife: "atom"
+        case .fireflies: "sparkles"
+        case .attractor: "tornado"
+        case .timeWarp: "clock.arrow.2.circlepath"
+        case .fluid: "drop.fill"
+        case .warp: "water.waves"
         case .overdrive: "sun.max"
+        case .blendRefract: "drop.circle"
+        case .blendLight: "flashlight.on.fill"
+        case .blendFlow: "wind"
+        case .blendInterfere: "water.waves.and.arrow.trianglehead.up"
+        case .blendBorrow: "eyedropper"
+        case .blendDissolve: "flame"
         }
     }
 
@@ -135,7 +187,13 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
         case .invert: 14
         case .text, .clock: 15
         case .phyllotaxis: 16
-        case .posterizeTime, .overdrive: -1
+        case .lines: 17
+        case .dots: 18
+        case .flow: 19
+        case .tunnel: 20
+        case .warp: 21
+        case .glitchBox, .vhs, .videoFeedback, .rasterScan, .crt: -1
+        case .posterizeTime, .overdrive, .blendRefract, .blendLight, .blendFlow, .blendInterfere, .blendBorrow, .blendDissolve, .school, .physarum, .particleLife, .fireflies, .attractor, .timeWarp, .fluid: -1
         }
     }
 
@@ -175,6 +233,64 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
                 EffectParam(label: "ディザ", range: 0...1, defaultValue: 0, format: EffectParam.percent),
                 EffectParam(label: "ドット", range: 1...32, defaultValue: 1, perPoint: 0.05, step: 1,
                             format: { $0 < 1.5 ? "なし" : String(format: "%.0f px（1080p）", $0) }),
+            ]
+        case .blendRefract:
+            return [
+                EffectParam(label: "曲げる強さ", range: 0...300, defaultValue: 60, perPoint: 0.3,
+                            format: { String(format: "%.0f px（1080p）", $0) }, animRange: 20...150),
+                EffectParam(label: "なめらかさ", range: 0...1, defaultValue: 0.3, format: EffectParam.percent),
+                EffectParam(label: "色のずれ", range: 0...1, defaultValue: 0.2, format: EffectParam.percent),
+                EffectParam(label: "ふちの光", range: 0...1, defaultValue: 0.3, format: EffectParam.percent),
+                EffectParam(label: "上の絵も見せる", range: 0...1, defaultValue: 0, format: EffectParam.percent),
+            ]
+        case .blendLight:
+            return [
+                EffectParam(label: "照らされない所の暗さ", range: 0...1, defaultValue: 0.85, format: EffectParam.percent),
+                EffectParam(label: "光の広がり", range: 0...400, defaultValue: 80, perPoint: 0.5,
+                            format: { String(format: "%.0f px（1080p）", $0) }, animRange: 20...200),
+                EffectParam(label: "光の強さ", range: 0...4, defaultValue: 1.5, perPoint: 0.005, format: EffectParam.percent,
+                            animRange: 0.5...2.5),
+                EffectParam(label: "光の色を付ける", range: 0...1, defaultValue: 0.5, format: EffectParam.percent),
+                EffectParam(label: "光そのものを見せる", range: 0...1, defaultValue: 0.2, format: EffectParam.percent),
+            ]
+        case .blendFlow:
+            return [
+                EffectParam(label: "かき混ぜる強さ", range: 0...3, defaultValue: 1, perPoint: 0.005, format: EffectParam.percent),
+                EffectParam(label: "押し方", range: 0...1, defaultValue: 0, choices: ["動いた所", "明るい所のまわり"]),
+                EffectParam(label: "元に戻る速さ", range: 0...1, defaultValue: 0.3, format: EffectParam.percent),
+                EffectParam(label: "渦", range: 0...1, defaultValue: 0.5, format: EffectParam.percent),
+                EffectParam(label: "ねばり", range: 0...1, defaultValue: 0.3, format: EffectParam.percent),
+                EffectParam(label: "上の絵も見せる", range: 0...1, defaultValue: 0, format: EffectParam.percent),
+            ]
+        case .blendInterfere:
+            return [
+                EffectParam(label: "縞の細かさ", range: 1...200, defaultValue: 30, perPoint: 0.2,
+                            format: { String(format: "%.0f", $0) }, animRange: 10...80),
+                EffectParam(label: "流れる速さ", range: -4...4, defaultValue: 0.5, perPoint: 0.005,
+                            format: { String(format: "%+.2f /秒", $0) }),
+                EffectParam(label: "縞の濃さ", range: 0...1, defaultValue: 0.8, format: EffectParam.percent),
+                EffectParam(label: "鋭さ", range: 0...1, defaultValue: 0.3, format: EffectParam.percent),
+                EffectParam(label: "色", range: 0...2, defaultValue: 0, choices: ["下の色", "上の色", "虹色"]),
+            ]
+        case .blendBorrow:
+            return [
+                EffectParam(label: "借り方", range: 0...1, defaultValue: 0, choices: ["同じ場所の色", "上の絵をパレットに"]),
+                EffectParam(label: "明るさのコントラスト", range: 0...3, defaultValue: 1.2, perPoint: 0.005,
+                            format: { String(format: "%.2f", $0) }),
+                EffectParam(label: "明るさでずらす", range: 0...0.5, defaultValue: 0, perPoint: 0.001, format: EffectParam.percent,
+                            animRange: 0...0.2),
+                EffectParam(label: "パレットにする行", range: 0...1, defaultValue: 0.5, format: EffectParam.percent),
+                EffectParam(label: "元の色を残す", range: 0...1, defaultValue: 0, format: EffectParam.percent),
+            ]
+        case .blendDissolve:
+            return [
+                EffectParam(label: "溶ける量", range: 0...1, defaultValue: 0.5, format: EffectParam.percent, animRange: 0...1),
+                EffectParam(label: "溶け方", range: 0...3, defaultValue: 0, choices: ["暗い所から", "明るい所から", "ノイズ", "上の明るさで"]),
+                EffectParam(label: "ふちのやわらかさ", range: 0...0.5, defaultValue: 0.06, perPoint: 0.0005, format: EffectParam.percent),
+                EffectParam(label: "ふちの光", range: 0...3, defaultValue: 1, perPoint: 0.005, format: EffectParam.percent),
+                EffectParam(label: "ふちの色相", range: 0...360, defaultValue: 25, perPoint: 1,
+                            format: { String(format: "%.0f°", $0) }, animRange: 0...360),
+                EffectParam(label: "ノイズを混ぜる", range: 0...1, defaultValue: 0.3, format: EffectParam.percent),
             ]
         case .overdrive:
             // 加算して 100% を超えた分（あふれ）をどう見せるか
@@ -249,6 +365,379 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
                             format: { String(format: "%.0f°", $0) }, animRange: 0...360),
                 EffectParam(label: "ぼかし", range: 0...0.3, defaultValue: 0.005, perPoint: 0.0005,
                             format: EffectParam.percent),
+            ]
+        case .flow:
+            // アブストラクトな光：やわらかい光の帯がゆったりうねり、ふちが虹色ににじむ。粒子感（フィルムのざらつき）付き
+            return [
+                EffectParam(label: "速さ", range: 0...3, defaultValue: 0.15, perPoint: 0.002,
+                            format: { String(format: "%.2f", $0) }, animRange: 0.05...0.5),
+                EffectParam(label: "ぼけ", range: 0...1, defaultValue: 0.55, format: EffectParam.percent, animRange: 0.2...0.9),
+                EffectParam(label: "帯の数", range: 1...4, defaultValue: 2, perPoint: 0.02, step: 1,
+                            format: { String(format: "%.0f 本", $0) }),
+                EffectParam(label: "帯の太さ", range: 0.02...0.6, defaultValue: 0.22, perPoint: 0.0005,
+                            format: EffectParam.percent, animRange: 0.08...0.3),
+                EffectParam(label: "うねり", range: 0...2, defaultValue: 0.8, perPoint: 0.003,
+                            format: EffectParam.percent, animRange: 0.3...1.5),
+                EffectParam(label: "色のにじみ", range: 0...1, defaultValue: 0.6, format: EffectParam.percent, animRange: 0.2...1),
+                EffectParam(label: "虹色", range: 0...1, defaultValue: 0.75, format: EffectParam.percent, animRange: 0.3...1),
+                EffectParam(label: "粒子感", range: 0...0.4, defaultValue: 0.07, perPoint: 0.0005, format: EffectParam.percent),
+                EffectParam(label: "角度", range: 0...360, defaultValue: 325, perPoint: 1,
+                            format: { String(format: "%.0f°", $0) }, animRange: 0...360),
+                EffectParam(label: "明るさ", range: 0...3, defaultValue: 1, perPoint: 0.003,
+                            format: EffectParam.percent, animRange: 0.5...1.5),
+                EffectParam(label: "色相ずらし", range: 0...360, defaultValue: 0, perPoint: 1,
+                            format: { String(format: "%.0f°", $0) }, animRange: 0...360),
+                EffectParam(label: "まわりの光", range: 0...1, defaultValue: 0.35, format: EffectParam.percent, animRange: 0.2...0.8),
+                EffectParam(label: "大きさ", range: 0.2...4, defaultValue: 1, perPoint: 0.003,
+                            format: { String(format: "%.2fx", $0) }, animRange: 0.7...1.5),
+                // 光の中の分光（波長ごとのずれ・薄い膜の干渉色・光の筋）
+                EffectParam(label: "スペクトルの複雑さ", range: 0...1, defaultValue: 0.6, format: EffectParam.percent,
+                            animRange: 0.2...1),
+                EffectParam(label: "スペクトルの細かさ", range: 0.2...5, defaultValue: 1.5, perPoint: 0.005,
+                            format: { String(format: "%.2f", $0) }, animRange: 0.8...3),
+            ]
+        case .physarum:
+            // 粘菌：点 1 つずつが前・左・右のにおいをかいで、濃い方へ曲がる
+            return [
+                EffectParam(label: "数", range: 1000...1_000_000, defaultValue: 500_000, perPoint: 1000, step: 1000,
+                            format: { String(format: "%.0f 万", $0 / 10000) }, animRange: 100_000...600_000),
+                EffectParam(label: "速さ", range: 0...3, defaultValue: 0.8, perPoint: 0.005, format: { String(format: "%.2f", $0) }),
+                EffectParam(label: "においをかぐ角度", range: 5...120, defaultValue: 40, perPoint: 0.3,
+                            format: { String(format: "%.0f°", $0) }, animRange: 15...60),
+                EffectParam(label: "においをかぐ距離", range: 2...80, defaultValue: 20, perPoint: 0.1,
+                            format: { String(format: "%.0f px（1080p）", $0) }, animRange: 8...40),
+                EffectParam(label: "曲がる角度", range: 5...120, defaultValue: 20, perPoint: 0.3,
+                            format: { String(format: "%.0f°", $0) }, animRange: 10...50),
+                EffectParam(label: "跡の残る長さ", range: 0...1, defaultValue: 0.6, format: EffectParam.percent),
+                EffectParam(label: "にじみ", range: 0...1, defaultValue: 0.2, format: EffectParam.percent),
+                EffectParam(label: "明るさ", range: 0...4, defaultValue: 0.6, perPoint: 0.005, format: EffectParam.percent, animRange: 0.3...1.5),
+                EffectParam(label: "色の付け方", range: 0...1, defaultValue: 0, choices: ["1 色", "パレット"]),
+                EffectParam(label: "えさ", range: 0...2, defaultValue: 0, choices: ["なし", "動く点", "輪"]),
+                EffectParam(label: "えさの強さ", range: 0...1, defaultValue: 0.5, format: EffectParam.percent),
+                EffectParam(label: "ゆらぎ", range: 0...1, defaultValue: 0.1, format: EffectParam.percent),
+                EffectParam(label: "始まりの形", range: 0...2, defaultValue: 0, choices: ["ばらばら", "円", "真ん中から"]),
+            ]
+        case .particleLife:
+            // パーティクル・ライフ：種類どうしの好き嫌い（たねで決まる表）だけで動く
+            return [
+                EffectParam(label: "数", range: 2...6000, defaultValue: 2000, perPoint: 2, step: 1,
+                            format: { String(format: "%.0f 粒", $0) }),
+                EffectParam(label: "種類の数", range: 1...8, defaultValue: 6, perPoint: 0.03, step: 1,
+                            format: { String(format: "%.0f 色", $0) }),
+                EffectParam(label: "たね（性格）", range: 0...999, defaultValue: 1, perPoint: 0.1, step: 1,
+                            format: { String(format: "%.0f", $0) }),
+                EffectParam(label: "力の届く広さ", range: 0.02...0.3, defaultValue: 0.09, perPoint: 0.0003,
+                            format: EffectParam.percent, animRange: 0.05...0.15),
+                EffectParam(label: "力の強さ", range: 0...3, defaultValue: 1, perPoint: 0.005, format: EffectParam.percent),
+                EffectParam(label: "ブレーキ", range: 0...1, defaultValue: 0.5, format: EffectParam.percent),
+                EffectParam(label: "速さ", range: 0...3, defaultValue: 1, perPoint: 0.005, format: { String(format: "%.2f", $0) }),
+                EffectParam(label: "粒の大きさ", range: 1...40, defaultValue: 6, perPoint: 0.05,
+                            format: { String(format: "%.0f px（1080p）", $0) }),
+                EffectParam(label: "光のにじみ", range: 0...1, defaultValue: 0.3, format: EffectParam.percent),
+                EffectParam(label: "色の付け方", range: 0...1, defaultValue: 0, choices: ["虹色", "パレット"]),
+                EffectParam(label: "性格を入れ替える（拍）", range: 0...6, defaultValue: 0,
+                            choices: ["しない", "1", "2", "4", "8", "16", "32"]),
+                EffectParam(label: "明るさ", range: 0...3, defaultValue: 1, perPoint: 0.003, format: EffectParam.percent),
+                EffectParam(label: "残像", range: 0...0.98, defaultValue: 0, format: EffectParam.percent),
+            ]
+        case .fireflies:
+            // ホタルの同期：1 匹ずつが自分の速さで光り、まわりの光に位相を少し合わせる
+            return [
+                EffectParam(label: "数", range: 10...4000, defaultValue: 600, perPoint: 2, step: 1,
+                            format: { String(format: "%.0f 匹", $0) }),
+                EffectParam(label: "そろう強さ", range: 0...3, defaultValue: 0.8, perPoint: 0.005,
+                            format: EffectParam.percent, animRange: 0...1.5),
+                EffectParam(label: "見える広さ", range: 0.02...1, defaultValue: 0.25, perPoint: 0.002,
+                            format: { $0 >= 0.999 ? "画面全体" : String(format: "%.0f%%", $0 * 100) }),
+                EffectParam(label: "光る速さ", range: 0.1...4, defaultValue: 0.8, perPoint: 0.005,
+                            format: { String(format: "%.2f 回/秒", $0) }),
+                EffectParam(label: "速さのばらつき", range: 0...1, defaultValue: 0.3, format: EffectParam.percent),
+                EffectParam(label: "光の長さ", range: 0.02...1, defaultValue: 0.25, format: EffectParam.percent),
+                EffectParam(label: "大きさ", range: 1...40, defaultValue: 7, perPoint: 0.05,
+                            format: { String(format: "%.0f px（1080p）", $0) }),
+                EffectParam(label: "光のにじみ", range: 0...1, defaultValue: 0.6, format: EffectParam.percent),
+                EffectParam(label: "ふらふら", range: 0...1, defaultValue: 0.4, format: EffectParam.percent),
+                EffectParam(label: "拍に合わせる", range: 0...4, defaultValue: 0, choices: ["しない", "½ 拍", "1 拍", "2 拍", "4 拍"]),
+                EffectParam(label: "拍への引き", range: 0...1, defaultValue: 0.4, format: EffectParam.percent),
+                EffectParam(label: "明るさ", range: 0...3, defaultValue: 1, perPoint: 0.003, format: EffectParam.percent),
+                EffectParam(label: "色のばらつき", range: 0...1, defaultValue: 0.15, format: EffectParam.percent),
+            ]
+        case .attractor:
+            // ストレンジ・アトラクター：点を式で動かし続け、通った所の濃さを描く
+            return [
+                EffectParam(label: "種類", range: 0...3, defaultValue: 0, choices: ["クリフォード", "デ・ヨング", "トーマス", "アイザワ"]),
+                EffectParam(label: "係数 a", range: -3...3, defaultValue: -1.4, perPoint: 0.002, format: { String(format: "%+.3f", $0) }),
+                EffectParam(label: "係数 b", range: -3...3, defaultValue: 1.6, perPoint: 0.002, format: { String(format: "%+.3f", $0) }),
+                EffectParam(label: "係数 c", range: -3...3, defaultValue: 1.0, perPoint: 0.002, format: { String(format: "%+.3f", $0) }),
+                EffectParam(label: "係数 d", range: -3...3, defaultValue: 0.7, perPoint: 0.002, format: { String(format: "%+.3f", $0) }),
+                EffectParam(label: "変身の速さ", range: 0...2, defaultValue: 0.2, perPoint: 0.002, format: { String(format: "%.2f", $0) }),
+                EffectParam(label: "変身の大きさ", range: 0...1, defaultValue: 0.3, format: EffectParam.percent),
+                EffectParam(label: "濃さ", range: 0...4, defaultValue: 1, perPoint: 0.005, format: EffectParam.percent, animRange: 0.5...2),
+                EffectParam(label: "残り方", range: 0...0.99, defaultValue: 0.9, format: EffectParam.percent),
+                EffectParam(label: "大きさ", range: 0.2...3, defaultValue: 1, perPoint: 0.003, format: { String(format: "%.2fx", $0) }),
+                EffectParam(label: "回る速さ", range: -60...60, defaultValue: 4, perPoint: 0.2,
+                            format: { String(format: "%+.0f°/秒", $0) }),
+                EffectParam(label: "色の付け方", range: 0...2, defaultValue: 1, choices: ["1 色", "パレット", "動きの向き"]),
+                EffectParam(label: "点の数", range: 0.1...4, defaultValue: 1, perPoint: 0.005,
+                            format: { String(format: "%.1f 百万/コマ", $0) }),
+            ]
+        case .timeWarp:
+            // 時間のずらし：場所ごとに何コマ前を見せるか
+            return [
+                EffectParam(label: "ずらす時間", range: 0.05...4, defaultValue: 1, perPoint: 0.005,
+                            format: { String(format: "%.2f 秒", $0) }, animRange: 0.3...2),
+                EffectParam(label: "ずらし方", range: 0...4, defaultValue: 0, choices: ["縦", "横", "円", "ノイズ", "明るさ"]),
+                EffectParam(label: "反対にする", range: 0...1, defaultValue: 0, isToggle: true),
+                EffectParam(label: "段々にする", range: 0...32, defaultValue: 0, perPoint: 0.05, step: 1,
+                            format: { $0 < 1.5 ? "なめらか" : String(format: "%.0f 段", $0) }),
+                EffectParam(label: "ノイズの細かさ", range: 0.2...8, defaultValue: 2, perPoint: 0.01, format: { String(format: "%.2f", $0) }),
+                EffectParam(label: "ノイズの速さ", range: 0...2, defaultValue: 0.3, perPoint: 0.003, format: { String(format: "%.2f", $0) }),
+            ]
+        case .fluid:
+            // 流体：動きで押して、絵の具を流す
+            return [
+                EffectParam(label: "動きで押す", range: 0...3, defaultValue: 1, perPoint: 0.005, format: EffectParam.percent),
+                EffectParam(label: "絵の具を足す量", range: 0...1, defaultValue: 0.4, format: EffectParam.percent),
+                EffectParam(label: "足し方", range: 0...2, defaultValue: 0, choices: ["動いた所", "明るい所", "全体"]),
+                EffectParam(label: "絵の具の残る長さ", range: 0...1, defaultValue: 0.7, format: EffectParam.percent),
+                EffectParam(label: "渦", range: 0...1, defaultValue: 0.4, format: EffectParam.percent),
+                EffectParam(label: "風", range: 0...1, defaultValue: 0.25, format: EffectParam.percent, animRange: 0...0.6),
+                EffectParam(label: "ねばり", range: 0...1, defaultValue: 0.3, format: EffectParam.percent),
+                EffectParam(label: "元の絵", range: 0...1, defaultValue: 0.5, format: EffectParam.percent),
+                EffectParam(label: "細かさ", range: 0...2, defaultValue: 1, choices: ["粗い", "ふつう", "細かい"]),
+            ]
+        case .glitchBox:
+            return [
+                EffectParam(label: "同期くずし", range: 0...1, defaultValue: 0.3, format: EffectParam.percent, animRange: 0...0.8),
+                EffectParam(label: "縦に流れる", range: -2...2, defaultValue: 0, perPoint: 0.005, format: { String(format: "%+.2f", $0) }),
+                EffectParam(label: "ガクッとずれる", range: 0...1, defaultValue: 0.2, format: EffectParam.percent),
+                EffectParam(label: "色にじみ", range: 0...1, defaultValue: 0.4, format: EffectParam.percent),
+                EffectParam(label: "色ずれ", range: 0...60, defaultValue: 8, perPoint: 0.1,
+                            format: { String(format: "%.0f px（1080p）", $0) }, animRange: 0...30),
+                EffectParam(label: "ゲイン", range: 0.5...4, defaultValue: 1.2, perPoint: 0.005, format: EffectParam.percent,
+                            animRange: 1...2.5),
+                EffectParam(label: "折り返し（反転）", range: 0...1, defaultValue: 0, format: EffectParam.percent),
+                EffectParam(label: "エンハンサー", range: 0...1, defaultValue: 0.3, format: EffectParam.percent),
+                EffectParam(label: "色の発振", range: 0...1, defaultValue: 0.15, format: EffectParam.percent),
+                EffectParam(label: "ノイズ", range: 0...1, defaultValue: 0.15, format: EffectParam.percent),
+                EffectParam(label: "走査線", range: 0...1, defaultValue: 0.2, format: EffectParam.percent),
+                EffectParam(label: "乱れる速さ", range: 0...4, defaultValue: 1, perPoint: 0.005, format: { String(format: "%.2f", $0) }),
+            ]
+        case .vhs:
+            return [
+                EffectParam(label: "トラッキングのずれ", range: 0...1, defaultValue: 0.3, format: EffectParam.percent),
+                EffectParam(label: "下のノイズ", range: 0...1, defaultValue: 0.6, format: EffectParam.percent),
+                EffectParam(label: "揺れ", range: 0...1, defaultValue: 0.4, format: EffectParam.percent),
+                EffectParam(label: "色のにじみ", range: 0...1, defaultValue: 0.5, format: EffectParam.percent),
+                EffectParam(label: "色あせ", range: 0...1, defaultValue: 0.35, format: EffectParam.percent),
+                EffectParam(label: "ドロップアウト", range: 0...1, defaultValue: 0.3, format: EffectParam.percent),
+                EffectParam(label: "ノイズ", range: 0...1, defaultValue: 0.25, format: EffectParam.percent),
+                EffectParam(label: "画質", range: 0...1, defaultValue: 0.4, format: EffectParam.percent),
+            ]
+        case .videoFeedback:
+            return [
+                EffectParam(label: "ズーム", range: 0.5...2, defaultValue: 1.25, perPoint: 0.002,
+                            format: { String(format: "%.2fx /秒", $0) }, animRange: 0.8...1.6),
+                EffectParam(label: "回転", range: -180...180, defaultValue: 20, perPoint: 0.5,
+                            format: { String(format: "%+.0f°/秒", $0) }, animRange: -60...60),
+                EffectParam(label: "ずれ X", range: -0.5...0.5, defaultValue: 0, perPoint: 0.001,
+                            format: { String(format: "%+.0f%%/秒", $0 * 100) }),
+                EffectParam(label: "ずれ Y", range: -0.5...0.5, defaultValue: 0, perPoint: 0.001,
+                            format: { String(format: "%+.0f%%/秒", $0 * 100) }),
+                EffectParam(label: "色相のずれ", range: -360...360, defaultValue: 60, perPoint: 1,
+                            format: { String(format: "%+.0f°/秒", $0) }),
+                EffectParam(label: "残る強さ", range: 0...1, defaultValue: 0.4, format: EffectParam.percent),
+                EffectParam(label: "切り抜く明るさ", range: 0...1, defaultValue: 0.15, format: EffectParam.percent),
+                EffectParam(label: "重ね方", range: 0...2, defaultValue: 0, choices: ["上に重ねる", "加算", "明るい方"]),
+                EffectParam(label: "コントラスト", range: 0.5...2, defaultValue: 1.05, perPoint: 0.003,
+                            format: { String(format: "%.2f", $0) }),
+                EffectParam(label: "ぼかし", range: 0...1, defaultValue: 0.1, format: EffectParam.percent),
+            ]
+        case .rasterScan:
+            return [
+                EffectParam(label: "線の数", range: 4...400, defaultValue: 100, perPoint: 0.3, step: 1,
+                            format: { String(format: "%.0f 本", $0) }, animRange: 40...160),
+                EffectParam(label: "持ち上げる高さ", range: 0...1, defaultValue: 0.25, format: EffectParam.percent, animRange: 0.1...0.5),
+                EffectParam(label: "線の太さ", range: 0.5...8, defaultValue: 2, perPoint: 0.01,
+                            format: { String(format: "%.1f px（1080p）", $0) }),
+                EffectParam(label: "奥への傾き", range: 0...1, defaultValue: 0.5, format: EffectParam.percent),
+                EffectParam(label: "色", range: 0...2, defaultValue: 0, choices: ["元の色", "1 色", "白黒"]),
+                EffectParam(label: "明るさ", range: 0...3, defaultValue: 1.3, perPoint: 0.003, format: EffectParam.percent),
+                EffectParam(label: "波", range: 0...1, defaultValue: 0, format: EffectParam.percent, animRange: 0...0.6),
+                EffectParam(label: "下に元の絵", range: 0...1, defaultValue: 0, format: EffectParam.percent),
+                EffectParam(label: "後ろの線を隠す", range: 0...1, defaultValue: 1, isToggle: true),
+            ]
+        case .crt:
+            return [
+                EffectParam(label: "走査線", range: 0...1, defaultValue: 0.5, format: EffectParam.percent),
+                EffectParam(label: "蛍光体の粒", range: 0...1, defaultValue: 0.4, format: EffectParam.percent),
+                EffectParam(label: "粒の大きさ", range: 1...8, defaultValue: 3, perPoint: 0.01,
+                            format: { String(format: "%.1f px（1080p）", $0) }),
+                EffectParam(label: "画面のふくらみ", range: 0...1, defaultValue: 0.25, format: EffectParam.percent),
+                EffectParam(label: "にじむ光", range: 0...1, defaultValue: 0.35, format: EffectParam.percent),
+                EffectParam(label: "残光", range: 0...1, defaultValue: 0.3, format: EffectParam.percent),
+                EffectParam(label: "まわりを暗く", range: 0...1, defaultValue: 0.4, format: EffectParam.percent),
+                EffectParam(label: "明るさ", range: 0.5...3, defaultValue: 1.35, perPoint: 0.003, format: EffectParam.percent),
+                EffectParam(label: "ちらつき", range: 0...1, defaultValue: 0.05, format: EffectParam.percent),
+            ]
+        case .tunnel:
+            // トンネル：奥へ進む筒の内側。速さは進んだ量にして渡す
+            return [
+                EffectParam(label: "速さ", range: -4...4, defaultValue: 0.8, perPoint: 0.005,
+                            format: { String(format: "%+.2f", $0) }, animRange: 0.3...2),
+                EffectParam(label: "形", range: 0...3, defaultValue: 0, choices: ["円", "四角", "六角", "三角"]),
+                EffectParam(label: "模様", range: 0...4, defaultValue: 0, choices: ["輪", "格子", "チェッカー", "光の筋", "もや"]),
+                EffectParam(label: "輪の数", range: 0.5...24, defaultValue: 4, perPoint: 0.02,
+                            format: { String(format: "%.1f", $0) }, animRange: 2...8),
+                EffectParam(label: "線の太さ", range: 0.02...1, defaultValue: 0.18, format: EffectParam.percent,
+                            animRange: 0.08...0.5),
+                EffectParam(label: "回る速さ", range: -180...180, defaultValue: 12, perPoint: 0.5,
+                            format: { String(format: "%+.0f°/秒", $0) }, animRange: -45...45),
+                EffectParam(label: "ねじれ", range: -2...2, defaultValue: 0, perPoint: 0.005,
+                            format: { String(format: "%+.2f", $0) }, animRange: -1...1),
+                EffectParam(label: "奥の暗さ", range: 0...2, defaultValue: 0.5, perPoint: 0.003, format: EffectParam.percent),
+                EffectParam(label: "うねり（曲がる）", range: 0...2, defaultValue: 0.4, perPoint: 0.003,
+                            format: EffectParam.percent, animRange: 0...1),
+                EffectParam(label: "うねりの速さ", range: 0...3, defaultValue: 0.3, perPoint: 0.003,
+                            format: { String(format: "%.2f", $0) }),
+                EffectParam(label: "中心の位置 X", range: -0.5...0.5, defaultValue: 0, perPoint: 0.001,
+                            format: EffectParam.percent, animRange: -0.2...0.2),
+                EffectParam(label: "中心の位置 Y", range: -0.5...0.5, defaultValue: 0, perPoint: 0.001,
+                            format: EffectParam.percent, animRange: -0.2...0.2),
+                EffectParam(label: "まわりの区切り", range: 2...48, defaultValue: 12, perPoint: 0.05, step: 1,
+                            format: { String(format: "%.0f", $0) }),
+                EffectParam(label: "色の付け方", range: 0...2, defaultValue: 0, choices: ["1 色", "パレット", "虹色"]),
+                EffectParam(label: "明るさ", range: 0...3, defaultValue: 1, perPoint: 0.003,
+                            format: EffectParam.percent, animRange: 0.5...1.5),
+                EffectParam(label: "光のにじみ", range: 0...1, defaultValue: 0.3, format: EffectParam.percent, animRange: 0...0.8),
+            ]
+        case .warp:
+            // うねり：ノイズで絵の場所をずらす（強さは 1080p での px）
+            return [
+                EffectParam(label: "強さ", range: 0...300, defaultValue: 45, perPoint: 0.3,
+                            format: { String(format: "%.0f px（1080p）", $0) }, animRange: 0...120),
+                EffectParam(label: "うねりの大きさ", range: 0.03...2, defaultValue: 0.4, perPoint: 0.002,
+                            format: { String(format: "%.2f", $0) }, animRange: 0.15...1),
+                EffectParam(label: "速さ", range: 0...4, defaultValue: 0.4, perPoint: 0.003,
+                            format: { String(format: "%.2f", $0) }, animRange: 0.1...1.5),
+                EffectParam(label: "種類", range: 0...3, defaultValue: 0, choices: ["液体", "熱気", "渦", "波紋"]),
+                EffectParam(label: "細かさ", range: 0...1, defaultValue: 0.45, format: EffectParam.percent),
+                EffectParam(label: "ねばり", range: 0...1, defaultValue: 0.5, format: EffectParam.percent, animRange: 0...1),
+                EffectParam(label: "色のずれ", range: 0...1, defaultValue: 0, format: EffectParam.percent, animRange: 0...0.6),
+                EffectParam(label: "画面の端", range: 0...2, defaultValue: 1, choices: ["のばす", "折り返す", "透明"]),
+            ]
+        case .school:
+            // 群れ（ボイド）。GPU の上で 1 匹ずつ動かす（シェーダーの a・b は使わない）
+            return [
+                EffectParam(label: "数", range: 50...4000, defaultValue: 900, perPoint: 2, step: 1,
+                            format: { String(format: "%.0f 匹", $0) }, animRange: 300...2000),
+                EffectParam(label: "大きさ", range: 2...80, defaultValue: 14, perPoint: 0.05,
+                            format: { String(format: "%.1f px（1080p）", $0) }, animRange: 8...24),
+                EffectParam(label: "形", range: 0...3, defaultValue: 0, choices: ["魚", "鳥", "粒", "線"]),
+                EffectParam(label: "速さ", range: 0...3, defaultValue: 1, perPoint: 0.003,
+                            format: { String(format: "%.2fx", $0) }, animRange: 0.5...1.5),
+                EffectParam(label: "まとまる", range: 0...1, defaultValue: 0.5, format: EffectParam.percent, animRange: 0...1),
+                EffectParam(label: "向きをそろえる", range: 0...1, defaultValue: 0.6, format: EffectParam.percent, animRange: 0...1),
+                EffectParam(label: "間をあける", range: 0...1, defaultValue: 0.5, format: EffectParam.percent, animRange: 0...1),
+                EffectParam(label: "まわりを見る広さ", range: 0.02...0.3, defaultValue: 0.08, perPoint: 0.0005,
+                            format: { String(format: "%.1f%%（高さ）", $0 * 100) }, animRange: 0.04...0.15),
+                EffectParam(label: "動き回る", range: 0...1, defaultValue: 0.4, format: EffectParam.percent, animRange: 0...1),
+                EffectParam(label: "天敵から逃げる", range: 0...1, defaultValue: 0, format: EffectParam.percent, animRange: 0...1),
+                EffectParam(label: "ゆらぎ", range: 0...1, defaultValue: 0.2, format: EffectParam.percent, animRange: 0...1),
+                EffectParam(label: "きらめき", range: 0...1, defaultValue: 0.6, format: EffectParam.percent, animRange: 0...1),
+                EffectParam(label: "奥行き", range: 0...1, defaultValue: 0.4, format: EffectParam.percent, animRange: 0...1),
+                EffectParam(label: "画面の端", range: 0...1, defaultValue: 0, choices: ["戻ってくる", "反対側へ抜ける"]),
+                // 3D：厚みがあれば箱の中を立体に泳ぎ、回るカメラから遠近をつけて描く（0 なら平ら）
+                EffectParam(label: "厚み（3D）", range: 0...1, defaultValue: 0.5, format: EffectParam.percent, animRange: 0...1),
+                EffectParam(label: "渦を巻く", range: 0...1, defaultValue: 0, format: EffectParam.percent, animRange: 0...1),
+                EffectParam(label: "カメラの回る速さ", range: -45...45, defaultValue: 5, perPoint: 0.05,
+                            format: { String(format: "%+.1f°/秒", $0) }, animRange: -10...10),
+                EffectParam(label: "カメラの向き", range: 0...360, defaultValue: 0, perPoint: 1,
+                            format: { String(format: "%.0f°", $0) }, animRange: 0...360),
+                EffectParam(label: "視点の高さ", range: -80...80, defaultValue: 15, perPoint: 0.2,
+                            format: { String(format: "%+.0f°", $0) }, animRange: -40...40),
+                EffectParam(label: "カメラの距離", range: 0.3...3, defaultValue: 1.2, perPoint: 0.003,
+                            format: { String(format: "%.2fx", $0) }, animRange: 0.8...1.6),
+                EffectParam(label: "画角", range: 15...120, defaultValue: 50, perPoint: 0.1,
+                            format: { String(format: "%.0f°", $0) }, animRange: 30...80),
+            ]
+        case .dots:
+            // ラインの粒版。並べた粒を、ばらつき・明滅・波（大きさが波打つ）・奥への傾き・波の高さ（3D の点の雲）で動かす。
+            // 0〜7 はシェーダーの a・b、8 からは pts で渡す
+            return [
+                EffectParam(label: "数", range: 1...150, defaultValue: 14, perPoint: 0.05,
+                            format: { String(format: "%.1f 個", $0) }, animRange: 6...30),
+                EffectParam(label: "粒の大きさ", range: 0.5...300, defaultValue: 16, perPoint: 0.1,
+                            format: { String(format: "%.1f px（1080p）", $0) }, animRange: 6...40),
+                EffectParam(label: "形", range: 0...3, defaultValue: 0, choices: ["円", "四角", "ひし形", "十字"]),
+                EffectParam(label: "並び", range: 0...2, defaultValue: 0, choices: ["格子", "互い違い", "ばらばら"]),
+                EffectParam(label: "角度", range: 0...360, defaultValue: 0, perPoint: 1,
+                            format: { String(format: "%.0f°", $0) }, animRange: 0...360),
+                EffectParam(label: "速さ", range: -8...8, defaultValue: 0, perPoint: 0.005,
+                            format: { String(format: "%+.2f 個/秒", $0) }, animRange: -2...2),
+                EffectParam(label: "位置のばらつき", range: 0...1, defaultValue: 0, format: EffectParam.percent),
+                EffectParam(label: "大きさのばらつき", range: 0...1, defaultValue: 0, format: EffectParam.percent),
+                EffectParam(label: "明滅", range: 0...1, defaultValue: 0, format: EffectParam.percent),
+                // 波：粒の大きさが波打つ（横・中心から・ノイズ）。波の高さ（3D）の形にも使う
+                EffectParam(label: "波の大きさ", range: 0...1, defaultValue: 0.6, format: EffectParam.percent, animRange: 0...1),
+                EffectParam(label: "波の細かさ", range: 0.1...20, defaultValue: 2.5, perPoint: 0.01,
+                            format: { String(format: "%.2f 山", $0) }, animRange: 0.5...4),
+                EffectParam(label: "波の速さ", range: -8...8, defaultValue: 0.5, perPoint: 0.005,
+                            format: { String(format: "%+.2f /秒", $0) }, animRange: -2...2),
+                EffectParam(label: "波の形", range: 0...2, defaultValue: 1, choices: ["横", "中心から", "ノイズ"]),
+                EffectParam(label: "奥への傾き（縦）", range: -85...85, defaultValue: 0, perPoint: 0.2,
+                            format: { String(format: "%+.0f°", $0) }, animRange: -60...60),
+                EffectParam(label: "奥への傾き（横）", range: -85...85, defaultValue: 0, perPoint: 0.2,
+                            format: { String(format: "%+.0f°", $0) }, animRange: -60...60),
+                EffectParam(label: "遠くを暗く", range: 0...1, defaultValue: 0.5, format: EffectParam.percent),
+                EffectParam(label: "波の高さ（3D）", range: 0...0.6, defaultValue: 0, perPoint: 0.0005,
+                            format: EffectParam.percent, animRange: 0.05...0.3),
+                EffectParam(label: "ぼかし", range: 0...100, defaultValue: 0, perPoint: 0.05,
+                            format: { String(format: "%.1f px", $0) }, animRange: 0...20),
+                // ふらふら：粒が 1 つずつ別々の道すじで、ゆっくり自由に飛び回る（ほたるのように）。平らのときだけ
+                EffectParam(label: "ふらふら（自由に飛ぶ）", range: 0...1, defaultValue: 0, format: EffectParam.percent,
+                            animRange: 0...1),
+                EffectParam(label: "ふらふらの速さ", range: 0...4, defaultValue: 0.5, perPoint: 0.003,
+                            format: { String(format: "%.2fx", $0) }, animRange: 0.2...1.5),
+                // 光のにじみ：粒のまわりにぼんやり光の輪（重なると明るくなる）
+                EffectParam(label: "光のにじみ", range: 0...1, defaultValue: 0, format: EffectParam.percent,
+                            animRange: 0...1),
+            ]
+        case .lines:
+            // Arena の Lines と同じ考え方：本数は画面の高さに入る数、0° で縦の線。太さは px（1080p での大きさ）なので細い線は細いまま
+            return [
+                EffectParam(label: "本数", range: 1...200, defaultValue: 10, perPoint: 0.05,
+                            format: { String(format: "%.1f 本", $0) }, animRange: 4...30),
+                EffectParam(label: "線の太さ", range: 0.25...200, defaultValue: 4, perPoint: 0.05,
+                            format: { String(format: "%.1f px（1080p）", $0) }, animRange: 2...20),
+                EffectParam(label: "角度", range: 0...360, defaultValue: 0, perPoint: 1,
+                            format: { String(format: "%.0f°", $0) }, animRange: 0...360),
+                EffectParam(label: "速さ", range: -8...8, defaultValue: 0.5, perPoint: 0.005,
+                            format: { String(format: "%+.2f 本/秒", $0) }, animRange: -2...2),
+                EffectParam(label: "ぼかし", range: 0...100, defaultValue: 0, perPoint: 0.05,
+                            format: { String(format: "%.1f px", $0) }, animRange: 0...20),
+                // 波：線が波形のようにうねる（大きさは画面の高さに対する割合、細かさは高さあたりの山の数）
+                EffectParam(label: "波の大きさ", range: 0...0.5, defaultValue: 0, perPoint: 0.0005,
+                            format: EffectParam.percent, animRange: 0...0.1),
+                EffectParam(label: "波の細かさ", range: 0.1...20, defaultValue: 2, perPoint: 0.01,
+                            format: { String(format: "%.2f 山", $0) }, animRange: 1...4),
+                EffectParam(label: "波の速さ", range: -8...8, defaultValue: 1, perPoint: 0.005,
+                            format: { String(format: "%+.2f /秒", $0) }, animRange: -2...2),
+                EffectParam(label: "線ごとの波のずれ", range: 0...1, defaultValue: 0, format: EffectParam.percent),
+                // 3D：線を描いた板を奥へ傾ける（遠近あり）
+                EffectParam(label: "奥への傾き（縦）", range: -85...85, defaultValue: 0, perPoint: 0.2,
+                            format: { String(format: "%+.0f°", $0) }, animRange: -60...60),
+                EffectParam(label: "奥への傾き（横）", range: -85...85, defaultValue: 0, perPoint: 0.2,
+                            format: { String(format: "%+.0f°", $0) }, animRange: -60...60),
+                EffectParam(label: "遠くを暗く", range: 0...1, defaultValue: 0.5, format: EffectParam.percent),
+                // 波の高さ：線を上下に持ち上げて、地形のような 3D にする（手前の山が奥の線を隠す）
+                EffectParam(label: "波の高さ（3D）", range: 0...0.6, defaultValue: 0, perPoint: 0.0005,
+                            format: EffectParam.percent, animRange: 0.05...0.3),
+                EffectParam(label: "山の形", range: 0...2, defaultValue: 1, choices: ["波", "なめらかな山", "とがった山"]),
+                EffectParam(label: "真ん中を平ら／山に", range: -1...1, defaultValue: 0, perPoint: 0.002,
+                            format: { $0 == 0 ? "なし" : String(format: $0 > 0 ? "平ら %.0f%%" : "山 %.0f%%", abs($0) * 100) },
+                            animRange: -1...1),
+                EffectParam(label: "山の下を黒く塗る", range: 0...1, defaultValue: 0, isToggle: true),
             ]
         case .phyllotaxis:
             // Resolume 用に作った FFGL のジェネレーター（Phyllotaxis）と同じ値。粒は黄金角ずつ回りながら中心から生まれて外へ広がる
@@ -382,6 +871,23 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
         case .grid: "チェッカー・格子・ドット（すき間は透明）"
         case .noise: "なめらかに動くノイズか、砂嵐"
         case .shapes: "円・リング・四角・枠・三角。数を増やすと並ぶ（まわりは透明）"
+        case .flow: "やわらかい光の帯がゆったりうねって流れる。ふちが虹色ににじみ、まわりにぼんやりした光とフィルムのざらつき（まわりは透明）"
+        case .physarum: "粘菌の動き方をまねた、何十万もの点。自分や仲間の通った跡のにおいを追って進むだけで、葉脈・神経・川の地図のような網を自分で作っては組み替える。えさを置くと、えさどうしを網でつなぐ（まわりは透明）"
+        case .particleLife: "色ごとに「あの色に寄る・あの色から逃げる」を決めただけの粒から、細胞のように集まる・追いかける・回る「生き物」が生まれる。たねで性格が変わり、拍ごとに入れ替えられる（まわりは透明）"
+        case .fireflies: "ばらばらに光るホタルが、見えるまわりの光に少しずつ合わせて、やがて全体がそろって光る（蔵本モデル）。そろう強さを動かすと、ばらばら ↔ 一斉を行き来する。拍に合わせることもできる（まわりは透明）"
+        case .attractor: "簡単な式をくり返すだけで点が描く、煙や絹のような形（クリフォード・デ・ヨング。トーマス・アイザワは 3D で回る）。係数をゆっくり揺らして形を変え続け、点の重なりを光の濃さで描く（まわりは透明）"
+        case .timeWarp: "場所ごとに少し前のコマを見せる。上ほど過去にすると、動く人が飴のように伸びる・ねじれる（スリットスキャン）。円・ノイズ・明るさでずらし方を変えられる"
+        case .fluid: "絵の動き（明るさが変わった所）が、本物の流体の計算で絵の具を押し流す。煙やインクのように渦を巻いて混ざり、残る。風で、止まった絵でも流れる"
+        case .glitchBox: "サーキットベンドしたアナログ映像機材のように絵を乱す。同期が外れて横に裂ける・縦に流れる・帯ごと跳ねる、色が遅れてにじむ、ゲインの入れすぎで明るい所が飽和して反転する、輪郭が二重に光る、色が虹色にうなる、砂嵐。FX パッドに入れて押している間だけ乱すのも合う"
+        case .vhs: "古いビデオテープの再生のように。トラッキングのノイズの帯が流れ、画面の下がずれてざらつき、絵がゆらゆら揺れ、色がにじんで色あせ、白い線（ドロップアウト）が走る"
+        case .videoFeedback: "カメラで、それを映しているモニターを撮ったように、前のコマを拡大・回転・色相ずれさせて重ね続ける。画面の中に画面が無限に続き、渦やトンネルが生まれる。暗い所を切り抜くと、そこから前の絵が見える"
+        case .rasterScan: "70 年代の映像シンセ（Rutt/Etra）のように、絵を横の走査線に分けて、明るい所ほど線を持ち上げる。映像が波打つ線の地形になる（まわりは透明）"
+        case .crt: "昔のブラウン管モニターに映したように。走査線・蛍光体の RGB の粒・画面のふくらみ・にじむ光・明るいものが尾を引く残光・まわりの暗さ。ほかのエフェクトの最後にかけると全体がモニターに映る"
+        case .tunnel: "奥へ奥へと進んでいくトンネル。輪・格子・チェッカー・光の筋・もやの模様で、形は円・四角・六角・三角。回す・ねじる・うねって曲がる。奥は暗くなって透ける（まわりは透明）"
+        case .warp: "水の中・熱気・渦のように、絵をぬるぬるとゆがませる。ねばりを上げると、ゆがみがゆがみを呼んで生き物のような模様に。色のずれでふちが虹色ににじむ"
+        case .school: "イワシやムクドリのような群れ。1 匹ずつが、まわりに寄る・向きをそろえる・ぶつからないように間をあける、だけで動き、群れ全体がうねって形を変える。天敵から逃げると群れが割れてまた集まる。厚みで 3D になり、回るカメラから見る（まわりは透明）"
+        case .dots: "並べた粒（ラインの粒版）。形・並び・ばらつき・明滅、波で大きさが波打ち、奥への傾き・波の高さで 3D の点の雲になる。ふらふらで粒が自由に飛び回り、光のにじみで光る（ほたるのように。すき間は透明）"
+        case .lines: "等間隔の線（Arena の Lines のように）。本数は画面の高さに入る数、0° で縦の線。波で波形のようにうねり、奥への傾きで 3D の床・壁のようになる（すき間は透明）"
         case .phyllotaxis: "ひまわりの種のように、粒が黄金角（137.5°）ずつ回りながら中心から生まれて外へ広がる。線の長さで棒に、色のばらつきでカラフルに（まわりは透明）"
         case .clock: "今の時刻・決めた時刻までのカウントダウン・タイマー・ストップウォッチを出す。0 になったら好きな文字を出せる（まわりは透明）"
         case .text: "文字を出す。流す・敷き詰める・1 文字ずつ・拍で弾む。行ごとに拍で切り替えも（まわりは透明）"
@@ -390,14 +896,50 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
         case .echo: "動いた跡が残像になって残る。レイヤーかコンポジションにかけると、位置や回転の動きも跡になる"
         case .strobe: "BPM か秒に合わせて点滅させる（色で光る・消える・反転）。残光を上げると光ったあとすっと消える"
         case .posterizeTime: "コマを間引いて、指定したフレームレートでしか動かないようにする（この段全体にかかる）"
+        case .blendRefract: "このレイヤーを透明なガラスにして、明るさの坂で下の絵を曲げて見せる。文字や図形が、映像の上を透明なまま流れる"
+        case .blendLight: "このレイヤーを光にして、下の絵を照らす。照らされていない所は暗く沈み、光はぼんやり広がる"
+        case .blendFlow: "このレイヤーの動き（または明るさ）で、下の絵を絵の具のように押し流してかき混ぜる。だんだん元の絵に戻る"
+        case .blendInterfere: "2 つの絵の明るさを波として重ね、ずれた所に動く縞（モアレ）を出す"
+        case .blendBorrow: "下の絵の明るさ（形）に、このレイヤーの色を借りて塗る。このレイヤーをパレットとして使うこともできる"
+        case .blendDissolve: "下の絵の暗い所（または明るい所・ノイズ）から順に、このレイヤーへ溶けていく。ふちは燃えるように光る"
         case .overdrive: "下のレイヤーに加算して 100% を超えた分を、にじみ（ハレーション）・色相ずれ・波紋に変える"
+        }
+    }
+}
+
+/// ジェネレーター一覧の分類
+enum GeneratorCategory: Int, CaseIterable, Identifiable {
+    case color, pattern, shape, text
+    var id: Int { rawValue }
+    var label: String {
+        switch self {
+        case .color: "色・グラデーション"
+        case .pattern: "線・模様"
+        case .shape: "図形・粒"
+        case .text: "文字・時計"
+        }
+    }
+    /// この分類のジェネレーター（一覧に出す順）
+    var kinds: [EffectKind] { EffectKind.generators.filter { $0.generatorCategory == self } }
+}
+
+extension EffectKind {
+    /// ジェネレーターの分類（ジェネレーターでなければ nil）
+    var generatorCategory: GeneratorCategory? {
+        switch self {
+        case .solid, .gradient: .color
+        case .lines, .dots, .stripes, .grid, .noise: .pattern
+        case .shapes, .phyllotaxis, .flow, .school, .tunnel, .particleLife, .fireflies: .shape
+        case .physarum, .attractor: .pattern
+        case .text, .clock: .text
+        default: nil
         }
     }
 }
 
 /// エフェクト一覧の分類
 enum EffectCategory: Int, CaseIterable, Identifiable {
-    case color, shape, mask, time, blend, generator
+    case color, shape, mask, time, retro, blend, generator
     var id: Int { rawValue }
     var label: String {
         switch self {
@@ -406,12 +948,125 @@ enum EffectCategory: Int, CaseIterable, Identifiable {
         case .shape: "形"
         case .mask: "マスク"
         case .time: "時間"
+        case .retro: "アナログ機材"
         case .blend: "合成"
         }
     }
 }
 
 /// エフェクトの 1 つの値
+extension EffectKind {
+    /// ジェネレーターの見た目のひな形（押すと値をまとめてそろえる）
+    struct GeneratorLook {
+        let name: String
+        let help: String
+        let values: [Int: Double]
+        var color: RGB? = nil
+    }
+
+    static let dotsLooks: [GeneratorLook] = [
+        GeneratorLook(name: "ほたる", help: "ばらばらの小さな光が、ふらふら自由に飛び回り、ゆっくり明滅する（黄緑の光）",
+                 values: [0: 5, 1: 8, 2: 0, 3: 2, 4: 0, 5: 0, 6: 1, 7: 0.6, 8: 0.9, 9: 0, 16: 0, 17: 1.5,
+                          18: 0.9, 19: 0.35, 20: 0.8],
+                 color: RGB(r: 0.78, g: 1.0, b: 0.35)),
+        GeneratorLook(name: "舞う粒", help: "細かい粒が少し上へ流れながら、ふわふわ漂う（ほこり・雪のように）",
+                 values: [0: 16, 1: 4, 2: 0, 3: 2, 4: 90, 5: 0.25, 6: 1, 7: 0.7, 8: 0.4, 9: 0, 16: 0, 17: 1,
+                          18: 0.5, 19: 0.6, 20: 0.35]),
+        GeneratorLook(name: "格子", help: "まっすぐ並んだ粒（はじめの見た目）。波・3D はそのまま",
+                 values: [3: 0, 6: 0, 7: 0, 8: 0, 18: 0, 20: 0]),
+    ]
+
+    static let schoolLooks: [GeneratorLook] = [
+        GeneratorLook(name: "イワシ", help: "銀色の小魚の大きな群れ。向きを変えるとまとめてきらっと光り、天敵が来ると割れてまた集まる",
+                      values: [0: 1400, 1: 13, 2: 0, 3: 1, 4: 0.6, 5: 0.75, 6: 0.45, 7: 0.07, 8: 0.45, 9: 0.6, 10: 0.15,
+                               11: 0.85, 12: 0.5, 13: 0, 14: 0.6, 15: 0],
+                      color: RGB(r: 0.82, g: 0.9, b: 1.0)),
+        GeneratorLook(name: "ムクドリ", help: "小さな鳥の群れが空でうねる（羽ばたく。夕焼けの空の映像に重ねると合う）",
+                      values: [0: 2600, 1: 7, 2: 1, 3: 1.3, 4: 0.45, 5: 0.9, 6: 0.35, 7: 0.1, 8: 0.6, 9: 0.35, 10: 0.1,
+                               11: 0, 12: 0.6, 13: 0, 14: 0.8, 15: 0]),
+        GeneratorLook(name: "ばらばら", help: "まとまらずに、思い思いに泳ぐ魚",
+                      values: [0: 300, 1: 22, 2: 0, 3: 0.6, 4: 0.1, 5: 0.15, 6: 0.6, 7: 0.06, 8: 0, 9: 0, 10: 0.7,
+                               11: 0.3, 12: 0.5, 13: 1, 14: 0, 15: 0]),
+        GeneratorLook(name: "トルネード", help: "銀色の魚が、竜巻のように渦を巻いて回る（3D。下から見上げる）",
+                      values: [0: 2200, 1: 12, 2: 0, 3: 1, 4: 0.55, 5: 0.8, 6: 0.45, 7: 0.07, 8: 0.5, 9: 0, 10: 0.1,
+                               11: 0.9, 12: 0.6, 13: 0, 14: 0.8, 15: 0.85, 16: 4, 18: -25, 19: 1.1, 20: 55],
+                      color: RGB(r: 0.82, g: 0.9, b: 1.0)),
+    ]
+
+    static let tunnelLooks: [GeneratorLook] = [
+        GeneratorLook(name: "ワープ", help: "光の筋が奥から飛んでくる（宇宙をワープするように）",
+                      values: [0: 2.2, 1: 0, 2: 3, 3: 1.5, 4: 0.12, 5: 6, 6: 0, 7: 0.7, 8: 0.15, 12: 40, 13: 2, 14: 1.3, 15: 0.6]),
+        GeneratorLook(name: "ネオン", help: "パレットの色の輪が光りながら流れる、ゆるく曲がったトンネル",
+                      values: [0: 0.8, 1: 0, 2: 0, 3: 3, 4: 0.12, 5: 0, 6: 0, 7: 0.6, 8: 0.6, 9: 0.3, 13: 1, 14: 1.4, 15: 0.7]),
+        GeneratorLook(name: "格子の筒", help: "四角い格子の通路をまっすぐ進む（ワイヤーフレームのように）",
+                      values: [0: 1, 1: 1, 2: 1, 3: 3, 4: 0.06, 5: 0, 6: 0, 7: 0.8, 8: 0, 12: 8, 13: 0, 14: 1, 15: 0.4]),
+        GeneratorLook(name: "渦", help: "チェッカーがねじれながら回り、吸い込まれていく",
+                      values: [0: 1, 1: 0, 2: 2, 3: 2, 5: 40, 6: 0.8, 7: 0.5, 8: 0.3, 12: 16, 13: 2, 14: 1, 15: 0]),
+        GeneratorLook(name: "もやの洞窟", help: "やわらかいもやが流れる、六角の洞窟",
+                      values: [0: 0.6, 1: 2, 2: 4, 3: 2.5, 4: 0.5, 5: 8, 6: 0.2, 7: 0.4, 8: 0.8, 9: 0.25, 12: 10, 13: 1, 14: 1.2, 15: 0.2]),
+    ]
+
+    static let physarumLooks: [GeneratorLook] = [
+        GeneratorLook(name: "葉脈", help: "葉脈のような網の目が、ゆっくり組み替わる（はじめの見た目）",
+                      values: [0: 500_000, 1: 0.8, 2: 40, 3: 20, 4: 20, 5: 0.6, 6: 0.2, 7: 0.6, 9: 0, 11: 0.1]),
+        GeneratorLook(name: "細かい網", help: "とても細かい網がびっしり（レースや神経のように）",
+                      values: [0: 1_000_000, 1: 0.5, 2: 22.5, 3: 6, 4: 45, 5: 0.4, 6: 0.05, 7: 0.5, 9: 0, 11: 0.1]),
+        GeneratorLook(name: "細胞", help: "小さな丸い部屋がぎっしり並んで、泡や細胞のように",
+                      values: [0: 800_000, 1: 0.6, 2: 60, 3: 10, 4: 60, 5: 0.6, 6: 0.2, 7: 0.6, 9: 0, 11: 0.1]),
+        GeneratorLook(name: "太い川", help: "太い流れがうねって、川の地図のように",
+                      values: [0: 600_000, 1: 1, 2: 30, 3: 18, 4: 25, 5: 0.85, 6: 0.7, 7: 0.7, 9: 0, 11: 0.05]),
+        GeneratorLook(name: "えさをつなぐ", help: "動くえさの間を、網がつないでいく",
+                      values: [0: 500_000, 1: 0.8, 2: 40, 3: 20, 4: 20, 5: 0.7, 6: 0.2, 7: 0.6, 9: 1, 10: 0.8, 11: 0.1]),
+    ]
+
+    static let particleLifeLooks: [GeneratorLook] = [
+        GeneratorLook(name: "生き物", help: "細胞のようなかたまりが生まれて、追いかけ合う（はじめの見た目）",
+                      values: [0: 2000, 1: 6, 2: 1, 3: 0.09, 4: 1, 5: 0.5, 8: 0.3, 12: 0]),
+        GeneratorLook(name: "光の跡", help: "残像で、粒の通った道が光の線になる",
+                      values: [0: 1500, 1: 5, 2: 7, 3: 0.1, 4: 1.2, 5: 0.35, 7: 4, 8: 0.5, 12: 0.85]),
+        GeneratorLook(name: "拍で変身", help: "4 拍ごとに性格が入れ替わり、群れの形ががらっと変わる",
+                      values: [0: 2500, 1: 6, 3: 0.08, 4: 1, 5: 0.5, 10: 3, 12: 0.4]),
+        GeneratorLook(name: "大きな細胞", help: "粒を増やして、広く力の届く大きな構造に",
+                      values: [0: 5000, 1: 4, 2: 23, 3: 0.14, 4: 0.8, 5: 0.65, 7: 3, 8: 0.2, 12: 0]),
+    ]
+
+    static let fireflyLooks: [GeneratorLook] = [
+        GeneratorLook(name: "ばらばら", help: "そろわずに、それぞれが勝手に光る",
+                      values: [1: 0, 2: 0.25, 9: 0]),
+        GeneratorLook(name: "だんだんそろう", help: "近くどうしから合っていき、光の波が広がってやがて一斉に（はじめの見た目）",
+                      values: [1: 0.8, 2: 0.25, 4: 0.3, 9: 0]),
+        GeneratorLook(name: "一斉", help: "画面全体がすぐにそろって、ぱっ、ぱっと光る",
+                      values: [1: 2.5, 2: 1, 4: 0.15, 9: 0]),
+        GeneratorLook(name: "拍で光る", help: "BPM の拍の頭に向かってそろっていく",
+                      values: [1: 0.6, 2: 0.25, 9: 2, 10: 0.5]),
+    ]
+
+    static let attractorLooks: [GeneratorLook] = [
+        GeneratorLook(name: "絹", help: "クリフォード。薄い布が重なったような形（はじめの見た目）",
+                      values: [0: 0, 1: -1.4, 2: 1.6, 3: 1.0, 4: 0.7, 7: 1, 11: 1]),
+        GeneratorLook(name: "煙", help: "デ・ヨング。煙が巻いたような形",
+                      values: [0: 1, 1: -2.0, 2: -2.0, 3: -1.2, 4: 2.0, 7: 1.2, 11: 1]),
+        GeneratorLook(name: "迷路の糸", help: "トーマス（3D）。糸がからまった迷路が回る",
+                      values: [0: 2, 1: 0, 7: 1.4, 9: 1, 10: 10, 11: 2]),
+        GeneratorLook(name: "リンゴの芯", help: "アイザワ（3D）。リンゴの芯のような立体が回る",
+                      values: [0: 3, 1: 0, 2: 0, 3: 0, 4: 0, 7: 1.4, 9: 1, 10: 12, 11: 2]),
+    ]
+
+    /// この種類の見た目のひな形（無ければ空）
+    var looks: [GeneratorLook] {
+        switch self {
+        case .dots: Self.dotsLooks
+        case .school: Self.schoolLooks
+        case .tunnel: Self.tunnelLooks
+        case .physarum: Self.physarumLooks
+        case .particleLife: Self.particleLifeLooks
+        case .fireflies: Self.fireflyLooks
+        case .attractor: Self.attractorLooks
+        default: []
+        }
+    }
+}
+
 struct EffectParam {
     let label: String
     let range: ClosedRange<Double>
@@ -557,7 +1212,10 @@ struct Effect: Codable, Identifiable, Equatable {
         // 文字は暗い色だと沈むので、明るい色だけのパレット
         if kind == .phyllotaxis { color = RGB.hsb(0.11, 0.55, 1) }
         if kind == .clock { text = ClockText.defaultFinish; values[1] = 0.3; values[6] = 4 }
-        if kind.isText { palette = [PalettePreset.hex(0x6A00FF), PalettePreset.hex(0xFF00C8), PalettePreset.hex(0x00F0FF)] }
+        if kind == .fireflies { color = RGB(r: 0.78, g: 1.0, b: 0.35) }
+        if kind == .physarum { color = RGB(r: 1.0, g: 0.85, b: 0.45) }
+        if kind == .attractor || kind == .physarum { palette = PalettePreset.all[1].colors }
+        if kind.isText || kind == .tunnel || kind == .particleLife { palette = [PalettePreset.hex(0x6A00FF), PalettePreset.hex(0xFF00C8), PalettePreset.hex(0x00F0FF)] }
     }
 
     /// 設定を最初の状態に戻したもの（オン／オフ・文字・自由な形の点はそのまま。描いた形や打った文字は中身なので残す）

@@ -15,6 +15,8 @@ final class ValueDragNSView: NSView {
     var format: (Double) -> String = { String(format: "%.2f", $0) }
     /// 範囲に対する割合をバーで表示する（不透明度・音量など）
     var showsBar = false
+    /// 値の見せ方（バーの代わりの小さな絵）
+    var style = ValueStyle.plain
     var onChange: ((Double) -> Void)?
     /// アニメーション中なら、今の値を返す（欄はこの値を表示し、手で動かせない）
     var live: (() -> Double)? {
@@ -43,6 +45,9 @@ final class ValueDragNSView: NSView {
         super.viewDidMoveToWindow()
         if window == nil { liveTimer?.invalidate(); liveTimer = nil } else if live != nil && liveTimer == nil { updateLiveTimer() }
     }
+
+    /// マイナスの値の色（プラスは橙）
+    static let minusColor = NSColor(calibratedRed: 0.30, green: 0.78, blue: 1.0, alpha: 1)
 
     override var isFlipped: Bool { true }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
@@ -97,13 +102,35 @@ final class ValueDragNSView: NSView {
         let shown = live?() ?? value
         let animating = live != nil
         let changed = abs(value - defaultValue) > 1e-9 || animating
+        // プラスにもマイナスにもなる値（位置・角度・速さなど）は、プラスを橙、マイナスを水色にして見分ける
+        let signed = range.lowerBound < 0 && range.upperBound > 0
+        let changedColor = signed && shown < 0 ? Self.minusColor : NSColor.systemOrange
         if showsBar || animating {
-            let f = min(max((shown - range.lowerBound) / (range.upperBound - range.lowerBound), 0), 1)
+            // 範囲のどこにいるかをバーで。プラス・マイナスのある値は 0 の所から今の値まで
+            let span = range.upperBound - range.lowerBound
+            let f = CGFloat(min(max((shown - range.lowerBound) / span, 0), 1))
+            let z = signed ? CGFloat((0 - range.lowerBound) / span) : 0
             NSGraphicsContext.saveGraphicsState()
             bg.addClip()
-            (animating ? NSColor.systemPurple : changed ? NSColor.systemOrange : NSColor.systemBlue)
+            (animating ? NSColor.systemPurple : changed ? changedColor : NSColor.systemBlue)
                 .withAlphaComponent(animating ? 0.45 : 0.35).setFill()
-            NSBezierPath(rect: NSRect(x: r.minX, y: r.minY, width: r.width * CGFloat(f), height: r.height)).fill()
+            NSBezierPath(rect: NSRect(x: r.minX + r.width * min(z, f), y: r.minY, width: r.width * abs(f - z), height: r.height)).fill()
+            if signed {
+                NSColor(white: 1, alpha: 0.35).setFill()
+                NSBezierPath(rect: NSRect(x: r.minX + r.width * z - 0.5, y: r.minY, width: 1, height: r.height)).fill()
+            }
+            NSGraphicsContext.restoreGraphicsState()
+        } else if signed && abs(shown) > 1e-9 && !style.hasGlyph {
+            // 0 の所から今の値まで、下に細い線（どちら向きにどれだけか）
+            let span = range.upperBound - range.lowerBound
+            let x0 = r.minX + r.width * CGFloat((0 - range.lowerBound) / span)
+            let x1 = r.minX + r.width * CGFloat(min(max((shown - range.lowerBound) / span, 0), 1))
+            NSGraphicsContext.saveGraphicsState()
+            bg.addClip()
+            (shown < 0 ? Self.minusColor : NSColor.systemOrange).withAlphaComponent(changed ? 0.9 : 0.4).setFill()
+            NSBezierPath(rect: NSRect(x: min(x0, x1), y: r.maxY - 3, width: max(abs(x1 - x0), 1.5), height: 3)).fill()
+            NSColor(white: 1, alpha: 0.35).setFill()
+            NSBezierPath(rect: NSRect(x: x0 - 0.5, y: r.maxY - 5, width: 1, height: 5)).fill()
             NSGraphicsContext.restoreGraphicsState()
         }
 
@@ -113,7 +140,7 @@ final class ValueDragNSView: NSView {
         ]
         let valueAttrs: [NSAttributedString.Key: Any] = [
             .font: NSFont.monospacedDigitSystemFont(ofSize: icon != nil && r.height < 24 ? 11 : 13, weight: .semibold),
-            .foregroundColor: animating ? NSColor.white : changed ? NSColor.systemOrange : NSColor.white,
+            .foregroundColor: animating ? NSColor.white : changed ? changedColor : NSColor.white,
         ]
         var ls = (label as NSString).size(withAttributes: labelAttrs)
         let small = r.height < 24
@@ -138,9 +165,114 @@ final class ValueDragNSView: NSView {
         }
         let text = format(shown)
         let vs = (text as NSString).size(withAttributes: valueAttrs)
-        (text as NSString).draw(at: NSPoint(x: r.maxX - (icon != nil && r.height < 24 ? 6 : 8) - vs.width,
-                                            y: r.midY - vs.height / 2), withAttributes: valueAttrs)
+        let vx = r.maxX - (icon != nil && r.height < 24 ? 6 : 8) - vs.width
+        (text as NSString).draw(at: NSPoint(x: vx, y: r.midY - vs.height / 2), withAttributes: valueAttrs)
+        // 値の左に小さな絵（位置・大きさ・角度）。名前とぶつかるほど狭ければ出さない
+        if style.hasGlyph {
+            let gw: CGFloat = 34, gh = min(r.height - 8, 20)
+            // 数字の幅で絵が動かないように、いちばん長くなる数字（範囲の両端）の分を空けて置く
+            let widest = [range.lowerBound, range.upperBound, -range.upperBound]
+                .map { (format($0) as NSString).size(withAttributes: valueAttrs).width }.max() ?? vs.width
+            let gx = r.maxX - (icon != nil && r.height < 24 ? 6 : 8) - max(widest, vs.width) - 10 - gw
+            if gx > r.minX + 8 + ls.width + 6 {
+                let accent = animating ? NSColor.systemPurple.blended(withFraction: 0.3, of: .white) ?? .systemPurple
+                    : changed ? changedColor : NSColor(white: 0.85, alpha: 1)
+                drawGlyph(NSRect(x: gx, y: r.midY - gh / 2, width: gw, height: gh), value: shown, accent: accent)
+            }
+        }
     }
+
+    /// 位置：画面の枠と、クリップの中心の点（動かす向きに線）。大きさ：画面の枠とクリップの大きさの四角。角度：文字盤
+    private func drawGlyph(_ g: NSRect, value v: Double, accent: NSColor) {
+        let frameColor = NSColor(white: 1, alpha: 0.32)
+        // 画面の枠（16:9 くらい、絵の真ん中）
+        func screenRect(_ k: CGFloat) -> NSRect {
+            let h = min(g.height, g.width * 9 / 16) * k, w = h * 16 / 9
+            return NSRect(x: g.midX - w / 2, y: g.midY - h / 2, width: w, height: h)
+        }
+        switch style {
+        case .position(let horizontal):
+            // 画面は絵の中の 2/3。はみ出した分は外の余白に（それより外は縁で止めて、白抜き）
+            let sr = screenRect(0.72)
+            frameColor.setStroke()
+            let fr = NSBezierPath(roundedRect: sr, xRadius: 1.5, yRadius: 1.5); fr.lineWidth = 1; fr.stroke()
+            let half = horizontal ? sr.width : sr.height
+            let limit = horizontal ? (g.width / 2 - 2) : (g.height / 2 - 2)
+            let raw = CGFloat(v) * half
+            let off = min(max(raw, -limit), limit)
+            let outside = abs(raw) > limit
+            // 動かす向きのガイド線
+            NSColor(white: 1, alpha: 0.18).setFill()
+            if horizontal {
+                NSBezierPath(rect: NSRect(x: g.minX, y: sr.midY - 0.5, width: g.width, height: 1)).fill()
+            } else {
+                NSBezierPath(rect: NSRect(x: sr.midX - 0.5, y: g.minY, width: 1, height: g.height)).fill()
+            }
+            // 上がプラス（画面の座標は下向きなので反対に）
+            let c = horizontal ? NSPoint(x: sr.midX + off, y: sr.midY) : NSPoint(x: sr.midX, y: sr.midY - off)
+            let dot = NSBezierPath(ovalIn: NSRect(x: c.x - 3.5, y: c.y - 3.5, width: 7, height: 7))
+            if outside { accent.setStroke(); dot.lineWidth = 1.5; dot.stroke() } else { accent.setFill(); dot.fill() }
+        case .scale:
+            // 大きい方が絵に収まるように：100% より大きいと、画面の枠の方が小さく見える
+            let s = CGFloat(max(v, 0))
+            let box = max(1, s)
+            let full = screenRect(1)
+            func centered(_ k: CGFloat) -> NSRect {
+                let w = full.width * k, h = full.height * k
+                return NSRect(x: g.midX - w / 2, y: g.midY - h / 2, width: w, height: h)
+            }
+            let sr = centered(1 / box)
+            frameColor.setStroke()
+            let fr = NSBezierPath(roundedRect: sr, xRadius: 1.5, yRadius: 1.5); fr.lineWidth = 1; fr.stroke()
+            let cr = centered(max(s / box, 0.04))
+            accent.withAlphaComponent(0.28).setFill()
+            NSBezierPath(rect: cr).fill()
+            accent.setStroke()
+            let cp = NSBezierPath(rect: cr.insetBy(dx: 0.5, dy: 0.5)); cp.lineWidth = 1; cp.stroke()
+        case .angle:
+            // 文字盤：上が 0°、時計回りがプラス。1 周を超えた分は外の輪を濃く
+            let rad = min(g.height, g.width) / 2 - 1
+            let c = NSPoint(x: g.midX, y: g.midY)
+            func point(_ deg: Double, _ rr: CGFloat) -> NSPoint {
+                let a = deg * .pi / 180
+                return NSPoint(x: c.x + CGFloat(sin(a)) * rr, y: c.y - CGFloat(cos(a)) * rr)
+            }
+            let ring = NSBezierPath(ovalIn: NSRect(x: c.x - rad, y: c.y - rad, width: rad * 2, height: rad * 2))
+            frameColor.setStroke(); ring.lineWidth = 1; ring.stroke()
+            let turns = Int(abs(v) / 360)
+            if turns > 0 { accent.withAlphaComponent(0.45).setStroke(); ring.lineWidth = 2; ring.stroke() }
+            // 0° から今の角度までの扇
+            let rest = v.truncatingRemainder(dividingBy: 360)
+            if abs(rest) > 0.5 {
+                let fan = NSBezierPath(); fan.move(to: c)
+                let n = max(Int(abs(rest) / 6), 2)
+                for i in 0...n { fan.line(to: point(rest * Double(i) / Double(n), rad - 1)) }
+                fan.close()
+                accent.withAlphaComponent(0.25).setFill(); fan.fill()
+            }
+            // 針
+            let needle = NSBezierPath(); needle.move(to: c); needle.line(to: point(v, rad - 1))
+            needle.lineWidth = 2; needle.lineCapStyle = .round
+            accent.setStroke(); needle.stroke()
+            NSColor(white: 1, alpha: 0.5).setFill()
+            NSBezierPath(rect: NSRect(x: c.x - 0.5, y: c.y - rad, width: 1, height: 2.5)).fill()
+        default:
+            break
+        }
+    }
+}
+
+/// 数値欄の見せ方（バーが合わない値は、値の左に小さな絵を出す）
+enum ValueStyle: Equatable {
+    case plain
+    /// 位置（画面の枠とクリップの中心）。horizontal = 横（X）
+    case position(horizontal: Bool)
+    /// 大きさ（画面の枠とクリップの四角）
+    case scale
+    /// 角度（文字盤）
+    case angle
+
+    var hasGlyph: Bool { self != .plain }
 }
 
 struct ValueDrag: NSViewRepresentable {
@@ -154,6 +286,7 @@ struct ValueDrag: NSViewRepresentable {
     var live: (() -> Double)? = nil
     var badge = ""
     var icon: String? = nil
+    var style = ValueStyle.plain
 
     func makeNSView(context: Context) -> ValueDragNSView {
         let v = ValueDragNSView()
@@ -174,6 +307,7 @@ struct ValueDrag: NSViewRepresentable {
         v.perPoint = perPoint
         v.defaultValue = defaultValue
         v.showsBar = showsBar
+        v.style = style
         v.format = format
         v.badge = badge
         v.live = live
@@ -498,13 +632,13 @@ struct TransformFields<T: TransformEditable>: View {
 
     var body: some View {
         AnimField(label: "位置 X", value: $t.posX, range: -2...2, perPoint: 0.002, defaultValue: 0,
-                  format: { String(format: "%+.1f%%", $0 * 100) }, key: .posX, target: t)
+                  format: { String(format: "%+.1f%%", $0 * 100) }, style: .position(horizontal: true), key: .posX, target: t)
         AnimField(label: "位置 Y", value: $t.posY, range: -2...2, perPoint: 0.002, defaultValue: 0,
-                  format: { String(format: "%+.1f%%", $0 * 100) }, key: .posY, target: t)
+                  format: { String(format: "%+.1f%%", $0 * 100) }, style: .position(horizontal: false), key: .posY, target: t)
         AnimField(label: "スケール", value: $t.scale, range: 0...5, perPoint: 0.003, defaultValue: 1,
-                  format: { String(format: "%.1f%%", $0 * 100) }, key: .scale, target: t)
+                  format: { String(format: "%.1f%%", $0 * 100) }, style: .scale, key: .scale, target: t)
         AnimField(label: "角度", value: $t.rotation, range: -720...720, perPoint: 0.25, defaultValue: 0,
-                  format: { String(format: "%.1f°", $0) }, key: .rotation, target: t)
+                  format: { String(format: "%.1f°", $0) }, style: .angle, key: .rotation, target: t)
     }
 }
 
@@ -518,18 +652,19 @@ struct CompositionParams: View {
         VStack(alignment: .leading, spacing: 0) {
         ParamColumns {
             ParamColumn(title: "トランスフォーム") {
-                MiniButton(icon: "arrow.counterclockwise", label: "リセット", disabled: engine.compTransform.isDefault,
-                           help: "位置・スケール・角度を初期値に戻す") { engine.compTransform.reset() }
+                MiniButton(icon: "arrow.counterclockwise", label: "リセット",
+                           disabled: engine.compTransform.isDefault && engine.masterOpacity == 1,
+                           help: "位置・スケール・角度・不透明度を初期値に戻す") { engine.compTransform.reset(); engine.masterOpacity = 1 }
             } content: {
                 TransformFields(t: engine.compTransform)
-            }
-            ParamColumn(title: "マスター") {
                 HStack(spacing: 4) {
                     AnimField(label: "不透明度", value: $engine.masterOpacity, range: 0...1, perPoint: 0.003,
                               defaultValue: 1, showsBar: true, format: percent, key: .opacity, target: engine)
                     VisibilityButton(muted: $engine.compMuted, what: "コンポジション（出力全体）")
                 }
                 .frame(height: UI.rowHeight)
+            }
+            ParamColumn(title: "マスター") {
                 Group {
                     HStack(spacing: 4) {
                         ValueDrag(label: "音量", value: $engine.masterVolume, range: 0...1, perPoint: 0.003,
@@ -571,10 +706,16 @@ struct LayerParams: View {
         VStack(alignment: .leading, spacing: 0) {
         ParamColumns {
             ParamColumn(title: "トランスフォーム") {
-                MiniButton(icon: "arrow.counterclockwise", label: "リセット", disabled: layer.transform.isDefault,
-                           help: "位置・スケール・角度を初期値に戻す") { layer.transform.reset() }
+                MiniButton(icon: "arrow.counterclockwise", label: "リセット", disabled: layer.transform.isDefault && layer.opacity == 1,
+                           help: "位置・スケール・角度・不透明度を初期値に戻す") { layer.transform.reset(); layer.opacity = 1 }
             } content: {
                 TransformFields(t: layer.transform)
+                HStack(spacing: 4) {
+                    AnimField(label: "不透明度", value: $layer.opacity, range: 0...1, perPoint: 0.003,
+                              defaultValue: 1, showsBar: true, format: percent, key: .opacity, target: layer)
+                    VisibilityButton(muted: $layer.muted, what: "このレイヤー")
+                }
+                .frame(height: UI.rowHeight)
             }
             ParamColumn(title: "ミックス") {
                 LayerStopMini(layer: layer)
@@ -586,12 +727,6 @@ struct LayerParams: View {
                 .frame(height: UI.rowHeight)
                 .help("オン：このレイヤーのクリップは使わず、付けたエフェクトを下のレイヤー全体にかける。不透明度がかかり具合")
                 BlendChoice(blend: $layer.blend)
-                HStack(spacing: 4) {
-                    AnimField(label: "不透明度", value: $layer.opacity, range: 0...1, perPoint: 0.003,
-                              defaultValue: 1, showsBar: true, format: percent, key: .opacity, target: layer)
-                    VisibilityButton(muted: $layer.muted, what: "このレイヤー")
-                }
-                .frame(height: UI.rowHeight)
                 Group {
                     HStack(spacing: 4) {
                         ValueDrag(label: "音量", value: $layer.volume, range: 0...1, perPoint: 0.003,
@@ -643,21 +778,24 @@ struct ClipParams: View {
     @ViewBuilder private var mediaParams: some View {
         SideBySide {
         VStack(alignment: .leading, spacing: 0) {
+        ClipNameField(slot: slot)
+            .padding(.bottom, 8)
         ParamColumns {
             ParamColumn(title: "トランスフォーム") {
                 MiniButton(icon: "arrow.counterclockwise", label: "リセット", disabled: !slot.hasCustomTransform,
                            help: "位置・スケール・角度・不透明度・音量を初期値に戻す（速度はそのまま）") { slot.resetTransform() }
             } content: {
                 TransformFields(t: slot)
-            }
-            ParamColumn(title: "ミックス・再生") {
                 HStack(spacing: 4) {
                     AnimField(label: "不透明度", value: $slot.opacity, range: 0...1, perPoint: 0.003, defaultValue: 1,
                               showsBar: true, format: percent, key: .opacity, target: slot)
                     VisibilityButton(muted: $slot.muted, what: "このクリップ")
                 }
                 .frame(height: UI.rowHeight)
-                if !slot.isStill {
+            }
+            // 静止画・ジェネレーターには音も再生範囲も無いので出さない
+            if !slot.isStill {
+                ParamColumn(title: "音・再生") {
                     HStack(spacing: 4) {
                         ValueDrag(label: "音量", value: $slot.clipVolume, range: 0...1, perPoint: 0.003,
                                   defaultValue: 1, showsBar: true, format: percent)
@@ -665,14 +803,15 @@ struct ClipParams: View {
                         SoundMuteButton(muted: $slot.audioMuted, what: "このクリップ")
                     }
                     .frame(height: UI.rowHeight)
+                    ClipSpeedFields(slot: slot)
                 }
-                if !slot.isStill { ClipSpeedFields(slot: slot) }
             }
         }
         if slot.generator != nil {
             // ジェネレーター：再生範囲・速度の代わりに、絵の設定
             VStack(alignment: .leading, spacing: 6) {
-                SectionTitle("ジェネレーター：" + (slot.generator?.kind.label ?? ""))
+                SectionTitle("ジェネレーター：" + (slot.generator?.kind.label ?? ""),
+                             icon: slot.generator?.kind.icon ?? "sparkles", tint: UI.generatorTint)
                 EffectCard(effect: Binding(get: { slot.generator ?? Effect(kind: .solid) }, set: { slot.generator = $0 }),
                            origin: slot.animOrigin, isFirst: true, isLast: true, move: { _ in }, remove: {},
                            isBlendSettings: true)
@@ -709,6 +848,36 @@ struct ClipParams: View {
     }
 }
 
+/// クリップの見かけの名前の欄（空なら元の名前を薄く出す）
+struct ClipNameField: View {
+    @ObservedObject var slot: ClipSlot
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Text("名前").font(.system(size: 12)).foregroundStyle(.secondary)
+            TextField(slot.autoName, text: $slot.title)
+                .textFieldStyle(.roundedBorder)
+                .help("クリップの枠などに出る名前。空にすると元の名前（" + slot.autoName + "）")
+            if !slot.title.isEmpty {
+                Button { slot.title = "" } label: { Image(systemName: "xmark.circle.fill") }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                    .help("元の名前（" + slot.autoName + "）に戻す")
+            }
+        }
+        .frame(maxWidth: 360, alignment: .leading)
+    }
+}
+
+/// クリップの名前を変える（右クリックメニューから）
+enum ClipRename {
+    static func ask(_ slot: ClipSlot) {
+        if let t = askText(title: "クリップの名前（空にすると元の名前「\(slot.autoName)」）", initial: slot.title) {
+            slot.title = t
+        }
+    }
+}
+
 /// エフェクトのクリップ（調整レイヤーの枠）の設定：名前と、エフェクトの並び
 struct EffectClipParams: View {
     @ObservedObject var slot: ClipSlot
@@ -719,7 +888,7 @@ struct EffectClipParams: View {
                 SectionTitle("エフェクトのクリップ")
                 HStack(spacing: 6) {
                     Text("名前").font(.system(size: 12)).foregroundStyle(.secondary)
-                    TextField("空ならエフェクト名", text: $slot.title)
+                    TextField(slot.autoName, text: $slot.title)
                         .textFieldStyle(.roundedBorder)
                 }
                 Text("押すと、右のエフェクトがこのレイヤーより下の絵全体にかかる（レイヤーの不透明度がかかり具合）。同じ段の別の枠を押すと切り替わり、空きの枠を押すと外れる。レイヤー自体に付けたエフェクトは、いつも一緒にかかる。")

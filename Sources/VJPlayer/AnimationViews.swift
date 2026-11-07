@@ -10,6 +10,7 @@ struct AnimValueField: View {
     let defaultValue: Double
     var showsBar = false
     let format: (Double) -> String
+    var style = ValueStyle.plain
     @Binding var anim: ParamAnim
     /// 秒モードの基準時刻
     var origin: Double = 0
@@ -23,7 +24,7 @@ struct AnimValueField: View {
             HStack(spacing: 4) {
                 ValueDrag(label: label, value: $value, range: range, perPoint: perPoint, defaultValue: defaultValue,
                           showsBar: showsBar, format: format, live: anim.isOn ? liveValue() : nil,
-                          badge: anim.summary)
+                          badge: anim.summary, style: style)
                 Button {
                     expanded.toggle()
                 } label: {
@@ -60,12 +61,13 @@ struct AnimField<Target: ObservableObject & Animatable>: View {
     let defaultValue: Double
     var showsBar = false
     let format: (Double) -> String
+    var style = ValueStyle.plain
     let key: ParamKey
     @ObservedObject var target: Target
 
     var body: some View {
         AnimValueField(label: label, value: $value, range: range, perPoint: perPoint, defaultValue: defaultValue,
-                       showsBar: showsBar, format: format,
+                       showsBar: showsBar, format: format, style: style,
                        anim: Binding(get: { target.anim(key) }, set: { target.setAnim(key, $0) }),
                        origin: target.animOrigin, animDefault: key.defaultRange)
     }
@@ -145,10 +147,19 @@ struct BlendChoice: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             Text("重ね方").font(.system(size: 11)).foregroundStyle(.secondary)
-            ChoiceButtons(selection: $blend, items: BlendMode.allCases.filter { !$0.isSpecial && !$0.isMask }.map { ($0, $0.label) })
+            ChoiceButtons(selection: $blend, items: [BlendMode.normal, .add, .screen, .multiply].map { ($0, $0.label) })
+            ChoiceButtons(selection: $blend, items: BlendMode.simpleBelow.prefix(3).map { ($0, $0.label) })
+                .help("差分：重なった所が反転したような色に（同じ色は黒）。オーバーレイ・ソフトライト：明るい所はより明るく、暗い所はより暗く")
+            ChoiceButtons(selection: $blend, items: BlendMode.simpleBelow.suffix(3).map { ($0, $0.label) })
+                .help("覆い焼き：明るい所が焼けたように光る。色相だけ：下の絵の明るさのまま、このレイヤーの色に。明るさだけ：下の絵の色のまま、このレイヤーの明るさに")
             ChoiceButtons(selection: $blend, items: BlendMode.allCases.filter(\.isMask).map { ($0, $0.label) })
                 .help("このレイヤーを見せずに、明るさを使って下のレイヤー全部を切り抜く（白黒の動画や、マスクのエフェクトを付けた白い絵など）。不透明度でかかり具合")
-            ChoiceButtons(selection: $blend, items: BlendMode.allCases.filter(\.isSpecial).map { ($0, $0.label) })
+            Text("絡み合う重ね方（下の絵そのものを変える）").font(.system(size: 11)).foregroundStyle(.secondary).padding(.top, 2)
+            ChoiceButtons(selection: $blend, items: BlendMode.entangle.prefix(3).map { ($0, $0.label) })
+                .help("屈折：このレイヤーを透明なガラスにして、下の絵を曲げる。光で照らす：このレイヤーの光で下の絵を照らす（ほかは暗く）。流し込む：このレイヤーの動きで下の絵をかき混ぜる")
+            ChoiceButtons(selection: $blend, items: BlendMode.entangle.suffix(3).map { ($0, $0.label) })
+                .help("干渉：2 つの明るさを波にして縞（モアレ）を出す。色を借りる：下の絵の形に、このレイヤーの色を塗る。溶け込む：下の暗い所から順にこのレイヤーへ溶ける")
+            ChoiceButtons(selection: $blend, items: [(BlendMode.overdrive, BlendMode.overdrive.label)])
                 .help("特殊合成：下のレイヤーの明るさを読んで、100% を超えた分をにじみ・色相ずれ・波紋に変える")
         }
     }
@@ -180,7 +191,9 @@ struct AnimEditor: View {
             .pickerStyle(.segmented)
             .labelsHidden()
             .controlSize(.large)
-            if anim.isOn {
+            if anim.mode == .audio {
+                AudioAnimControls(anim: $anim)
+            } else if anim.isOn {
                 ChoiceButtons(selection: $anim.motion, items: AnimMotion.allCases.map { ($0, $0.label) })
                 if anim.mode == .time {
                     ValueDrag(label: "周期", value: $anim.seconds, range: 0.1...120, perPoint: 0.02, defaultValue: 4,
@@ -194,6 +207,8 @@ struct AnimEditor: View {
                     }
                     .help("何拍で 1 周するか")
                 }
+            }
+            if anim.isOn {
                 HStack(spacing: 6) {
                     ValueDrag(label: "から", value: $anim.lo, range: range, perPoint: perPoint,
                               defaultValue: defaultRange.lowerBound, format: format)
@@ -206,6 +221,41 @@ struct AnimEditor: View {
         .padding(8)
         .background(RoundedRectangle(cornerRadius: 6).fill(Color.purple.opacity(0.10)))
         .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.purple.opacity(0.35)))
+    }
+}
+
+/// 動かし方が「音」のとき：音のどの部分か・感度・今の値
+struct AudioAnimControls: View {
+    @Binding var anim: ParamAnim
+    @ObservedObject private var ar = AudioReactive.shared
+
+    private var link: AudioLink { anim.audio ?? AudioLink() }
+    private var band: Binding<AudioBand> {
+        Binding(get: { link.band }, set: { var a = link; a.band = $0; anim.audio = a })
+    }
+    private var gain: Binding<Double> {
+        Binding(get: { link.gain }, set: { var a = link; a.gain = $0; anim.audio = a })
+    }
+    private var reverse: Binding<Bool> {
+        Binding(get: { anim.motion == .backward }, set: { anim.motion = $0 ? .backward : .forward })
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ChoiceButtons(selection: band, items: AudioBand.allCases.map { ($0, $0.label) })
+                .help(link.band.help)
+            HStack(spacing: 8) {
+                ValueDrag(label: "感度", value: gain, range: 0...6, perPoint: 0.005, defaultValue: 1, format: EffectParam.percent)
+                    .frame(height: UI.rowHeight)
+                Toggle("逆", isOn: reverse).toggleStyle(.button).controlSize(.small)
+                    .help("音が大きいほど「から」の方へ")
+            }
+            AudioMeter(band: link.band, gain: link.gain)
+            if ar.source == .off {
+                Text("音の入力がオフ（上のバーの「音の入力」で、アプリの音かマイク・ライン入力を選ぶ）")
+                    .font(.system(size: 11)).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
+            }
+        }
     }
 }
 
@@ -324,22 +374,25 @@ struct EffectsSection<H: ObservableObject & EffectHolder>: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            SectionTitle("エフェクト")
-            // 右下の「エフェクト」一覧からここへドラッグ
+            SectionTitle("エフェクト", icon: "camera.filters", tint: UI.effectTint)
+            // ＋ボタンのメニューから選ぶか、右下の「エフェクト」一覧からここへドラッグ
             HStack(spacing: 8) {
-                Image(systemName: "plus.rectangle.on.rectangle").foregroundStyle(.purple)
+                AddEffectMenu { k in holder.addEffectOpened(k) }
+                    .tint(.purple)
                 Text(holder.effects.isEmpty
-                     ? "「エフェクト」パネルからドラッグして追加（上から順にかかります）"
-                     : "「エフェクト」パネルからドラッグして追加")
-                    .font(.system(size: 12))
+                     ? "またはパネルからドラッグ（上から順にかかる）"
+                     : "またはパネルからドラッグ")
+                    .font(.system(size: 11))
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 10)
             .frame(height: 40)
             .background(RoundedRectangle(cornerRadius: 6)
                 .strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [5, 4]))
-                .foregroundStyle(Color.purple.opacity(0.5)))
+                .foregroundStyle(UI.effectTint.opacity(0.5)))
             .effectDropTarget { k in
                 let e = holder.insertEffect(k, at: holder.effects.count)
                 ui.expanded.insert(e.id)
@@ -406,7 +459,7 @@ struct EffectCard: View {
                         .frame(width: 12)
                     Image(systemName: effect.kind.icon)
                         .font(.system(size: 13))
-                        .foregroundStyle(effect.enabled ? Color.purple : Color.secondary)
+                        .foregroundStyle(effect.enabled ? tint : Color.secondary)
                         .frame(width: 18)
                     Text(effect.kind.label)
                         .font(.system(size: 13, weight: .semibold))
@@ -462,6 +515,7 @@ struct EffectCard: View {
             }
             if effect.kind == .strobe { strobeSwitches }
             if effect.kind.isText { textControls }
+            if !effect.kind.looks.isEmpty { looksRow }
             LazyVGrid(columns: narrow ? [GridItem(.flexible(), alignment: .top)]
                       : [GridItem(.fixed(UI.paramColumnWidth), spacing: 16), GridItem(.fixed(UI.paramColumnWidth), alignment: .top)],
                       alignment: .leading, spacing: 8) {
@@ -483,7 +537,8 @@ struct EffectCard: View {
                         .frame(height: UI.rowHeight)
                     } else {
                         AnimValueField(label: p.label, value: valueBinding(i), range: p.range, perPoint: p.perPoint,
-                                       defaultValue: p.defaultValue, showsBar: p.range == 0...1, format: p.format,
+                                       defaultValue: p.defaultValue, showsBar: p.range != 0...360, format: p.format,
+                                       style: p.range == 0...360 ? .angle : .plain,
                                        anim: Binding(get: { effect.anim(i) }, set: { var e = effect; e.setAnim(i, $0); effect = e }),
                                        origin: origin, animDefault: p.animRange ?? p.range)
                     }
@@ -494,10 +549,8 @@ struct EffectCard: View {
                 if effect.value(0) < 0.5 {
                     HStack(spacing: 10) {
                         Text("色").font(.system(size: 12)).foregroundStyle(.secondary)
-                        ColorPicker("", selection: colorBinding(\.color), supportsOpacity: false)
-                            .labelsHidden()
-                            .frame(width: 60, height: UI.rowHeight)
-                        Text("（クリックで色のパネル：ホイール・RGB/HSB・スポイト・保存した色）")
+                        ColorWell(color: $effect.color)
+                        Text("（クリックで色を選ぶ）")
                             .font(.system(size: 11)).foregroundStyle(.secondary)
                     }
                 } else {
@@ -505,12 +558,14 @@ struct EffectCard: View {
                 }
             }
             if effect.kind == .polyMask { PolyMaskControls(effect: $effect) }
-            if effect.kind.usesColor && !(effect.kind.isText && effect.value(5) > 0.5) {
+            if effect.kind.usesColor && !(effect.kind.isText && effect.value(5) > 0.5)
+                && !(effect.kind == .tunnel && effect.value(13) > 0.5)
+                && !(effect.kind == .physarum && effect.value(8) > 0.5)
+                && !(effect.kind == .attractor && effect.value(11) > 0.5)
+                && !(effect.kind == .rasterScan && abs(effect.value(4) - 1) > 0.5) {
                 HStack(spacing: 10) {
                     Text("色").font(.system(size: 12)).foregroundStyle(.secondary)
-                    ColorPicker("", selection: colorBinding(\.color), supportsOpacity: false)
-                        .labelsHidden()
-                        .frame(width: 60, height: UI.rowHeight)
+                    ColorWell(color: $effect.color)
                     ForEach([RGB.white, RGB.black, .hsb(0, 0.85, 1), .hsb(0.33, 0.85, 1), .hsb(0.6, 0.85, 1),
                              .hsb(0.83, 0.85, 1), .hsb(0.13, 0.85, 1)], id: \.self) { c in
                         Button { var e = effect; e.color = c; effect = e } label: {
@@ -522,23 +577,35 @@ struct EffectCard: View {
                     }
                 }
             }
-            if effect.kind == .gradient || (effect.kind.isText && effect.value(5) > 0.5) {
+            if effect.kind == .gradient || (effect.kind.isText && effect.value(5) > 0.5)
+                || (effect.kind == .tunnel && effect.value(13) > 0.5 && effect.value(13) < 1.5)
+                || (effect.kind == .physarum && effect.value(8) > 0.5)
+                || (effect.kind == .particleLife && effect.value(9) > 0.5)
+                || (effect.kind == .attractor && effect.value(11) > 0.5 && effect.value(11) < 1.5) {
                 PaletteEditor(palette: $effect.palette)
             }
             if effect.kind == .strobe && effect.value(0) < 0.5 {
                 HStack(spacing: 10) {
                     Text("光る色").font(.system(size: 12)).foregroundStyle(.secondary)
-                    ColorPicker("", selection: colorBinding(\.color), supportsOpacity: false)
-                        .labelsHidden()
-                        .frame(width: 60, height: UI.rowHeight)
+                    ColorWell(color: $effect.color)
                 }
             }
             }
         }
         .padding(10)
-        .background(RoundedRectangle(cornerRadius: 6).fill(Color.white.opacity(0.05)))
-        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.gray.opacity(0.3)))
+        .padding(.leading, 4)
+        .background(RoundedRectangle(cornerRadius: 6).fill(tint.opacity(isGen ? 0.09 : 0.05)))
+        .overlay(RoundedRectangle(cornerRadius: 6).stroke(tint.opacity(isGen ? 0.55 : 0.35)))
+        // 左端の色の帯（ジェネレーター：青緑、エフェクト：紫）
+        .overlay(alignment: .leading) {
+            UnevenRoundedRectangle(topLeadingRadius: 6, bottomLeadingRadius: 6)
+                .fill(tint.opacity(effect.enabled || isBlendSettings ? 0.9 : 0.35))
+                .frame(width: 4)
+        }
     }
+
+    private var isGen: Bool { effect.kind.isGenerator }
+    private var tint: Color { isGen ? UI.generatorTint : UI.effectTint }
 
     @ObservedObject private var ui = EffectUIState.shared
     private var open: Bool { ui.expanded.contains(effect.id) }
@@ -546,10 +613,43 @@ struct EffectCard: View {
         if open { ui.expanded.remove(effect.id) } else { ui.expanded.insert(effect.id) }
     }
 
+    /// ドット・群れ：よく使う見た目に一度でそろえる（そろえたあと、ふつうに値を直せる）
+    private var looksRow: some View {
+        HStack(spacing: 6) {
+            Text("見た目").font(.system(size: 12)).foregroundStyle(.secondary)
+            ForEach(effect.kind.looks, id: \.name) { look in
+                Button(look.name) {
+                    var e = effect
+                    for (i, v) in look.values { e.values[i] = v }
+                    if let c = look.color { e.color = c }
+                    effect = e
+                }
+                .controlSize(.small)
+                .help(look.help)
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
     /// その値を出すか（カラーライズのパレットモードでは「明るさを保つ」は使わない）
     private func shows(_ i: Int) -> Bool {
         // 以前の「かかり具合」は、上の「不透明度」にまとめた
         if i == effect.kind.amountIndex { return false }
+        if effect.kind == .dots && [4, 18, 19, 20].contains(i) {
+            // 波の高さ（3D の点の雲）のときは角度・ふらふら・光のにじみを使わない（平らのときだけ）
+            return effect.value(16) <= 0
+        }
+        if effect.kind == .school && (16...20).contains(i) {
+            // カメラは 3D（厚みがある）のときだけ
+            return effect.value(14) > 0
+        }
+        if effect.kind == .lines {
+            // 波の高さ（3D の地形）のときは、横の線だけを描く（角度・横のうねり・線ごとのずれは使わない）。
+            // 山の形・真ん中・黒く塗るは、波の高さがあるときだけ
+            let terrain = effect.value(12) > 0
+            if [2, 5, 8].contains(i) { return !terrain }
+            if (13...15).contains(i) { return terrain }
+        }
         if effect.kind == .clock {
             // モード・表示・細かさは上の欄で。目標の時刻はカウントダウン、長さはタイマー、弾みは数えるときだけ
             let mode = Int(effect.value(12).rounded())
@@ -723,11 +823,6 @@ struct EffectCard: View {
             .frame(width: width)
     }
 
-    private func colorBinding(_ key: WritableKeyPath<Effect, RGB>) -> Binding<Color> {
-        Binding(get: { Color(rgb: effect[keyPath: key]) },
-                set: { var e = effect; e[keyPath: key] = RGB(color: $0); effect = e })
-    }
-
     private var mixBinding: Binding<Double> {
         Binding(get: { effect.mix }, set: { v in var e = effect; e.mix = min(max(v, 0), 1); effect = e })
     }
@@ -773,11 +868,9 @@ struct PaletteEditor: View {
                 .clipShape(RoundedRectangle(cornerRadius: 3))
             HStack(spacing: 6) {
                 ForEach(palette.indices, id: \.self) { i in
-                    ColorPicker("", selection: Binding(get: { Color(rgb: palette[min(i, palette.count - 1)]) },
-                                                       set: { if palette.indices.contains(i) { palette[i] = RGB(color: $0) } }),
-                                supportsOpacity: false)
-                        .labelsHidden()
-                        .frame(width: 44, height: UI.rowHeight)
+                    ColorWell(color: Binding(get: { palette[min(i, palette.count - 1)] },
+                                             set: { if palette.indices.contains(i) { palette[i] = $0 } }),
+                              width: 44)
                         .contextMenu {
                             Button("この色を外す") { if palette.count > 2 { palette.remove(at: i) } }
                                 .disabled(palette.count <= 2)
