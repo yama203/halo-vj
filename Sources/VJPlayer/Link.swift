@@ -13,7 +13,9 @@ final class SyphonOutput: ObservableObject {
     static let shared = SyphonOutput()
 
     @Published var enabled = false { didSet { if oldValue != enabled { apply(); save() } } }
-    @Published var name = "Halo VJ" { didSet { if oldValue != name { apply(); save() } } }
+    /// 名前は打ち終わってから出し直す（1 文字ごとに出し直すと、受け取る側で映像が途切れる）
+    @Published var name = "Halo VJ" { didSet { if oldValue != name { save(); applySoon() } } }
+    private var applyWork: DispatchWorkItem?
     /// 見ているアプリがあるか（画面の表示用）
     @Published private(set) var hasClients = false
     var forTests = false
@@ -36,7 +38,15 @@ final class SyphonOutput: ObservableObject {
         UserDefaults.standard.set(name, forKey: "syphon.name")
     }
 
+    private func applySoon() {
+        applyWork?.cancel()
+        let w = DispatchWorkItem { [weak self] in self?.apply() }
+        applyWork = w
+        DispatchQueue.main.asyncAfter(deadline: .now() + (forTests ? 0 : 0.8), execute: w)
+    }
+
     private func apply() {
+        applyWork?.cancel(); applyWork = nil
         let old = lock.withLock { () -> SyphonMetalServer? in
             let s = server; server = nil; return s
         }

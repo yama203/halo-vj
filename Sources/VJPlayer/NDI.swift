@@ -34,7 +34,9 @@ final class NDIOutput: ObservableObject {
     static let shared = NDIOutput()
 
     @Published var enabled = false { didSet { if oldValue != enabled { apply(); save() } } }
-    @Published var name = "Halo VJ" { didSet { if oldValue != name { apply(); save() } } }
+    /// 名前は打ち終わってから出し直す（1 文字ごとに出し直すと、受け取る側で映像が途切れる）
+    @Published var name = "Halo VJ" { didSet { if oldValue != name { save(); applySoon() } } }
+    private var applyWork: DispatchWorkItem?
     /// 受け取っている相手の数（画面の表示用）
     @Published private(set) var connections = 0
     /// NDI ランタイムが見つからなかった
@@ -67,7 +69,15 @@ final class NDIOutput: ObservableObject {
         UserDefaults.standard.set(name, forKey: "ndi.name")
     }
 
+    private func applySoon() {
+        applyWork?.cancel()
+        let w = DispatchWorkItem { [weak self] in self?.apply() }
+        applyWork = w
+        DispatchQueue.main.asyncAfter(deadline: .now() + (forTests ? 0 : 0.8), execute: w)
+    }
+
     private func apply() {
+        applyWork?.cancel(); applyWork = nil
         let old = lock.withLock { () -> UnsafeMutableRawPointer? in
             let s = sender; sender = nil; return s
         }
@@ -79,7 +89,8 @@ final class NDIOutput: ObservableObject {
         guard NDIRuntime.available else { missingRuntime = true; return }
         missingRuntime = false
         let s = name.withCString { ndi_send_create($0) }
-        lock.withLock { sender = s; busy = false }
+        // busy は戻さない（送りかけの 1 枚が終われば戻る。その前に次を始めると、同じ入れ物に書いてしまう）
+        lock.withLock { sender = s }
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             guard let self, let s = self.lock.withLock({ self.sender }) else { return }
             self.queue.async {
@@ -112,6 +123,8 @@ final class NDIOutput: ObservableObject {
         cb.addCompletedHandler { [weak self] _ in
             guard let self else { return }
             self.queue.async {
+                // 送り口を作り直していたら送らない（古い送り口はもう閉じている）
+                guard self.lock.withLock({ self.sender == s }) else { self.lock.withLock { self.busy = false }; return }
                 let stride = w * 4
                 if self.bytes.count != stride * h { self.bytes = [UInt8](repeating: 0, count: stride * h) }
                 self.bytes.withUnsafeMutableBytes { p in
@@ -161,7 +174,8 @@ final class NDIReceiver {
     private var next = 0
     private var poolAlpha = true
     private var running = true
-    private(set) var finished = false
+    private var _finished = false
+    var finished: Bool { lock.withLock { _finished } }
     var used = CACurrentMediaTime()
     /// 受け取った枚数（テスト用）
     private(set) var frames = 0
@@ -182,7 +196,7 @@ final class NDIReceiver {
         let r = source.withCString { ndi_recv_create($0) }
         defer {
             if let r { ndi_recv_destroy(r) }
-            lock.withLock { finished = true; latest = nil; pool = [] }
+            lock.withLock { _finished = true; latest = nil; pool = [] }
         }
         guard let r else { return }
         var v = ndi_video_t()

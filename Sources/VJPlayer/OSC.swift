@@ -126,6 +126,8 @@ final class OSCHub: ObservableObject {
     private var values: [String: Double] = [:]
     private var learnHandler: ((String) -> Void)?
     private var listener: NWListener?
+    /// 受け口・送り口（ネットワークのキューと画面のスレッドの両方から触るので connLock の中で）
+    private let connLock = NSLock()
     private var conns: [NWConnection] = []
     private var sender: NWConnection?
     private let queue = DispatchQueue(label: "VJPlayer.osc")
@@ -199,7 +201,7 @@ final class OSCHub: ObservableObject {
 
     private func restartListener() {
         listener?.cancel(); listener = nil
-        conns.forEach { $0.cancel() }; conns = []
+        connLock.withLock { let old = conns; conns = []; return old }.forEach { $0.cancel() }
         guard receiveOn else { updateStatus(); return }
         guard let port = NWEndpoint.Port(rawValue: UInt16(clamping: receivePort)),
               let l = try? NWListener(using: .udp, on: port) else {
@@ -208,7 +210,7 @@ final class OSCHub: ObservableObject {
         }
         l.newConnectionHandler = { [weak self] c in
             guard let self else { return }
-            self.conns.append(c)
+            self.connLock.withLock { self.conns.append(c) }
             c.start(queue: self.queue)
             self.receive(c)
         }
@@ -235,11 +237,11 @@ final class OSCHub: ObservableObject {
 
     private func restartSender() {
         sendTimer?.cancel(); sendTimer = nil
-        sender?.cancel(); sender = nil
+        connLock.withLock { let old = sender; sender = nil; return old }?.cancel()
         guard sendOn, let port = NWEndpoint.Port(rawValue: UInt16(clamping: sendPort)) else { updateStatus(); return }
         let c = NWConnection(host: NWEndpoint.Host(sendHost), port: port, using: .udp)
         c.start(queue: queue)
-        sender = c
+        connLock.withLock { sender = c }
         lastClipNames = []
         // 拍・音の値を 1 秒に 30 回送る
         let t = DispatchSource.makeTimerSource(queue: queue)
@@ -251,7 +253,7 @@ final class OSCHub: ObservableObject {
     }
 
     func send(_ m: OSCMessage) {
-        sender?.send(content: m.encode(), completion: .idempotent)
+        connLock.withLock { sender }?.send(content: m.encode(), completion: .idempotent)
     }
 
     private func sendTick() {

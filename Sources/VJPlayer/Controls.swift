@@ -162,16 +162,23 @@ final class ControlHub: ObservableObject {
         feedbackTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in self?.sendFeedback() }
     }
 
+    /// 機器の名前（つないだときに覚えておく。メッセージのたびに聞くと遅れる）
+    private let nameLock = NSLock()
+    private var sourceNames: [MIDIEndpointRef: String] = [:]
+
     private func connectSources() {
         var names: [String] = []
+        var byRef: [MIDIEndpointRef: String] = [:]
         for i in 0..<MIDIGetNumberOfSources() {
             let s = MIDIGetSource(i)
             // 名前を refCon に入れておく（どの機器から来たか分かるように）
             let name = Self.name(s)
             names.append(name)
+            byRef[s] = name
             let ref = UnsafeMutableRawPointer(bitPattern: Int(s))
             MIDIPortConnectSource(inPort, s, ref)
         }
+        nameLock.withLock { sourceNames = byRef }
         devices = names
         lit = [:]
     }
@@ -185,7 +192,7 @@ final class ControlHub: ObservableObject {
 
     private func receive(_ list: UnsafePointer<MIDIEventList>, source: UnsafeMutableRawPointer?) {
         let srcRef = MIDIEndpointRef(UInt(bitPattern: source))
-        let device = srcRef != 0 ? Self.name(srcRef) : "MIDI"
+        let device = srcRef == 0 ? "MIDI" : (nameLock.withLock { sourceNames[srcRef] } ?? Self.name(srcRef))
         for packet in list.unsafeSequence() {
             let words = MIDIEventPacket.WordCollection(packet)
             for w in words {

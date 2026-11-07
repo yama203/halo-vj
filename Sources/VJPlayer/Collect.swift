@@ -40,10 +40,20 @@ extension Engine {
         var used: Set<String> = []
         var copied = 0, reused = 0
         var missing: [String] = []
+        // もう「素材」の中にある素材（前にまとめたもの）は、その名前のまま使う。先に名前を取っておく
+        // （でないと、別の場所の同じ名前の素材がその名前を取って、上書きで元の素材を消してしまう）
+        let mediaPath = media.standardizedFileURL.path
+        for p in sources where URL(fileURLWithPath: p).deletingLastPathComponent().standardizedFileURL.path == mediaPath
+            && fm.fileExists(atPath: p) {
+            let f = URL(fileURLWithPath: p).lastPathComponent
+            used.insert(f.lowercased())
+            map[p] = f
+        }
         let total = Double(max(sources.count, 1))
         for (k, p) in sources.enumerated() {
             let src = URL(fileURLWithPath: p)
             progress?(Double(k) / total, src.lastPathComponent)
+            if map[p] != nil { reused += 1; continue }
             guard fm.fileExists(atPath: p) else { missing.append(src.lastPathComponent); continue }
             // 名前がぶつかったら番号を付ける（中身が同じなら使い回す）
             var fileName = src.lastPathComponent

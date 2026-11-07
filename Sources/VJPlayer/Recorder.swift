@@ -327,12 +327,13 @@ final class Recorder: ObservableObject {
         cb.addCompletedHandler { [weak self] _ in
             _ = cvTex
             self?.writeQueue.async {
-                guard sess.writer.status == .writing else { return }
+                // 止めたあとに描き終わったコマは入れない（閉じた入れ口に入れると落ちる）
+                guard let self, !self.lock.withLock({ sess.stopping }), sess.writer.status == .writing else { return }
                 if sess.video.isReadyForMoreMediaData,
                    sess.adaptor.append(pb, withPresentationTime: CMTime(value: idx, timescale: CMTimeScale(sess.fps))) {
-                    self?.lock.withLock { sess.frames += 1 }
+                    self.lock.withLock { sess.frames += 1 }
                 } else {
-                    self?.lock.withLock { sess.dropped += 1 }
+                    self.lock.withLock { sess.dropped += 1 }
                 }
             }
         }
@@ -377,8 +378,9 @@ final class Recorder: ObservableObject {
                                    sampleSizeArray: nil, sampleBufferOut: &sb) == noErr, let sb else { return }
         guard CMSampleBufferSetDataBufferFromAudioBufferList(sb, blockBufferAllocator: nil, blockBufferMemoryAllocator: nil,
                                                              flags: 0, bufferList: buf.audioBufferList) == noErr else { return }
-        writeQueue.async {
-            guard sess.writer.status == .writing, !sess.stopping, input.isReadyForMoreMediaData else { return }
+        writeQueue.async { [weak self] in
+            guard let self, !self.lock.withLock({ sess.stopping }), sess.writer.status == .writing,
+                  input.isReadyForMoreMediaData else { return }
             input.append(sb)
         }
     }

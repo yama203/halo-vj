@@ -100,19 +100,20 @@ enum Hap {
             guard ss + nn <= b.count else { throw DecodeError.bad }
             switch tt {
             case 0x02: comps = Array(b[ss..<ss + nn])
-            case 0x03: sizes = stride(from: ss, to: ss + nn, by: 4).map { le32(b, $0) }
-            case 0x04: offsets = stride(from: ss, to: ss + nn, by: 4).map { le32(b, $0) }
+            // 表は 4 バイトずつ（半端な残りは読まない）
+            case 0x03: sizes = stride(from: ss, through: ss + nn - 4, by: 4).map { le32(b, $0) }
+            case 0x04: offsets = stride(from: ss, through: ss + nn - 4, by: 4).map { le32(b, $0) }
             default: break
             }
             i = ss + nn
         }
-        guard comps.count == sizes.count else { throw DecodeError.bad }
+        guard comps.count == sizes.count, offsets.map({ $0.count >= sizes.count }) ?? true else { throw DecodeError.bad }
         let base = s + n
         var out: [UInt8] = []
         var pos = base
         for k in 0..<sizes.count {
             let o = offsets.map { base + $0[k] } ?? pos
-            guard o + sizes[k] <= b.count else { throw DecodeError.bad }
+            guard o >= 0, sizes[k] >= 0, o + sizes[k] <= b.count else { throw DecodeError.bad }
             let piece = Array(b[o..<o + sizes[k]])
             out += comps[k] == 0x0B ? try snappy(piece) : piece
             pos = o + sizes[k]
@@ -136,6 +137,8 @@ enum Hap {
             shift += 7
             guard shift < 35 else { throw DecodeError.bad }
         }
+        // ほどいた大きさ：1 コマとしてありえない大きさ（壊れたファイル）は読まない
+        guard len <= 256 << 20 else { throw DecodeError.bad }
         var out = [UInt8](); out.reserveCapacity(len)
         while i < b.count {
             let tag = b[i]; i += 1

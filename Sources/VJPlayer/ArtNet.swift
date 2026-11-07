@@ -34,6 +34,26 @@ struct DMXFixture: Codable, Identifiable, Equatable {
     var end: [Double] = [0.9, 0.5]
 
     var channelCount: Int { kind.channelsPerPixel * (kind == .line ? max(pixels, 1) : 1) }
+
+    init() {}
+
+    /// 読むとき：足りない値は初めの値に、取る所はかならず 2 つの数にする（壊れたファイルでも落ちないように）
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let d = DMXFixture()
+        id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        name = try c.decodeIfPresent(String.self, forKey: .name) ?? d.name
+        kind = try c.decodeIfPresent(Kind.self, forKey: .kind) ?? d.kind
+        universe = try c.decodeIfPresent(Int.self, forKey: .universe) ?? d.universe
+        channel = try c.decodeIfPresent(Int.self, forKey: .channel) ?? d.channel
+        pixels = min(max(try c.decodeIfPresent(Int.self, forKey: .pixels) ?? d.pixels, 1), 4096)
+        func two(_ a: [Double]?, _ def: [Double]) -> [Double] {
+            guard let a else { return def }
+            return [a.count > 0 ? a[0] : def[0], a.count > 1 ? a[1] : def[1]]
+        }
+        start = two(try c.decodeIfPresent([Double].self, forKey: .start), d.start)
+        end = two(try c.decodeIfPresent([Double].self, forKey: .end), d.end)
+    }
 }
 
 struct DMXMap: Codable, Equatable {
@@ -51,14 +71,17 @@ struct DMXMap: Codable, Equatable {
             return (Double(px[i + 2]) / 255, Double(px[i + 1]) / 255, Double(px[i]) / 255)
         }
         func level(_ v: Double) -> UInt8 { UInt8(min(max(pow(min(max(v, 0), 1), gamma) * brightness * 255, 0), 255).rounded()) }
+        // 取る所（壊れたファイルで数が足りなくても落ちないように）
+        func pt(_ a: [Double]) -> (Double, Double) { (a.count > 0 ? a[0] : 0.5, a.count > 1 ? a[1] : 0.5) }
         for f in fixtures {
+            let s0 = pt(f.start), e0 = pt(f.end)
             var ch = max(f.channel, 1) - 1
             var uni = max(f.universe, 0)
             let n = f.kind == .line ? max(f.pixels, 1) : 1
             for k in 0..<n {
                 let t = n > 1 ? Double(k) / Double(n - 1) : 0
-                let x = f.kind == .line ? f.start[0] + (f.end[0] - f.start[0]) * t : f.start[0]
-                let y = f.kind == .line ? f.start[1] + (f.end[1] - f.start[1]) * t : f.start[1]
+                let x = f.kind == .line ? s0.0 + (e0.0 - s0.0) * t : s0.0
+                let y = f.kind == .line ? s0.1 + (e0.1 - s0.1) * t : s0.1
                 let (r, g, b) = color(x, y)
                 let vals: [UInt8]
                 switch f.kind {
@@ -86,7 +109,7 @@ struct DMXMap: Codable, Equatable {
 final class ArtNetOutput: ObservableObject {
     static let shared = ArtNetOutput()
     @Published var enabled = false { didSet { if oldValue != enabled { save(); restart() } } }
-    @Published var host = "255.255.255.255" { didSet { if oldValue != host { save() } } }
+    @Published var host = "255.255.255.255" { didSet { if oldValue != host { save(); lock.withLock { sendHost = host } } } }
     @Published private(set) var status = ""
     var port: UInt16 = 6454
     var forTests = false
@@ -96,6 +119,9 @@ final class ArtNetOutput: ObservableObject {
     private var latest: (px: [UInt8], w: Int, h: Int)?
     private var map = DMXMap()
     private var timer: DispatchSourceTimer?
+    /// 送り先（送るキューで読む写し。lock の中で）
+    private var sendHost = "255.255.255.255"
+    /// ここから下は送るキューの中だけで触る
     private var sock: Int32 = -1
     private var seq: UInt8 = 0
 
@@ -103,6 +129,7 @@ final class ArtNetOutput: ObservableObject {
         let d = UserDefaults.standard
         enabled = d.bool(forKey: "artnet.enabled")
         if let h = d.string(forKey: "artnet.host"), !h.isEmpty { host = h }
+        sendHost = host
     }
 
     private func save() {
@@ -119,12 +146,18 @@ final class ArtNetOutput: ObservableObject {
     var isOn: Bool { lock.withLock { timer != nil } }
 
     private func restart() {
-        timer?.cancel(); timer = nil
-        if sock >= 0 { close(sock); sock = -1 }
-        guard enabled else { status = "オフ"; return }
-        sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)
-        var on: Int32 = 1
-        setsockopt(sock, SOL_SOCKET, SO_BROADCAST, &on, socklen_t(MemoryLayout<Int32>.size))
+        let old = lock.withLock { () -> DispatchSourceTimer? in let t = timer; timer = nil; return t }
+        old?.cancel()
+        let on = enabled
+        // 送り口は送るキューの中で閉じる・開く（送っている最中に閉じないように）
+        queue.sync {
+            if sock >= 0 { close(sock); sock = -1 }
+            guard on else { return }
+            sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)
+            var one: Int32 = 1
+            setsockopt(sock, SOL_SOCKET, SO_BROADCAST, &one, socklen_t(MemoryLayout<Int32>.size))
+        }
+        guard on else { status = "オフ"; return }
         let t = DispatchSource.makeTimerSource(queue: queue)
         t.schedule(deadline: .now(), repeating: 1.0 / 40)
         t.setEventHandler { [weak self] in self?.tick() }
@@ -146,7 +179,8 @@ final class ArtNetOutput: ObservableObject {
         var addr = sockaddr_in()
         addr.sin_family = sa_family_t(AF_INET)
         addr.sin_port = port.bigEndian
-        inet_pton(AF_INET, host, &addr.sin_addr)
+        let h = lock.withLock { sendHost }
+        guard inet_pton(AF_INET, h, &addr.sin_addr) == 1 else { return }
         _ = d.withUnsafeBytes { b in
             withUnsafePointer(to: &addr) {
                 $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {

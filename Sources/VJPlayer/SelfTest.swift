@@ -3308,6 +3308,12 @@ enum SelfTest {
         }
         check(found != nil && !NDIFinder.shared.sources().contains(found ?? ""), "NDI：自分の出力が見つかる（選ぶ一覧には出さない）\(found ?? "")")
         guard let found else { out.enabled = false; return }
+        // 送っている最中に名前を何度も打ち直しても落ちない（打ち終わってから 1 回だけ出し直す）
+        let before = out.sentFrames
+        for k in 0..<12 { out.name = name + String(repeating: "x", count: k % 4); pump() }
+        out.name = name
+        for _ in 0..<20 { pump() }
+        check(out.isOn && out.sentFrames > before, "NDI：送っている最中に名前を打ち直しても落ちず、送り続ける")
         var tex: MTLTexture?
         let t1 = CACurrentMediaTime()
         while tex == nil && CACurrentMediaTime() - t1 < 10 {
@@ -3361,6 +3367,11 @@ enum SelfTest {
         check(Array(u0[0..<3]) == [255, 0, 0] && Array(u0[9..<21]) == [255, 0, 0, 255, 0, 0, 0, 0, 255, 0, 0, 255]
               && Array(u0[29..<33]) == [0, 0, 0, 255] && u0[39] == 18 && u[3]?.count == 512 && (u[4]?[87] ?? 0) == 255 && (u[4]?[88] ?? 1) == 0,
               "照明：灯体ごとに、取る所の色を決めたチャンネルへ（RGB・LED テープ・白は W に・明るさだけ・512 を超えたら次のユニバース）")
+        // 壊れた設定（取る所の数が足りない）を読んでも落ちない
+        let broken = #"{"fixtures":[{"kind":3,"start":[],"end":[0.2]}],"brightness":1,"gamma":1}"#
+        let bm = try? JSONDecoder().decode(DMXMap.self, from: Data(broken.utf8))
+        check(bm?.fixtures.first?.start.count == 2 && bm?.fixtures.first?.end.count == 2 && bm.map { !$0.universes(pixels: px, width: W, height: H).isEmpty } == true,
+              "照明：壊れた灯体の設定を読んでも落ちない（足りない値は初めの値に）")
         // 本当に送る：自分あてに送って受け取る
         let port = UInt16(40_000 + Int.random(in: 0..<500))
         let rs = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)
@@ -3419,6 +3430,16 @@ enum SelfTest {
                 && back.slots[3]?.generator?.kind == .solid
         }
         check(ok, "素材をまとめて保存：プロジェクトには「素材/名前」で書き、開き直すとコピーを読む（ジェネレーターもそのまま）")
+        // まとめたものに、別の場所の同じ名前の素材を先に足して、もう一度同じ所にまとめる：「素材」の中の元の素材を消さない
+        let inMedia = media.appendingPathComponent(base)
+        let size0 = (try? fm.attributesOfItem(atPath: paths[0])[.size] as? Int) ?? -1
+        let again = Engine(persistent: false)
+        again.load(urls: [sameName], startingAt: 0)
+        again.load(urls: [inMedia], startingAt: 1)
+        let r3 = try? Engine.collect(again.collectPlan(into: out, name: "まとめ"))
+        let size1 = (try? fm.attributesOfItem(atPath: inMedia.path)[.size] as? Int) ?? -2
+        check(r3 != nil && size1 == size0 && r3?.missing.isEmpty == true,
+              "素材をまとめて保存：もう「素材」の中にある素材は、別の場所の同じ名前の素材に上書きされない")
         try? fm.removeItem(at: tmp)
     }
 
@@ -3492,6 +3513,14 @@ enum SelfTest {
         let un = try? Hap.snappy(sn)
         check(un.map { String(decoding: $0, as: UTF8.self) } == "abcdabcdabcd" && (try? Hap.snappy([5, 0])) == nil,
               "HAP：Snappy をほどける（写しも）。壊れたものは読まない")
+        // 分けて圧縮したコマで、場所の表が大きさの表より短い（壊れたファイル）：落ちずに読まない
+        do {
+            func sec(_ type: UInt8, _ body: [UInt8]) -> [UInt8] { [UInt8(body.count & 0xFF), UInt8((body.count >> 8) & 0xFF), 0, type] + body }
+            func l32(_ v: Int) -> [UInt8] { [UInt8(v & 0xFF), UInt8((v >> 8) & 0xFF), UInt8((v >> 16) & 0xFF), UInt8(v >> 24)] }
+            let inner = sec(0x02, [0x0A, 0x0A]) + sec(0x03, l32(4) + l32(4)) + sec(0x04, l32(0) + [1, 2])
+            let frame = sec(0xCB, sec(0x01, inner) + [UInt8](repeating: 0, count: 8))
+            check((try? Hap.decodeFrame(frame)) == nil, "HAP：表の壊れたコマでも落ちずに、読まないで済ませる")
+        }
         // 自前の HAP の書き方（単色のブロックだけ）
         func le16(_ v: Int) -> [UInt8] { [UInt8(v & 0xFF), UInt8(v >> 8)] }
         func le32(_ v: Int) -> [UInt8] { [UInt8(v & 0xFF), UInt8((v >> 8) & 0xFF), UInt8((v >> 16) & 0xFF), UInt8(v >> 24)] }
