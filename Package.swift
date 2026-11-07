@@ -4,6 +4,10 @@ import PackageDescription
 let package = Package(
     name: "VJPlayer",
     platforms: [.macOS(.v14)],
+    dependencies: [
+        // 自動アップデート（MIT ライセンス。https://sparkle-project.org）
+        .package(url: "https://github.com/sparkle-project/Sparkle", exact: "2.10.1"),
+    ],
     targets: [
         // Objective-C の例外をつかまえるための小さな補助
         .target(name: "ObjCSupport", path: "Sources/ObjCSupport"),
@@ -27,9 +31,11 @@ let package = Package(
         .target(name: "NDIShim", path: "Sources/NDIShim"),
         .executableTarget(
             name: "VJPlayer",
-            dependencies: ["ObjCSupport", "Syphon", "NDIShim"],
+            dependencies: ["ObjCSupport", "Syphon", "NDIShim", .product(name: "Sparkle", package: "Sparkle")],
             path: "Sources/VJPlayer",
-            swiftSettings: [.swiftLanguageMode(.v5)]
+            swiftSettings: [.swiftLanguageMode(.v5)],
+            // .app の中の Contents/Frameworks（Sparkle）を探す
+            linkerSettings: [.unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"])]
         )
     ]
 )

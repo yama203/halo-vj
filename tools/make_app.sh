@@ -4,9 +4,21 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 swift build -c release
 APP="build/Halo VJ.app"
+# 版の番号：HALO_VERSION（リリースのとき tools/release.sh が渡す）か、いちばん新しいタグ。
+# ビルド番号はコミットの数（Sparkle はこれで新しいかを比べる。いつも増える）
+VERSION="${HALO_VERSION:-$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || true)}"
+VERSION="${VERSION:-0.1.0}"
+BUILD="${HALO_BUILD:-$(git rev-list --count HEAD 2>/dev/null || echo 1)}"
+# アップデートの確かめ用（ふだんは使わない）：別のバンドル ID・別の更新の場所で作る
+BUNDLE_ID="${HALO_BUNDLE_ID:-local.yama.vjplayer}"
+FEED_URL="${HALO_FEED_URL:-https://github.com/yama203/halo-vj/releases/latest/download/appcast.xml}"
+APP="${HALO_APP_PATH:-$APP}"
 rm -rf "$APP" build/VJPlayer.app
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp .build/release/VJPlayer "$APP/Contents/MacOS/HaloVJ"
+# 自動アップデート（Sparkle）の部品
+mkdir -p "$APP/Contents/Frameworks"
+ditto .build/release/Sparkle.framework "$APP/Contents/Frameworks/Sparkle.framework"
 # アイコン（無ければ tools/make_icon.swift で作る）
 if [ ! -f Resources/AppIcon.icns ] || [ ! -f Resources/ProjectIcon.icns ]; then
   swift tools/make_icon.swift Resources
@@ -28,12 +40,17 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleAllowMixedLocalizations</key><true/>
   <key>CFBundleName</key><string>Halo VJ</string>
   <key>CFBundleDisplayName</key><string>Halo VJ</string>
-  <key>CFBundleIdentifier</key><string>local.yama.vjplayer</string>
+  <key>CFBundleIdentifier</key><string>$BUNDLE_ID</string>
   <key>CFBundleExecutable</key><string>HaloVJ</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
-  <key>CFBundleShortVersionString</key><string>0.1.0</string>
-  <key>CFBundleVersion</key><string>1</string>
+  <key>CFBundleShortVersionString</key><string>$VERSION</string>
+  <key>CFBundleVersion</key><string>$BUILD</string>
+  <!-- 自動アップデート：GitHub Releases のいちばん新しい版の appcast.xml を見る。中身は下の公開鍵で確かめる -->
+  <key>SUFeedURL</key><string>$FEED_URL</string>
+  <key>SUPublicEDKey</key><string>Dl7bmGO0P/Xcgr1ln0/cS0B80UvmeVB7iE3CjkmpF6s=</string>
+  <key>SUEnableAutomaticChecks</key><true/>
+  <key>SUScheduledCheckInterval</key><integer>86400</integer>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>NSHighResolutionCapable</key><true/>
   <!-- 音に反応させる：マイク・ライン入力の音を読む -->
@@ -91,12 +108,17 @@ fi
 cat > "$APP/Contents/Resources/Credits.html" <<'CREDITS'
 <div style="font: 11px -apple-system; text-align: center">
 <p>NDI&reg; is a registered trademark of Vizrt NDI AB.<br><a href="https://ndi.video">ndi.video</a></p>
+<p>Sparkle &copy; Sparkle Project (MIT License).<br><a href="https://sparkle-project.org">sparkle-project.org</a></p>
 <p>Syphon &copy; Syphon contributors (BSD License).<br><a href="https://syphon.github.io">syphon.github.io</a></p>
 </div>
 CREDITS
 # 署名：作り直しても同じアプリと見なされるように、指定要件をバンドル ID にする
 # （ふつうのアドホック署名だと、作り直すたびにマイクの許可が外れて、音が 0 のまま届く）
-codesign --force --sign - --requirements '=designated => identifier "local.yama.vjplayer"' "$APP"
+codesign --force --sign - --requirements "=designated => identifier \"$BUNDLE_ID\"" "$APP"
 # ファイルの種類とアイコンを Finder に覚え直させる
-/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$APP" >/dev/null 2>&1 || true
-echo "作成しました: $(pwd)/$APP"
+# （確かめ用の別の場所に作ったときは覚えさせない。プロジェクトのファイルがそちらで開くようになるので）
+if [ -z "${HALO_APP_PATH:-}" ]; then
+  /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$APP" >/dev/null 2>&1 || true
+fi
+case "$APP" in /*) SHOW="$APP" ;; *) SHOW="$(pwd)/$APP" ;; esac
+echo "作成しました: $SHOW（版 $VERSION・ビルド $BUILD）"

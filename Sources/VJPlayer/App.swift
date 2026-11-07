@@ -111,6 +111,9 @@ struct VJPlayerApp: App {
                 .environmentObject(engine)
         }
         .commands {
+            CommandGroup(after: .appInfo) {
+                UpdateMenuItems()
+            }
             CommandGroup(replacing: .newItem) {
                 Button("新規プロジェクト") { ProjectMenu.new() }
                     .keyboardShortcut("n", modifiers: .command)
@@ -179,6 +182,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             AudioReactive.shared.startIfNeeded()
         }
+        // アップデートの確かめ用（ふだんは何もしない）
+        _ = AppUpdater.startTestIfRequested()
         // ほかのアプリとのやりとり（Syphon・OSC）：前の設定で始める（画面確認用の別の起動では始めない）
         if ProcessInfo.processInfo.environment["VJ_STATE_PATH"] == nil {
             SyphonOutput.shared.startIfNeeded()
@@ -187,6 +192,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             BeatDetector.shared.startIfNeeded()
             ArtNetOutput.shared.startIfNeeded()
             NDIOutput.shared.startIfNeeded()
+            AppUpdater.shared.startIfNeeded()
         }
 
         // 本番中にスリープ・App Nap で止まらないようにする

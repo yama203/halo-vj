@@ -254,6 +254,7 @@ struct TopBar: View {
             .help("オーディオデバイス一覧を更新")
             AudioInputButton()
             LinkButton()
+            UpdateBadge()
 
             Spacer()
 

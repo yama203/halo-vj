@@ -2,7 +2,7 @@
 
 ライブでのポン出し用の、自分で保守できる macOS 用 VJ ソフト。（ソースコードの中の名前は VJPlayer のまま）
 
-Swift + SwiftUI + Metal + AVFoundation（外部ライブラリなし）。
+Swift + SwiftUI + Metal + AVFoundation。取り込んでいるもの：Syphon（BSD）、Sparkle（自動アップデート、MIT）。NDI は入っている NDI ランタイムを実行時に読み込む。
 
 ## 使い方
 
@@ -116,6 +116,26 @@ Swift + SwiftUI + Metal + AVFoundation（外部ライブラリなし）。
 動画が見つからないときは「見つかりません」のクリップとして設定ごと置かれ、フォルダを選ぶと同じ名前のファイルを探して付け直す（「見つからない動画を探す…」、またはクリップを右クリック →「動画ファイルを付け直す…」）。
 Finder ではプロジェクトファイルに専用のアイコンが付き、ダブルクリックで Halo VJ が開く。
 自動保存はそのまま続くので、次に起動したときは前回の状態（開いていたプロジェクトも）から始まる。
+
+## インストール・アップデート
+
+- [Releases](https://github.com/yama203/halo-vj/releases) から `Halo-VJ-x.y.z.zip` を落として開き、「Halo VJ」をアプリケーションに入れる。Apple シリコンの Mac・macOS 14 以上。
+- Apple の公証を通していないので、初めて開くときは止められる。システム設定 → プライバシーとセキュリティ →「このまま開く」で一度許可する。
+- そのあとは、アプリが自分で新しい版を確かめる（1 日 1 回。アプリのメニュー「アップデートを確認…」でも）。起動したときに見つけたら窓が出る。動いている途中に見つけたら、上部に「新しい版」の小さなボタンが出るだけ（本番中に急に窓は出ない）。押すと変更点を見て、入れるか決められる。入れると入れ替えて開き直す。設定の「アップデート」で、自動で確かめるかを切り替えられる。
+- 中身は Sparkle が、公開鍵（Info.plist の SUPublicEDKey）で署名を確かめてから入れる。
+
+## リリースの作り方
+
+```bash
+tools/release.sh 0.2.0 --dry-run   # build/release に zip と appcast.xml を作るだけ
+tools/release.sh 0.2.0             # タグ v0.2.0 を付けて push し、GitHub Releases に zip と appcast.xml を置く
+```
+
+- 先にコミットしておく（変更が残っているとやめる）。変更点は前のタグからのコミットの題名（`HALO_NOTES=ファイル` で書いたものにできる）。
+- 版の番号は `CFBundleShortVersionString`、ビルド番号はコミットの数（Sparkle はビルド番号で新しいかを比べる）。
+- アプリは `https://github.com/yama203/halo-vj/releases/latest/download/appcast.xml` を見る。いちばん新しい Release に appcast.xml があればよい（リポジトリは公開にしておく）。
+- 署名の秘密鍵：ログインキーチェーン（Sparkle の `generate_keys` で作ったもの）と、その書き出し `~/.halo-vj/sparkle_ed25519`。**無くすと、今入っているアプリに新しい版を届けられなくなる**ので、どこか安全な所にも控えておく。リポジトリには入れない。
+- NDI SDK for Apple が入っていれば、libndi も同梱される（「映像（NDI）」の行を参照）。
 
 ## ビルド
 

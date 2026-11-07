@@ -16,6 +16,9 @@ struct SettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            Section("アップデート") {
+                UpdateSettingsSection()
+            }
         }
         .formStyle(.grouped)
         .frame(width: 460)
