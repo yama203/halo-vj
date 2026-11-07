@@ -274,6 +274,7 @@ enum SelfTest {
         testScenes(check: check, wait: wait)
         testSceneEdit(check: check, wait: wait)
         testSceneClipIDs(check: check)
+        testSceneClipSettings(check: check, wait: wait)
         testDecks(check: check, wait: wait)
         testPads(check: check)
         testMultiSelect(check: check)
@@ -2729,6 +2730,47 @@ enum SelfTest {
         check(e.decks.count == 2 && e.activeByLayer[0] == nil && e.scenes.first { $0.id == sb.id }?.deck == nil
               && e.slots.count == 2 * e.gridSize && e.slots[e.slotIndex(deck: 1, layer: 1, column: 1)]?.generator?.kind == .noise,
               "デッキ：消すと中のクリップは止まって外れ、後ろのデッキが詰まる")
+    }
+
+    /// シーン：流すクリップのエフェクト・位置などを記録して、呼び出すとその値に（フェード中はなめらかに）
+    static func testSceneClipSettings(check: (Bool, String) -> Void, wait: (Double) -> Void) {
+        let e = Engine(persistent: false)
+        e.placeGenerator(.solid, at: 0)
+        let clip = e.slots[0]!
+        e.trigger(0)
+        var blur = Effect(kind: .levels); blur.values[0] = 0.8
+        clip.posX = 0.3; clip.scale = 1.5; clip.rotation = 40; clip.opacity = 0.6; clip.effects = [blur]
+        let a = e.addScene()
+        check(a.clipSettings?[0]?.id == clip.id && a.clipSettings?[0]?.x == 0.3 && a.clipSettings?[0]?.effects.first?.kind == .levels,
+              "シーン：流しているクリップのエフェクト・位置などを記録する")
+        // 値を変えて別のシーン
+        var blur2 = blur; blur2.values[0] = 0.2
+        clip.posX = -0.3; clip.scale = 0.5; clip.rotation = 0; clip.opacity = 1; clip.effects = [blur2]
+        let b = e.addScene()
+        e.updateScene(a.id) { $0.fade = 0 }
+        e.recallScene(a.id)
+        check(clip.posX == 0.3 && clip.scale == 1.5 && clip.rotation == 40 && clip.opacity == 0.6 && clip.effects.first?.values[0] == 0.8,
+              "シーン：呼び出すと、クリップがシーンの値になる")
+        // フェード：途中は間の値
+        e.updateScene(b.id) { $0.fade = 0.6 }
+        e.recallScene(b.id)
+        wait(0.3)
+        let mid = clip.posX, midBlur = clip.effects.first?.values[0] ?? -1
+        wait(0.6)
+        check(mid < 0.3 && mid > -0.3 && midBlur < 0.8 && midBlur > 0.2 && clip.posX == -0.3 && clip.effects.first?.values[0] == 0.2,
+              "シーン：フェードの間、クリップの値もなめらかに動く（途中 x \(String(format: "%.2f", mid))）")
+        // 前に作ったシーン（クリップの記録が無い）は、クリップの値を変えない
+        e.updateScene(a.id) { $0.clipSettings = nil }
+        e.recallScene(a.id)
+        check(clip.posX == -0.3, "シーン：クリップの記録が無い前のシーンは、クリップの値を変えない")
+        // シーンの編集：記録し直す
+        clip.posX = 0.1
+        e.recordSceneClipSettings(a.id)
+        check(e.scenes.first { $0.id == a.id }?.clipSettings?[0]?.x == 0.1, "シーンの編集：クリップの設定を今の値で記録し直せる")
+        // 保存して読み込んでも残る
+        let o = Engine(persistent: false)
+        o.apply(e.makeState(relativeTo: nil), baseDir: nil)
+        check(o.scenes.first { $0.id == a.id }?.clipSettings?[0]?.x == 0.1, "シーン：クリップの設定はプロジェクトに保存される")
     }
 
     /// シーン：クリップを動かしても、同じクリップを流す（目印で探す）

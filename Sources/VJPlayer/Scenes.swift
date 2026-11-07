@@ -26,9 +26,32 @@ struct VJScene: Codable, Identifiable {
     var compEffects: [Effect]
     /// 保存したときの出力の小さな絵（PNG）
     var thumbnail: Data?
+    /// レイヤーごとの、流すクリップの設定（エフェクト・位置・大きさ・回転・不透明度）。呼び出すとクリップをこの値にする
+    /// （無い = 前に作ったシーン。クリップの設定は変えない）
+    var clipSettings: [ClipSceneSettings?]?
 
     static let fadeChoices: [Double] = [0, 0.5, 1, 2, 4, 8]
     static func fadeLabel(_ s: Double) -> String { s <= 0 ? "すぐ" : String(format: s < 1 ? "%.1f秒" : "%.0f秒", s) }
+}
+
+/// シーンに記録する、クリップ 1 つの設定
+struct ClipSceneSettings: Codable {
+    /// どのクリップの設定か（クリップの目印）
+    var id: UUID
+    var x: Double
+    var y: Double
+    var scale: Double
+    var rotation: Double
+    var opacity: Double
+    var effects: [Effect]
+    var anims: [String: ParamAnim]?
+
+    init(_ c: ClipSlot) {
+        id = c.id
+        x = c.posX; y = c.posY; scale = c.scale; rotation = c.rotation; opacity = c.opacity
+        effects = c.effects
+        anims = Engine.encodeAnims(c.anims)
+    }
 }
 
 extension Engine {
@@ -51,7 +74,8 @@ extension Engine {
                        compTransform: SavedTransform(compTransform),
                        masterAnims: Self.encodeAnims(anims),
                        compEffects: effects,
-                       thumbnail: RenderLoop.shared.snapshotPNG())
+                       thumbnail: RenderLoop.shared.snapshotPNG(),
+                       clipSettings: layers.indices.map { r in activeByLayer[r].flatMap { slots[$0] }.map(ClipSceneSettings.init) })
     }
 
     /// 今の状態を新しいシーンとして足す
@@ -96,6 +120,15 @@ extension Engine {
         if sceneDraft?.sceneID == id { reloadSceneDraft(id) }
     }
 
+    /// シーンで流すクリップの設定を、クリップの今の値で記録し直す
+    func recordSceneClipSettings(_ id: UUID) {
+        updateScene(id) { s in
+            s.clipSettings = s.playingIDs?.map { cid in
+                cid.flatMap { cid in slots.compactMap { $0 }.first { $0.id == cid } }.map(ClipSceneSettings.init)
+            }
+        }
+    }
+
     func deleteScene(_ id: UUID) {
         scenes.removeAll { $0.id == id }
         if activeSceneID == id { activeSceneID = nil }
@@ -126,6 +159,17 @@ extension Engine {
                        effects: $0.effects, blendFX: $0.blendFX)
         }
         let startMaster = masterOpacity
+        // クリップ：シーンに設定があれば、そのクリップを今の値からシーンの値へ
+        struct ClipStart { let clip: ClipSlot; let to: ClipSceneSettings
+            let x: Double, y: Double, scale: Double, rotation: Double, opacity: Double; let effects: [Effect] }
+        var clipStarts: [ClipStart] = []
+        if let cs = sc.clipSettings {
+            for set in cs.compactMap({ $0 }) {
+                guard let c = slots.compactMap({ $0 }).first(where: { $0.id == set.id }) else { continue }
+                clipStarts.append(ClipStart(clip: c, to: set, x: c.posX, y: c.posY, scale: c.scale, rotation: c.rotation,
+                                            opacity: c.opacity, effects: c.effects))
+            }
+        }
         let startComp = (compTransform.posX, compTransform.posY, compTransform.scale, compTransform.rotation)
         let startCompFX = effects
 
@@ -166,6 +210,7 @@ extension Engine {
             }
             anims = Self.decodeAnims(sc.masterAnims)
             compTransform.anims = Self.decodeAnims(sc.compTransform.anims)
+            for cs in clipStarts { cs.clip.anims = Self.decodeAnims(cs.to.anims) }
         }
 
         // p（0〜1）の時点の値を入れる
@@ -188,6 +233,13 @@ extension Engine {
             compTransform.set(x: lerp(startComp.0, ct.x, k), y: lerp(startComp.1, ct.y, k),
                               scale: lerp(startComp.2, ct.scale, k), rotation: lerp(startComp.3, ct.rotation, k))
             effects = Self.mixEffects(startCompFX, sc.compEffects, k: k, p: p)
+            for cs in clipStarts {
+                let c = cs.clip, to = cs.to
+                c.posX = lerp(cs.x, to.x, k); c.posY = lerp(cs.y, to.y, k)
+                c.scale = lerp(cs.scale, to.scale, k); c.rotation = lerp(cs.rotation, to.rotation, k)
+                c.opacity = lerp(cs.opacity, to.opacity, k)
+                c.effects = Self.mixEffects(cs.effects, to.effects, k: k, p: p)
+            }
             if p >= 0.5 && !discreteDone { applyDiscrete() }
         }
 

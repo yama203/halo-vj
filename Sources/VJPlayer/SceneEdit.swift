@@ -217,6 +217,13 @@ extension Engine {
         }
         s.layerDecks = ld.contains { $0 != nil } ? ld : nil
         s.layers = d.layers.map(SavedLayer.init)
+        // クリップの設定：前から同じクリップならシーンに記録した値のまま、新しく選んだクリップは今の値を記録する
+        let old = s.clipSettings ?? []
+        s.clipSettings = s.playingIDs?.map { id -> ClipSceneSettings? in
+            guard let id else { return nil }
+            if let o = old.compactMap({ $0 }).first(where: { $0.id == id }) { return o }
+            return slots.compactMap { $0 }.first { $0.id == id }.map(ClipSceneSettings.init)
+        }
         s.masterOpacity = d.masterOpacity
         s.compTransform = SavedTransform(d.compTransform)
         s.masterAnims = Self.encodeAnims(d.anims)
@@ -269,6 +276,12 @@ struct SceneEditBanner: View {
                     .opacity(0.85)
                     .lineLimit(1)
                 Spacer(minLength: 4)
+                Button {
+                    engine.recordSceneClipSettings(sc.id)
+                } label: {
+                    Label("クリップの設定を記録", systemImage: "square.and.arrow.down")
+                }
+                .help("このシーンで流すクリップの、今のエフェクト・位置・大きさ・回転・不透明度を、このシーンの値として記録する")
                 Button {
                     engine.recallScene(sc.id)
                 } label: {
