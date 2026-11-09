@@ -62,6 +62,43 @@ final class SystemMonitor: ObservableObject {
         lastAppCPU = cpu
         lastHostTicks = host
         DispatchQueue.main.async { if self.sample != s { self.sample = s } }
+        logIfAsked(s, wall: wall)
+    }
+
+    // MARK: 安定性のテスト用：VJ_STATS_LOG=ファイル で、10 秒ごとに様子を書き足す（CSV）
+    private static let logPath = ProcessInfo.processInfo.environment["VJ_STATS_LOG"]
+    private var logStart = 0.0
+    private var lastLog = 0.0
+    private var worstGap = 0.0
+    private var fpsSum = 0.0, fpsN = 0.0, fpsMin = 1e9
+
+    private func logIfAsked(_ s: Sample, wall: Double) {
+        guard let path = Self.logPath, s.fps > 0 else { return }
+        if logStart == 0 {
+            logStart = wall; lastLog = wall
+            try? "経過秒,描画fps平均,描画fps最低,最長の止まりms,アプリCPU%,GPU%,メモリMB,開いているファイル,スレッド,自動の切り替え回数\n"
+                .write(toFile: path, atomically: true, encoding: .utf8)
+        }
+        worstGap = max(worstGap, s.maxGapMs)
+        fpsSum += s.fps; fpsN += 1; fpsMin = min(fpsMin, s.fps)
+        guard wall - lastLog >= 10 else { return }
+        lastLog = wall
+        let fds = (try? FileManager.default.contentsOfDirectory(atPath: "/dev/fd").count) ?? -1
+        var threads: thread_act_array_t?
+        var count: mach_msg_type_number_t = 0
+        var nThreads = -1
+        if task_threads(mach_task_self_, &threads, &count) == KERN_SUCCESS {
+            nThreads = Int(count)
+            if let threads {
+                for i in 0..<Int(count) { mach_port_deallocate(mach_task_self_, threads[i]) }
+                vm_deallocate(mach_task_self_, vm_address_t(UInt(bitPattern: threads)), vm_size_t(Int(count) * MemoryLayout<thread_t>.stride))
+            }
+        }
+        let fired = DispatchQueue.main.sync { Engine.shared.autoRunner.firedCount }
+        let line = String(format: "%.0f,%.1f,%.1f,%.0f,%.1f,%.0f,%.0f,%d,%d,%d\n", wall - logStart, fpsSum / max(fpsN, 1), fpsMin,
+                          worstGap, s.appCPU, s.gpu ?? -1, s.memoryMB, fds, nThreads, fired)
+        if let h = FileHandle(forWritingAtPath: path) { h.seekToEndOfFile(); h.write(line.data(using: .utf8)!); h.closeFile() }
+        worstGap = 0; fpsSum = 0; fpsN = 0; fpsMin = 1e9
     }
 
     /// このアプリが使った CPU 時間（秒、全スレッドの合計）

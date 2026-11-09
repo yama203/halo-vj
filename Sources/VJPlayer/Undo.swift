@@ -64,6 +64,8 @@ extension Engine {
         defer { h.update() }
         guard let prev = h.committed else { h.committed = now; return false }
         guard prev != now else { return false }
+        // 自動操縦が変えている間の変化は、歩にしない（今の中身を「戻す先のはじめ」にするだけ）
+        if CACurrentMediaTime() < undoAbsorbUntil { h.committed = now; return false }
         h.past.append(prev)
         if h.past.count > UndoHistory.limit { h.past.removeFirst(h.past.count - UndoHistory.limit) }
         h.future = []

@@ -108,6 +108,8 @@ final class AutopilotRunner: ObservableObject {
     private var timer: Timer?
     /// 自分で出している最中（人の操作と見分ける）
     private(set) var acting = false
+    /// 自動で切り替えた回数（安定性のテスト用）
+    private(set) var firedCount = 0
     /// テスト用：時刻を決め打ちにする
     var clock: () -> Double = { CACurrentMediaTime() }
 
@@ -295,9 +297,20 @@ final class AutopilotRunner: ObservableObject {
         guard let key, key != cur, let chosen = all.first(where: { $0.key == key }) else { return }
         s.recent.append(key)
         if s.recent.count > 64 { s.recent.removeFirst(s.recent.count - 64) }
+        // 切り替えとフェードの間の変化は、元に戻すの記録に入れない（席に戻って ⌘Z を押すと、自分の操作が戻るように）
+        let fadeLen: Double = {
+            switch rule.target {
+            case .scenes: return rule.fade ?? engine.scenes.first { $0.id.uuidString == key }?.fade ?? 1
+            case .layer(let r): return rule.fade ?? (engine.layers.indices.contains(r) ? engine.layers[r].fadeTime : 0)
+            }
+        }()
+        // 人の変更がまだ歩になっていなければ、先に 1 歩にしておく（自動の変化と一緒に消えないように）
+        if engine.undoAbsorbUntil < CACurrentMediaTime() { engine.commitUndoStep() }
+        engine.undoAbsorbUntil = max(engine.undoAbsorbUntil, CACurrentMediaTime() + max(fadeLen, 0) + UndoHistory.settle + 1)
         acting = true
         chosen.run()
         acting = false
+        firedCount += 1
         // 次を決めておく
         s.planned = nil
         plan(rule, &s)

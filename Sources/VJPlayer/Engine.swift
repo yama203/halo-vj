@@ -334,6 +334,8 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
         }
     }
     lazy var autoRunner = AutopilotRunner(engine: self)
+    /// この時刻までの変化は、元に戻すの歩にしない（自動操縦の切り替えとそのフェードの間）
+    var undoAbsorbUntil = 0.0
 
     /// 照明（Art-Net / DMX）の灯体（プロジェクトに保存する）
     @Published var dmxMap = DMXMap() {

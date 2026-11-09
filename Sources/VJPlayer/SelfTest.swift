@@ -276,6 +276,7 @@ enum SelfTest {
         testSceneClipIDs(check: check)
         testSceneClipSettings(check: check, wait: wait)
         testAutopilot(check: check)
+        testAutopilotUndo(check: check, wait: wait)
         testDecks(check: check, wait: wait)
         testPads(check: check)
         testMultiSelect(check: check)
@@ -2731,6 +2732,36 @@ enum SelfTest {
         check(e.decks.count == 2 && e.activeByLayer[0] == nil && e.scenes.first { $0.id == sb.id }?.deck == nil
               && e.slots.count == 2 * e.gridSize && e.slots[e.slotIndex(deck: 1, layer: 1, column: 1)]?.generator?.kind == .noise,
               "デッキ：消すと中のクリップは止まって外れ、後ろのデッキが詰まる")
+    }
+
+    /// 自動操縦：自動の切り替えは元に戻すの記録に入らない。人の操作は入る
+    static func testAutopilotUndo(check: (Bool, String) -> Void, wait: (Double) -> Void) {
+        let e = Engine(persistent: false)
+        e.placeGenerator(.solid, at: 0)
+        e.trigger(0)
+        e.layers[0].opacity = 1
+        let a = e.addScene()
+        e.layers[0].opacity = 0.3
+        let b = e.addScene()
+        e.recallScene(a.id, fade: 0)
+        e.autopilot = AutoPilot(rules: [AutoRule(target: .scenes, unit: .minutes, every: 10, jitter: 0, pick: .sequence, fade: 0)],
+                                pauseAfterManual: 0)
+        wait(0.8); e.commitUndoStep(); e.resetUndo()
+        // 人の操作：不透明度を変える（1 歩）
+        e.layers[0].opacity = 0.7
+        wait(0.8)
+        // 自動で切り替える（シーン b：不透明度 0.3）
+        e.setAutopilot(true)
+        e.autoRunner.skip(e.autopilot.rules[0].id)
+        let afterAuto = e.layers[0].opacity
+        wait(2.0)
+        // ⌘Z：自動の切り替えは飛ばして、人の操作（0.7 にした）を 1 つ戻す → 不透明度 1
+        e.undo()
+        let afterUndo = e.layers[0].opacity
+        e.setAutopilot(false)
+        check(abs(afterAuto - 0.3) < 1e-9 && abs(afterUndo - 1) < 1e-9 && !e.undoHistory.canUndo,
+              "自動操縦：自動の切り替えは元に戻すの記録に入らず、⌘Z で自分の操作が戻る（自動のあと \(afterAuto) → 戻すと \(afterUndo)）")
+        _ = b
     }
 
     /// 自動操縦：時間・小節ごとに回す、順に／ばらばら、人が触ったら休む、保存
