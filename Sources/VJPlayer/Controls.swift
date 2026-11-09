@@ -261,6 +261,7 @@ final class ControlHub: ObservableObject {
             return e.isPadHeld(e.pads[i].id)
         case "blackout": return e.isBlackout
         case "record": return Recorder.shared.isRecording
+        case "auto": return e.autoRunner.isOn
         default: return false
         }
     }

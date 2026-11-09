@@ -200,6 +200,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             options: [.userInitiated, .idleDisplaySleepDisabled, .latencyCritical],
             reason: "VJ 出力中")
 
+        // 画面確認用：VJ_AUTOPILOT_ON で起動時に自動操縦をオンにする
+        if ProcessInfo.processInfo.environment["VJ_AUTOPILOT_ON"] != nil {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { Engine.shared.setAutopilot(true) }
+        }
         // 画面確認用：VJ_TRIGGER=番号,番号 で起動時にそのクリップを再生する
         if let v = ProcessInfo.processInfo.environment["VJ_TRIGGER"] {
             let list = v.split(separator: ",").compactMap { Int($0) }

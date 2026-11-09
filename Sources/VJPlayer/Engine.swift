@@ -325,6 +325,16 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
 
     private(set) var homographyInverse = matrix_identity_float3x3
 
+    /// 自動操縦のルール（プロジェクトに保存する。オン・オフは autoRunner に。保存しない）
+    @Published var autopilot = AutoPilot() {
+        didSet {
+            guard autopilot != oldValue else { return }
+            scheduleSave()
+            autoRunner.rulesChanged()
+        }
+    }
+    lazy var autoRunner = AutopilotRunner(engine: self)
+
     /// 照明（Art-Net / DMX）の灯体（プロジェクトに保存する）
     @Published var dmxMap = DMXMap() {
         didSet {
@@ -744,6 +754,8 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
     func trigger(_ index: Int, fadeTime fadeOverride: Double? = nil, select: Bool = true) {
         guard index >= 0, index < slots.count, let slot = slots[index] else { return }
         let r = layerOf(index)
+        // 人が出したら、自動操縦のそのレイヤーのルールはしばらく休む
+        autoRunner.noteManual(layer: r)
         // キューで消している途中のレイヤーを出し直したら、消すのをやめる
         cancelCueFade(layer: r)
         // キューで一時的に決めた「終わったら」は、出し直すと外れる（キューから出すときは、この後でまた入れる）
@@ -1675,6 +1687,8 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
         var outputMap: OutputMap?
         /// 照明（Art-Net / DMX）
         var dmxMap: DMXMap?
+        /// 自動操縦のルール
+        var autopilot: AutoPilot?
         var audioDeviceUID: String?
         var masterOpacity: Double?
         var masterVolume: Double?
@@ -1774,6 +1788,7 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
             corners: corners.map { [$0.x, $0.y] },
             outputMap: outputMap.slices.isEmpty && !outputMap.enabled ? nil : outputMap,
             dmxMap: dmxMap.fixtures.isEmpty ? nil : dmxMap,
+            autopilot: autopilot.rules.isEmpty ? nil : autopilot,
             audioDeviceUID: nil,
             masterOpacity: masterOpacity,
             masterVolume: masterVolume,
@@ -1847,6 +1862,7 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
         corners = state.corners.count == 4 ? state.corners.map { SIMD2($0[0], $0[1]) } : Engine.defaultCorners
         outputMap = state.outputMap ?? OutputMap()
         dmxMap = state.dmxMap ?? DMXMap()
+        autopilot = state.autopilot ?? AutoPilot()
         for (layer, saved) in zip(layers, state.layers ?? []) {
             layer.opacity = min(max(saved.opacity, 0), 1)
             layer.blend = BlendMode(rawValue: saved.blend) ?? .normal

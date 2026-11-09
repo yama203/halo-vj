@@ -275,6 +275,7 @@ enum SelfTest {
         testSceneEdit(check: check, wait: wait)
         testSceneClipIDs(check: check)
         testSceneClipSettings(check: check, wait: wait)
+        testAutopilot(check: check)
         testDecks(check: check, wait: wait)
         testPads(check: check)
         testMultiSelect(check: check)
@@ -2730,6 +2731,94 @@ enum SelfTest {
         check(e.decks.count == 2 && e.activeByLayer[0] == nil && e.scenes.first { $0.id == sb.id }?.deck == nil
               && e.slots.count == 2 * e.gridSize && e.slots[e.slotIndex(deck: 1, layer: 1, column: 1)]?.generator?.kind == .noise,
               "デッキ：消すと中のクリップは止まって外れ、後ろのデッキが詰まる")
+    }
+
+    /// 自動操縦：時間・小節ごとに回す、順に／ばらばら、人が触ったら休む、保存
+    static func testAutopilot(check: (Bool, String) -> Void) {
+        let e = Engine(persistent: false)
+        let c = e.columns
+        for k in 0..<4 { e.placeGenerator(.solid, at: k) }          // L1 に 4 つ
+        e.placeGenerator(.noise, at: c); e.placeGenerator(.stripes, at: c + 1)  // L2 に 2 つ
+        e.trigger(0)
+        let s1 = e.addScene()
+        e.trigger(1)
+        let s2 = e.addScene()
+        e.trigger(2)
+        let s3 = e.addScene()
+        let run = e.autoRunner
+        let t0 = CACurrentMediaTime()
+        var now = t0
+        run.clock = { now }
+        // シーンを 10 秒ごと（ゆらぎなし）・順に
+        e.autopilot = AutoPilot(rules: [AutoRule(target: .scenes, unit: .seconds, every: 10, jitter: 0, pick: .sequence, fade: 0)],
+                                pauseAfterManual: 30)
+        e.recallScene(s1.id, fade: 0)
+        e.setAutopilot(true)
+        now += 5; run.tick()
+        let before = e.activeSceneID
+        now += 5.1; run.tick()
+        let a1 = e.activeSceneID
+        now += 10.1; run.tick()
+        let a2 = e.activeSceneID
+        check(before == s1.id && a1 == s2.id && a2 == s3.id, "自動操縦：決めた秒数ごとに、シーンを順に回す")
+        // 人がシーンを出したら休む（30 秒）。休みが明けたらまた回る
+        e.recallScene(s1.id, fade: 0)
+        now += 10.1; run.tick(); now += 10.1; run.tick()
+        let paused = e.activeSceneID
+        now += 15; run.tick(); now += 10.1; run.tick()
+        check(paused == s1.id && e.activeSceneID != s1.id && run.nextInfo != nil,
+              "自動操縦：人がシーンを出すとしばらく休み、明けたらまた回す")
+        // ばらばら：今のものは続けて選ばない。何度回しても、同じものが続かない
+        e.autopilot.rules[0].pick = .random
+        var last = e.activeSceneID, repeats = 0, seen = Set<UUID>()
+        for _ in 0..<30 {
+            now += 10.1; run.tick()
+            if e.activeSceneID == last { repeats += 1 }
+            last = e.activeSceneID
+            if let a = last { seen.insert(a) }
+        }
+        check(repeats == 0 && seen.count == 3, "自動操縦：ばらばらでも同じシーンを続けず、全部を使う")
+        // 使うシーンを絞る
+        e.autopilot.rules[0].sceneIDs = [s1.id, s3.id]
+        var only = true
+        for _ in 0..<10 { now += 10.1; run.tick(); if e.activeSceneID == s2.id { only = false } }
+        check(only, "自動操縦：選んだシーンだけを使う")
+        // レイヤーのクリップを小節ごと（240 BPM で 1 小節 1 秒）。小節の区切りで替わる
+        e.bpm = 240
+        e.autopilot = AutoPilot(rules: [AutoRule(target: .layer(1), unit: .bars, every: 2, jitter: 0, pick: .sequence, fade: 0)],
+                                pauseAfterManual: 0)
+        e.trigger(c)
+        let bar0 = Int(floor(e.beatClockForOSC().beat(at: now) / 4))
+        run.tick()
+        // 次の 2 小節の区切りの少し後へ
+        let target = Double((bar0 / 2 + 1) * 2) * 4
+        let clockNow = e.beatClockForOSC()
+        var tt = now
+        while clockNow.beat(at: tt) < target + 0.2 { tt += 0.05 }
+        now = tt; run.tick()
+        check(e.beatClockForOSC().bpm == 240 && e.activeByLayer[1] == c + 1, "自動操縦：レイヤーのクリップを、小節の区切りで替える")
+        // 自動で出したものは、人の操作と数えない（休まない）／オフにすると止まる
+        e.setAutopilot(false)
+        let off = e.activeByLayer[1]
+        now += 30; run.tick()
+        check(e.activeByLayer[1] == off && run.nextInfo == nil, "自動操縦：オフにすると止まる")
+        // プロジェクトに保存される（オン・オフは保存しない）
+        let o = Engine(persistent: false)
+        o.apply(e.makeState(relativeTo: nil), baseDir: nil)
+        check(o.autopilot.rules.first?.target == .layer(1) && o.autopilot.rules.first?.unit == .bars && !o.autoRunner.isOn,
+              "自動操縦：ルールはプロジェクトに保存される（開いたときはオフ）")
+        // ルールが無いときにオンにすると、おまかせのルールを作る（シーンが 2 つ以上 → シーンを回す）
+        let f = Engine(persistent: false)
+        f.placeGenerator(.solid, at: 0); f.trigger(0); _ = f.addScene(); _ = f.addScene()
+        f.setAutopilot(true)
+        check(f.autopilot.rules.first?.target == .scenes && f.autoRunner.isOn, "自動操縦：ルールが無ければ、おまかせのルールで始める")
+        f.setAutopilot(false)
+        // OSC からオン・オフ
+        OSCCommands.run(OSCMessage(address: "/halo/auto", args: [.float(1)]), engine: f)
+        let on1 = f.autoRunner.isOn
+        OSCCommands.run(OSCMessage(address: "/halo/auto", args: [.float(0)]), engine: f)
+        check(on1 && !f.autoRunner.isOn, "自動操縦：OSC（/halo/auto）でオン・オフできる")
+        _ = s2
     }
 
     /// シーン：流すクリップのエフェクト・位置などを記録して、呼び出すとその値に（フェード中はなめらかに）

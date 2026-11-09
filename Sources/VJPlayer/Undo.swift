@@ -141,6 +141,7 @@ extension Engine {
         corners = state.corners.count == 4 ? state.corners.map { SIMD2($0[0], $0[1]) } : Engine.defaultCorners
         outputMap = state.outputMap ?? OutputMap()
         dmxMap = state.dmxMap ?? DMXMap()
+        autopilot = state.autopilot ?? AutoPilot()
         for (layer, saved) in zip(layers, state.layers ?? []) {
             layer.opacity = min(max(saved.opacity, 0), 1)
             layer.blend = BlendMode(rawValue: saved.blend) ?? .normal

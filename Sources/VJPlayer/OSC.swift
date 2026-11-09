@@ -333,6 +333,7 @@ enum OSCCommands {
         ("/halo/scene/N", "N 番目のシーンを呼ぶ"),
         ("/halo/deck/N", "N 番目のデッキにする"),
         ("/halo/record [0/1]", "録画を始める・止める"),
+        ("/halo/auto [0/1]", "自動操縦をオン・オフ（値なしで切り替え）"),
     ]
 
     /// メインスレッドで実行する
@@ -388,6 +389,8 @@ enum OSCCommands {
             if pressed, let i = n(2), e.decks.indices.contains(i) { e.currentDeck = i }
         case "record":
             if let v { if (v > 0.5) != Recorder.shared.isRecording { Recorder.shared.toggle() } } else { Recorder.shared.toggle() }
+        case "auto":
+            if let v { e.setAutopilot(v > 0.5) } else { e.setAutopilot(!e.autoRunner.isOn) }
         default:
             break
         }

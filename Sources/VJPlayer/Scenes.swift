@@ -145,6 +145,8 @@ extension Engine {
     /// シーンに切り替える。フェード時間があれば、クリップはクロスフェード、値はなめらかに動かす
     func recallScene(_ id: UUID, fade fadeOverride: Double? = nil) {
         guard let sc = scenes.first(where: { $0.id == id }) else { return }
+        // 人がシーンを出したら、自動操縦はしばらく休む
+        autoRunner.noteManual(layer: nil)
         sceneTween?.invalidate()
         sceneTween = nil
         finishCueFade()
