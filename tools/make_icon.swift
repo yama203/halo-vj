@@ -3,7 +3,7 @@
 // → <出力フォルダ>/AppIcon.iconset・ProjectIcon.iconset（各サイズの PNG）と、確認用の 1024px の PNG を作る。
 // .icns にするのは tools/make_app.sh（iconutil）。
 //
-// デザイン：暗い紫の角丸の板に、光る輪 1 本・その上に 1 拍目の光・黄色い再生ボタン（立体）。
+// デザイン：黒に近い角丸の板に、ピンク・水色・黄の光の円が 3 つ重なる（光を足すと、重なった所が混ざって真ん中が白）。
 // 数値は 1024 x 1024 の画面での値（macOS のアイコンの決まりで、板は 824 x 824 を真ん中に置く）
 import AppKit
 import CoreGraphics
@@ -31,105 +31,55 @@ func drawIcon(_ ctx: CGContext, size: CGFloat) {
     ctx.saveGState()
     ctx.setShadow(offset: CGSize(width: 0, height: 14), blur: 28, color: rgb(0x000000, 0.45))
     ctx.addPath(boardPath)
-    ctx.setFillColor(rgb(0x140A28))
+    ctx.setFillColor(rgb(0x050508))
     ctx.fillPath()
     ctx.restoreGState()
-    // 上が少し明るい縦のグラデーション
     ctx.saveGState()
     ctx.addPath(boardPath)
     ctx.clip()
-    let bg = CGGradient(colorsSpace: space, colors: [rgb(0x2A1650), rgb(0x150B2C), rgb(0x0C0619)] as CFArray,
+    // 上が少し明るい、黒に近い縦のグラデーション
+    let bg = CGGradient(colorsSpace: space, colors: [rgb(0x15151F), rgb(0x0B0B12), rgb(0x050508)] as CFArray,
                         locations: [0, 0.55, 1])!
     ctx.drawLinearGradient(bg, start: CGPoint(x: 512, y: 100), end: CGPoint(x: 512, y: 924), options: [])
-    // 真ん中のほのかな紫の光
-    let glow = CGGradient(colorsSpace: space, colors: [rgb(0x6A3BE0, 0.35), rgb(0x6A3BE0, 0)] as CFArray,
-                          locations: [0, 1])!
-    ctx.drawRadialGradient(glow, startCenter: CGPoint(x: 512, y: 512), startRadius: 0,
-                           endCenter: CGPoint(x: 512, y: 512), endRadius: 400, options: [])
+
+    // 3 色の光（ピンク・水色・黄）を足して重ねる：2 色の所は桃色・ラベンダー・薄緑、3 色の真ん中は白
+    ctx.setBlendMode(.plusLighter)
+    let colors: [UInt32] = [0xFF2D78, 0x26D9FF, 0xFFC42E]
+    let r: CGFloat = 200, d: CGFloat = 112, alpha: CGFloat = 0.74
+    for (i, col) in colors.enumerated() {
+        let t = CGFloat(i) / 3 * 2 * .pi - .pi / 2
+        let p = CGPoint(x: 512 + cos(t) * d, y: 532 + sin(t) * d)
+        let rect = CGRect(x: p.x - r, y: p.y - r, width: 2 * r, height: 2 * r)
+        ctx.saveGState()
+        ctx.addEllipse(in: rect)
+        ctx.clip()
+        // 左上が少し明るい（光の玉らしく）
+        let g = CGGradient(colorsSpace: space, colors: [rgb(col, min(alpha * 1.15, 1)), rgb(col, alpha), rgb(col, alpha * 0.9)] as CFArray,
+                           locations: [0, 0.7, 1])!
+        ctx.drawRadialGradient(g, startCenter: CGPoint(x: p.x - r * 0.15, y: p.y - r * 0.2), startRadius: 0,
+                               endCenter: p, endRadius: r, options: [.drawsAfterEndLocation])
+        ctx.restoreGState()
+    }
+    ctx.setBlendMode(.normal)
+
     // 上側の光沢
     let gloss = CGMutablePath()
-    gloss.move(to: CGPoint(x: 100, y: 360))
-    gloss.addQuadCurve(to: CGPoint(x: 924, y: 360), control: CGPoint(x: 512, y: 190))
+    gloss.move(to: CGPoint(x: 100, y: 330))
+    gloss.addQuadCurve(to: CGPoint(x: 924, y: 330), control: CGPoint(x: 512, y: 180))
     gloss.addLine(to: CGPoint(x: 924, y: 100))
     gloss.addLine(to: CGPoint(x: 100, y: 100))
     gloss.closeSubpath()
     ctx.addPath(gloss)
     ctx.clip()
-    let gl = CGGradient(colorsSpace: space, colors: [rgb(0xFFFFFF, 0.10), rgb(0xFFFFFF, 0.02)] as CFArray,
+    let gl = CGGradient(colorsSpace: space, colors: [rgb(0xFFFFFF, 0.08), rgb(0xFFFFFF, 0.01)] as CFArray,
                         locations: [0, 1])!
-    ctx.drawLinearGradient(gl, start: CGPoint(x: 512, y: 100), end: CGPoint(x: 512, y: 360), options: [])
+    ctx.drawLinearGradient(gl, start: CGPoint(x: 512, y: 100), end: CGPoint(x: 512, y: 330), options: [])
     ctx.restoreGState()
     // 板のふち（内側の細い光）
-    ctx.saveGState()
-    ctx.addPath(CGPath(roundedRect: board.insetBy(dx: 3, dy: 3), cornerWidth: 182, cornerHeight: 182, transform: nil))
-    ctx.setStrokeColor(rgb(0xFFFFFF, 0.08))
-    ctx.setLineWidth(4)
+    ctx.addPath(CGPath(roundedRect: board.insetBy(dx: 1.5, dy: 1.5), cornerWidth: 184, cornerHeight: 184, transform: nil))
+    ctx.setStrokeColor(rgb(0xFFFFFF, 0.10))
+    ctx.setLineWidth(3)
     ctx.strokePath()
-    ctx.restoreGState()
-
-    let c = CGPoint(x: 512, y: 512)
-    let r: CGFloat = 252
-
-    // 輪：ぼかした太い光 → 細い明るい線
-    ctx.saveGState()
-    ctx.setShadow(offset: .zero, blur: 60, color: rgb(0x7B4DFF, 0.9))
-    ctx.setStrokeColor(rgb(0x7B4DFF, 0.32))
-    ctx.setLineWidth(54)
-    ctx.addArc(center: c, radius: r, startAngle: 0, endAngle: .pi * 2, clockwise: false)
-    ctx.strokePath()
-    ctx.restoreGState()
-    ctx.saveGState()
-    ctx.setShadow(offset: .zero, blur: 18, color: rgb(0xB48CFF, 0.8))
-    ctx.setStrokeColor(rgb(0xC9A6FF))
-    ctx.setLineWidth(13)
-    ctx.addArc(center: c, radius: r, startAngle: 0, endAngle: .pi * 2, clockwise: false)
-    ctx.strokePath()
-    ctx.restoreGState()
-
-    // 1 拍目の光（輪の上）
-    let dot = CGPoint(x: 512, y: 512 - r)
-    ctx.saveGState()
-    let halo = CGGradient(colorsSpace: space, colors: [rgb(0xFFB067, 0.75), rgb(0xFF8A3D, 0)] as CFArray,
-                          locations: [0, 1])!
-    ctx.drawRadialGradient(halo, startCenter: dot, startRadius: 0, endCenter: dot, endRadius: 110, options: [])
-    ctx.setShadow(offset: .zero, blur: 30, color: rgb(0xFF8A3D, 1))
-    ctx.setFillColor(rgb(0xFFC48A))
-    ctx.fillEllipse(in: CGRect(x: dot.x - 40, y: dot.y - 40, width: 80, height: 80))
-    ctx.restoreGState()
-    ctx.setFillColor(rgb(0xFFF1DC, 0.9))
-    ctx.fillEllipse(in: CGRect(x: dot.x - 16, y: dot.y - 22, width: 26, height: 22))
-
-    // 再生ボタン（角を丸めた三角、上が明るい黄色）
-    let p0 = CGPoint(x: 512 - 82, y: 512 - 146), p1 = CGPoint(x: 512 + 148, y: 512 + 4)
-    let p2 = CGPoint(x: 512 - 82, y: 512 + 154)
-    let tri = CGMutablePath()
-    tri.move(to: CGPoint(x: (p0.x + p2.x) / 2, y: (p0.y + p2.y) / 2))
-    tri.addArc(tangent1End: p0, tangent2End: p1, radius: 34)
-    tri.addArc(tangent1End: p1, tangent2End: p2, radius: 34)
-    tri.addArc(tangent1End: p2, tangent2End: p0, radius: 34)
-    tri.closeSubpath()
-    ctx.saveGState()
-    ctx.setShadow(offset: CGSize(width: 0, height: 16), blur: 30, color: rgb(0x000000, 0.5))
-    ctx.addPath(tri)
-    ctx.setFillColor(rgb(0xE0A800))
-    ctx.fillPath()
-    ctx.restoreGState()
-    ctx.saveGState()
-    ctx.addPath(tri)
-    ctx.clip()
-    let ty = CGGradient(colorsSpace: space, colors: [rgb(0xFFE680), rgb(0xFFD23F), rgb(0xE8A400)] as CFArray,
-                        locations: [0, 0.5, 1])!
-    ctx.drawLinearGradient(ty, start: CGPoint(x: 512, y: 512 - 145), end: CGPoint(x: 512, y: 512 + 155), options: [])
-    // 上半分の照り
-    let shine = CGMutablePath()
-    shine.move(to: CGPoint(x: 512 - 90, y: 512 - 150))
-    shine.addLine(to: CGPoint(x: 512 + 160, y: 512 + 2))
-    shine.addLine(to: CGPoint(x: 512 - 90, y: 512 + 20))
-    shine.closeSubpath()
-    ctx.addPath(shine)
-    ctx.setFillColor(rgb(0xFFFFFF, 0.16))
-    ctx.fillPath()
-    ctx.restoreGState()
 
     ctx.restoreGState()
 }
@@ -157,13 +107,13 @@ func drawDocIcon(_ ctx: CGContext, size: CGFloat) {
     ctx.saveGState()
     ctx.setShadow(offset: CGSize(width: 0, height: 10), blur: 22, color: rgb(0x000000, 0.35))
     ctx.addPath(page)
-    ctx.setFillColor(rgb(0xF4F1FA))
+    ctx.setFillColor(rgb(0xF4F4F7))
     ctx.fillPath()
     ctx.restoreGState()
     ctx.saveGState()
     ctx.addPath(page)
     ctx.clip()
-    let paper = CGGradient(colorsSpace: space, colors: [rgb(0xFFFFFF), rgb(0xECE6F6)] as CFArray, locations: [0, 1])!
+    let paper = CGGradient(colorsSpace: space, colors: [rgb(0xFFFFFF), rgb(0xEBEBF1)] as CFArray, locations: [0, 1])!
     ctx.drawLinearGradient(paper, start: CGPoint(x: 512, y: t), end: CGPoint(x: 512, y: b), options: [])
     ctx.restoreGState()
     // 折り返し
@@ -174,7 +124,7 @@ func drawDocIcon(_ ctx: CGContext, size: CGFloat) {
     flap.addLine(to: CGPoint(x: r, y: t + fold))
     flap.closeSubpath()
     ctx.addPath(flap)
-    ctx.setFillColor(rgb(0xD6CCE8))
+    ctx.setFillColor(rgb(0xD5D5DE))
     ctx.fillPath()
     // アプリのアイコン（小さく）
     ctx.saveGState()
@@ -186,7 +136,7 @@ func drawDocIcon(_ ctx: CGContext, size: CGFloat) {
     // 文字
     let text = NSAttributedString(string: "HALO VJ", attributes: [
         .font: NSFont.systemFont(ofSize: 74, weight: .heavy),
-        .foregroundColor: NSColor(srgbRed: 0.36, green: 0.22, blue: 0.70, alpha: 1),
+        .foregroundColor: NSColor(srgbRed: 0.16, green: 0.16, blue: 0.22, alpha: 1),
         .kern: 6,
     ])
     let line = CTLineCreateWithAttributedString(text)
