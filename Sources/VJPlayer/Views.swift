@@ -52,14 +52,14 @@ struct ContentView: View {
             GeometryReader { g in
                 let st = layout.state
                 // 境目の位置（ドラッグで変えられる。別ウィンドウにしたものは場所を取らない）
-                let showMonitor = !layout.isDetached(.monitor)
+                let showMonitor = layout.isShownInMain(.monitor)
                 let monitorW = showMonitor ? min(max(CGFloat(st.monitorWidth), 220), max(g.size.width * 0.6, 220)) : 0
                 let gridWidth = g.size.width - 24 - (showMonitor ? 12 + monitorW : 0)
                 let cell = ClipGrid.cellSize(forWidth: gridWidth, columns: engine.columns,
                                              size: GridSize(rawValue: gridSizeRaw) ?? .large)
                 let gridHeight = ClipGrid.contentHeight(cell: cell.height, layers: engine.layerCount)
                 let monitorHeight = showMonitor ? (monitorW / max(engine.outputAspect, 0.1)) + 24 : 0
-                let padHeight: CGFloat = layout.isDetached(.pads) ? 0 : 58
+                let padHeight: CGFloat = layout.isShownInMain(.pads) ? 58 : 0
                 let handle: CGFloat = 8
                 let maxTop = max(g.size.height - padHeight - handle - 160, 150)
                 // グリッドの高さ：おまかせなら中身に合わせる（下のパネルは 370 は残す）
@@ -158,6 +158,7 @@ struct OutputMonitor: View {
                 // 自由レイアウトでは区画のタブの横にある
                 if !layout.isDetached(.monitor) && !layout.state.dockMode {
                     DetachButton(panel: .monitor)
+                    PanelCloseButton(panel: .monitor)
                 }
                 if editCorners {
                     Text("四隅の黄色い点をドラッグ")
@@ -218,6 +219,28 @@ struct OutputMonitor: View {
 
 // MARK: - 上部バー
 
+/// 上のバーの左端の、小さなアプリのアイコン（押すと「Halo VJ について」）
+struct AppBadge: View {
+    var body: some View {
+        Button { NSApp.orderFrontStandardAboutPanel(nil) } label: {
+            Image(nsImage: AppBadge.icon)
+                .resizable()
+                .interpolation(.high)
+                .frame(width: 26, height: 26)
+        }
+        .buttonStyle(.plain)
+        .help("\(AppInfo.name) " + (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "") + "（押すとこのアプリについて）")
+    }
+
+    /// .app ならアプリのアイコン。開発中（.app でない）は、同じ絵を Resources から
+    static let icon: NSImage = {
+        if Bundle.main.bundleURL.pathExtension == "app" { return NSApp.applicationIconImage }
+        let dev = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Resources/icon_1024.png")
+        return NSImage(contentsOf: dev) ?? NSApp.applicationIconImage
+    }()
+}
+
 struct TopBar: View {
     @EnvironmentObject var engine: Engine
     @ObservedObject var output = OutputController.shared
@@ -225,7 +248,8 @@ struct TopBar: View {
     @State private var audioDevices: [AudioDevice] = AudioDevices.outputDevices()
 
     var body: some View {
-        HStack(spacing: 14) {
+        HStack(spacing: 10) {
+            AppBadge()
             Picker("出力", selection: $output.target) {
                 Text("出力なし").tag(OutputTarget.none)
                 Text("ウィンドウ（テスト用）").tag(OutputTarget.window)
@@ -233,7 +257,7 @@ struct TopBar: View {
                     Text(OutputController.label(of: s)).tag(OutputTarget.screen(OutputController.displayID(of: s)))
                 }
             }
-            .frame(width: 280)
+            .frame(width: 240)
             .help("出力を閉じる／元に戻す：⌘⇧F")
             OutputFormatButton()
             RecordButton()
@@ -244,7 +268,7 @@ struct TopBar: View {
                     Text(d.name).tag(String?.some(d.id))
                 }
             }
-            .frame(width: 240)
+            .frame(width: 200)
 
             Button {
                 audioDevices = AudioDevices.outputDevices()
@@ -1350,7 +1374,10 @@ struct SidePanel: View {
                 .pickerStyle(.segmented)
                 .labelsHidden()
                 .controlSize(.large)
-                if let p = PanelID.tabs.first(where: { $0.tab == shown }) { DetachButton(panel: p) }
+                if let p = PanelID.tabs.first(where: { $0.tab == shown }) {
+                    DetachButton(panel: p)
+                    if let d = DockPanel(rawValue: p.rawValue) { PanelCloseButton(panel: d) }
+                }
             }
             switch shown {
             case .live: LivePanel()

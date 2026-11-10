@@ -220,6 +220,12 @@ indirect enum DockNode: Codable, Equatable {
         }
     }
 
+    /// tabsID の区画で、panel のタブを選ぶ
+    func selecting(_ tabsID: UUID, panel: DockPanel) -> DockNode {
+        guard case .tabs(_, let ps, _)? = find(tabsID), let i = ps.firstIndex(of: panel) else { return self }
+        return selecting(tabsID, i)
+    }
+
     func selecting(_ tabsID: UUID, _ index: Int) -> DockNode {
         switch self {
         case .tabs(let id, let ps, let s):
@@ -313,7 +319,7 @@ struct DockRootView: View {
     @ObservedObject private var drag = DockDragState.shared
 
     var body: some View {
-        let hidden = Set(DockPanel.allCases.filter { $0.window.map(layout.isDetached) ?? false })
+        let hidden = Set(DockPanel.allCases.filter { ($0.window.map(layout.isDetached) ?? false) || layout.isClosed($0) })
         Group {
             if let tree = layout.state.dock?.pruned(hidden) {
                 DockNodeView(node: tree)
@@ -406,11 +412,13 @@ private struct DockTabsView: View {
             HStack(spacing: 2) {
                 ForEach(Array(panels.enumerated()), id: \.element) { i, p in
                     DockTab(panel: p, on: i == sel) {
-                        LayoutManager.shared.state.dock = LayoutManager.shared.state.dock?.selecting(id, i)
+                        // 見えている並び（閉じた・別ウィンドウのものを除く）と、元の並びの番号は違うので、パネルで選ぶ
+                        LayoutManager.shared.state.dock = LayoutManager.shared.state.dock?.selecting(id, panel: p)
                     }
                 }
                 Spacer(minLength: 0)
                 if let w = shown.window { DetachButton(panel: w) }
+                PanelCloseButton(panel: shown)
             }
             .padding(.horizontal, 4)
             .frame(height: 26)
@@ -449,6 +457,10 @@ private struct DockTab: View {
         .foregroundStyle(on ? Color.primary : Color.secondary)
         .contentShape(Rectangle())
         .onTapGesture(perform: select)
+        .contextMenu {
+            Button("「\(panel.title)」を閉じる") { LayoutManager.shared.close(panel) }
+                .disabled(!LayoutManager.shared.canClose(panel))
+        }
         .onDrag {
             DockDragState.shared.begin(panel)
             return NSItemProvider(object: ("halovj-dock:" + panel.rawValue) as NSString)

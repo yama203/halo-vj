@@ -248,6 +248,10 @@ struct FXPadBar: View {
                 }
                 .foregroundStyle(.purple)
                 .frame(width: 26)
+                .contextMenu {
+                    Button("FX パッドを閉じる") { LayoutManager.shared.close(.pads) }
+                    Button("別ウィンドウに出す") { LayoutManager.shared.detach(.pads) }
+                }
                 .help("FX パッド：押している間だけ、出力のいちばん最後にエフェクトがかかる（シーン・コンポジションとは別）。「エフェクト」パネルからパッドへドラッグして登録。⌘ドラッグで並び替え。右クリックで設定・名前・キー・空にする・削除")
             }
             ScrollView(.horizontal) {

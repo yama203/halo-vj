@@ -303,6 +303,36 @@ enum SelfTest {
                 check(Set(tpl.panels) == Set(DockPanel.allCases) && tpl.panels.count == DockPanel.allCases.count,
                       "おすすめのレイアウト（\(name)）：全部のパネルが 1 回ずつある")
             }
+            // パネルを閉じる・開く（設定には保存しないもので試す）
+            do {
+                let lm = LayoutManager(persist: false)
+                // いつもの並べ方：閉じられるのは右下のタブ・FX パッド・出力モニター。グリッドなどは閉じられない
+                lm.close(DockPanel.cues); lm.close(DockPanel.pads); lm.close(DockPanel.grid)
+                check(lm.isClosed(DockPanel.cues) && !lm.attachedTabs.contains(.cues) && !lm.isShownInMain(.pads) && !lm.isClosed(DockPanel.grid),
+                      "パネル：いつもの並べ方で、タブ・FX パッドを閉じられる（グリッドは閉じられない）")
+                // 別ウィンドウのものを閉じると、ウィンドウも閉じる。開くとメインに戻る
+                lm.detach(.scenes)
+                lm.close(DockPanel.scenes)
+                let closedWin = !lm.isDetached(.scenes) && lm.isClosed(DockPanel.scenes)
+                lm.open(DockPanel.scenes); lm.open(DockPanel.cues); lm.open(DockPanel.pads)
+                check(closedWin && lm.isShownInMain(.scenes) && lm.attachedTabs.contains(.cues) && lm.state.closed.isEmpty,
+                      "パネル：別ウィンドウのパネルを閉じるとウィンドウも閉じ、開くとメインに戻る")
+                // 自由レイアウト：どれでも閉じられ、開くと元の区画の元の場所に戻る。最後の 1 つは閉じられない
+                lm.setDockMode(true)
+                let before = lm.state.dock
+                lm.close(DockPanel.monitor); lm.close(DockPanel.params)
+                let tree = lm.state.dock
+                lm.open(DockPanel.monitor); lm.open(DockPanel.params)
+                check(tree == before && lm.state.dock == before && lm.state.closed.isEmpty,
+                      "パネル：自由レイアウトで閉じても区画の形は残り、開くと元の場所に戻る")
+                for d in DockPanel.allCases { lm.close(d) }
+                check(lm.state.closed.count == DockPanel.allCases.count - 1, "パネル：最後の 1 つは閉じられない")
+                // 閉じたパネルを除いた並びでタブを押しても、押したパネルが選ばれる
+                let t = DockNode.tabs(id: UUID(), panels: [.live, .scenes, .cues, .effects], selected: 0)
+                if case .tabs(let id, _, _) = t, case .tabs(_, let ps, let sel)? = t.selecting(id, panel: .effects).find(id) {
+                    check(ps[sel] == .effects, "パネル：閉じたタブがあっても、押したタブが選ばれる")
+                }
+            }
             // ワークスペース：切り替え・いじった形を覚える・最初の形に戻す（設定には保存しないもので試す）
             do {
                 let lm = LayoutManager(persist: false)

@@ -64,6 +64,8 @@ struct LayoutState: Codable, Equatable {
     var dock: DockNode?
     /// 今のワークスペースの名前（nil = まだ選んでいない）
     var workspace: String?
+    /// 閉じているパネル（どこにも出さない。開くと元の場所に戻る）
+    var closed: [DockPanel] = []
 
     init() {}
 
@@ -79,6 +81,7 @@ struct LayoutState: Codable, Equatable {
         dockMode = try c.decodeIfPresent(Bool.self, forKey: .dockMode) ?? false
         dock = (try? c.decodeIfPresent(DockNode.self, forKey: .dock))?.normalized() ?? (dockMode ? DockNode.standard : nil)
         workspace = try c.decodeIfPresent(String.self, forKey: .workspace)
+        closed = (try? c.decodeIfPresent([DockPanel].self, forKey: .closed)) ?? []
     }
 }
 
@@ -151,8 +154,48 @@ final class LayoutManager: NSObject, ObservableObject, NSWindowDelegate {
     func isDetached(_ p: PanelID) -> Bool { state.detached.contains(p) }
     func isFloating(_ p: PanelID) -> Bool { state.floating.contains(p) }
 
-    /// 右下に残っているタブ
-    var attachedTabs: [SidePanel.Tab] { PanelID.tabs.filter { !isDetached($0) }.compactMap(\.tab) }
+    /// 右下に残っているタブ（別ウィンドウ・閉じているものは除く）
+    var attachedTabs: [SidePanel.Tab] { PanelID.tabs.filter { !isDetached($0) && !isClosed($0) }.compactMap(\.tab) }
+
+    // MARK: - 閉じる・開く
+
+    func isClosed(_ d: DockPanel) -> Bool { state.closed.contains(d) }
+    func isClosed(_ p: PanelID) -> Bool { DockPanel(rawValue: p.rawValue).map(isClosed) ?? false }
+    /// メインのウィンドウに出ているか（別ウィンドウ・閉じているものは出ていない）
+    func isShownInMain(_ p: PanelID) -> Bool { !isDetached(p) && !isClosed(p) }
+
+    /// 閉じられるパネル：いつもの並べ方ではグリッド・プレビュー・パラメーター以外。自由レイアウトでは、最後の 1 つ以外どれでも
+    func canClose(_ d: DockPanel) -> Bool {
+        guard !isClosed(d) else { return false }
+        if state.dockMode {
+            let visible = DockPanel.allCases.filter { !isClosed($0) && !($0.window.map(isDetached) ?? false) }
+            return visible.count > 1 || !visible.contains(d)
+        }
+        return d.window != nil
+    }
+
+    /// パネルを閉じる（どこにも出さない。別ウィンドウなら閉じる）
+    func close(_ d: DockPanel) {
+        guard canClose(d) else { return }
+        state.closed.append(d)
+        if let p = d.window { state.detached.removeAll { $0 == p } }
+        syncWindows()
+    }
+
+    /// 閉じていたパネルを開く（元の場所に戻る）
+    func open(_ d: DockPanel) {
+        state.closed.removeAll { $0 == d }
+        // 自由レイアウトの区画に無ければ、いちばん大きい区画に足す
+        if state.dockMode, let tree = state.dock, !tree.panels.contains(d) { state.dock = tree.normalized() }
+        syncWindows()
+    }
+
+    func toggleClosed(_ d: DockPanel) { isClosed(d) ? open(d) : close(d) }
+
+    /// 「パネル」のメニューに出すもの（いつもの並べ方では、閉じられないものは出さない）
+    var closablePanels: [DockPanel] {
+        state.dockMode ? DockPanel.allCases : DockPanel.allCases.filter { $0.window != nil }
+    }
 
     // MARK: - 別ウィンドウ
 
@@ -498,10 +541,61 @@ struct WorkspaceBar: View {
         }
         .fixedSize()
         .help("ワークスペース：画面の並べ方。切り替えると、いじった形は覚えておく")
+        PanelMenuButton()
     }
 
     /// はじめからのワークスペースの説明
     static let notes = ["Standard": "いつもの並べ方", "Show": "ポン出し", "VJ": "FX パッドを大きく"]
+}
+
+/// パネルを出す・閉じる（✓ が出ているもの）。メニューバーの「レイアウト」と、上のバーの「パネル」
+struct PanelVisibilityItems: View {
+    @ObservedObject var layout: LayoutManager
+    var body: some View {
+        ForEach(layout.closablePanels) { d in
+            Button((layout.isClosed(d) ? "　 " : "✓ ") + d.title) { layout.toggleClosed(d) }
+                .disabled(!layout.isClosed(d) && !layout.canClose(d))
+        }
+        if !layout.state.closed.isEmpty {
+            Divider()
+            Button("閉じたパネルを全部出す") { for d in layout.state.closed { layout.open(d) } }
+        }
+    }
+}
+
+/// 上のバーの「パネル」：使わないパネルを閉じる・閉じたものを出す
+struct PanelMenuButton: View {
+    @ObservedObject var layout = LayoutManager.shared
+    var body: some View {
+        Menu {
+            Text("✓ が出ているパネル（押すと閉じる・出す）")
+            PanelVisibilityItems(layout: layout)
+        } label: {
+            // 幅を取らないよう絵だけ（閉じているものがあれば数を出す）
+            if layout.state.closed.isEmpty {
+                Image(systemName: "rectangle.split.2x2")
+            } else {
+                Label("\(layout.state.closed.count)", systemImage: "rectangle.split.2x2")
+            }
+        }
+        .fixedSize()
+        .help("使わないパネルを閉じる・閉じたパネルを出す")
+    }
+}
+
+/// パネルを閉じるボタン（× の印）
+struct PanelCloseButton: View {
+    let panel: DockPanel
+    @ObservedObject var layout = LayoutManager.shared
+    var body: some View {
+        if layout.canClose(panel) {
+            Button { layout.close(panel) } label: {
+                Image(systemName: "xmark").font(.system(size: 10, weight: .semibold))
+            }
+            .controlSize(.small)
+            .help("「\(panel.title)」を閉じる（上のバーの「パネル」か、メニューの「レイアウト」でまた出せる）")
+        }
+    }
 }
 
 /// メニューバーの「レイアウト」
@@ -509,8 +603,11 @@ struct LayoutMenu: View {
     @ObservedObject var layout: LayoutManager
 
     var body: some View {
+        PanelVisibilityItems(layout: layout)
+        Divider()
         ForEach(PanelID.allCases) { p in
             Button((layout.isDetached(p) ? "✓ " : "") + p.title + "を別ウィンドウに") { layout.toggleDetached(p) }
+                .disabled(layout.isClosed(p))
         }
         Divider()
         Button((layout.state.dockMode ? "✓ " : "") + "自由レイアウト（試験中）") { layout.setDockMode(!layout.state.dockMode) }
