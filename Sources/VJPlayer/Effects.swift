@@ -10,8 +10,12 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
     case mirror, warp, fluid, colorize, levels, posterize, invert, posterizeTime, timeWarp, strobe, echo, shapeMask, polyMask
     /// 昔のアナログ映像機材をまねたもの
     case glitchBox, vhs, videoFeedback, rasterScan, crt
+    /// 追加のエフェクト（MoreKinds.swift）
+    case bloom, kaleidoscope, rgbSplit, pixelate, edgeNeon, zoomBlur, pixelSort, datamosh, ascii, dither, voronoiGlass
     /// ジェネレーター（動画の代わりにクリップとして置く絵）。エフェクト一覧には出さない
     case solid, gradient, stripes, grid, noise, shapes, text, clock, phyllotaxis, lines, dots, flow, school, tunnel, physarum, particleLife, fireflies, attractor, syphonIn, camera, audioScope, ndiIn
+    /// 追加のジェネレーター（MoreKinds.swift）
+    case reactionDiffusion, laser, synthwave, logoParticles, metaballs, starfield, fractal, ripples, lightning, growth
     /// 特殊合成（レイヤーの重ね方）の値。エフェクト一覧には出さない
     /// 切り替えの形（レイヤーの切り替え方で、新しいクリップに内部でかける。一覧には出さない）
     case transitionMask
@@ -32,7 +36,9 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
 
     /// ジェネレーターか（クリップとして置く。エフェクトとしては並べない）
     var isGenerator: Bool { Self.generators.contains(self) }
-    static let generators: [EffectKind] = [.solid, .gradient, .flow, .lines, .dots, .school, .tunnel, .physarum, .particleLife, .fireflies, .attractor, .audioScope, .syphonIn, .ndiIn, .camera, .stripes, .grid, .noise, .shapes, .phyllotaxis, .text, .clock]
+    static let generators: [EffectKind] = [.solid, .gradient, .flow, .lines, .dots, .school, .tunnel, .physarum, .particleLife, .fireflies, .attractor, .audioScope, .reactionDiffusion, .metaballs, .fractal, .growth,
+                                           .laser, .synthwave, .starfield, .ripples, .lightning, .logoParticles,
+                                           .syphonIn, .ndiIn, .camera, .stripes, .grid, .noise, .shapes, .phyllotaxis, .text, .clock]
     /// 文字を描くジェネレーター（テキスト・時計。描き方は同じ）
     var isText: Bool { self == .text || self == .clock }
     /// 色を 1 つ使うジェネレーター（「色」を出す）
@@ -51,7 +57,10 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
     }
 
     var label: String {
-        switch self {
+        if let m = moreLabel { return m }
+        return switch self {
+        // 追加のもの（上で返している）
+        case .bloom, .kaleidoscope, .rgbSplit, .pixelate, .edgeNeon, .zoomBlur, .pixelSort, .datamosh, .ascii, .dither, .voronoiGlass, .reactionDiffusion, .laser, .synthwave, .logoParticles, .metaballs, .starfield, .fractal, .ripples, .lightning, .growth: ""
         case .mirror: "ミラー"
         case .colorize: "カラーライズ"
         case .levels: "レベル"
@@ -105,7 +114,10 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
 
     /// 一覧での分類（エフェクトを足すときはここに入れる）
     var category: EffectCategory {
-        switch self {
+        if let m = moreCategory { return m }
+        return switch self {
+        // 追加のもの（上で返している）
+        case .bloom, .kaleidoscope, .rgbSplit, .pixelate, .edgeNeon, .zoomBlur, .pixelSort, .datamosh, .ascii, .dither, .voronoiGlass, .reactionDiffusion, .laser, .synthwave, .logoParticles, .metaballs, .starfield, .fractal, .ripples, .lightning, .growth: .generator
         case .mirror, .warp, .fluid: .shape
         case .colorize, .levels, .posterize, .invert: .color
         case .posterizeTime, .timeWarp, .strobe, .echo: .time
@@ -117,7 +129,10 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
     }
 
     var icon: String {
-        switch self {
+        if let m = moreIcon { return m }
+        return switch self {
+        // 追加のもの（上で返している）
+        case .bloom, .kaleidoscope, .rgbSplit, .pixelate, .edgeNeon, .zoomBlur, .pixelSort, .datamosh, .ascii, .dither, .voronoiGlass, .reactionDiffusion, .laser, .synthwave, .logoParticles, .metaballs, .starfield, .fractal, .ripples, .lightning, .growth: ""
         case .mirror: "rectangle.split.2x1"
         case .colorize: "paintpalette"
         case .levels: "slider.horizontal.3"
@@ -181,7 +196,10 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
 
     /// シェーダーでの番号（ポスタライズ時間はシェーダーを使わない）
     var shaderIndex: Int32 {
-        switch self {
+        if isMore { return -1 }
+        return switch self {
+        // 追加のもの（上で返している）
+        case .bloom, .kaleidoscope, .rgbSplit, .pixelate, .edgeNeon, .zoomBlur, .pixelSort, .datamosh, .ascii, .dither, .voronoiGlass, .reactionDiffusion, .laser, .synthwave, .logoParticles, .metaballs, .starfield, .fractal, .ripples, .lightning, .growth: -1
         case .mirror: 0
         case .colorize: 1
         case .levels: 2
@@ -211,7 +229,10 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
     }
 
     var params: [EffectParam] {
+        if let m = moreParams { return m }
         switch self {
+        // 追加のもの（上で返している）
+        case .bloom, .kaleidoscope, .rgbSplit, .pixelate, .edgeNeon, .zoomBlur, .pixelSort, .datamosh, .ascii, .dither, .voronoiGlass, .reactionDiffusion, .laser, .synthwave, .logoParticles, .metaballs, .starfield, .fractal, .ripples, .lightning, .growth: return []
         case .mirror:
             return [
                 EffectParam(label: "左右", range: 0...2, defaultValue: 1, choices: ["なし", "左を右へ", "右を左へ"]),
@@ -903,7 +924,10 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
     }
 
     var help: String {
-        switch self {
+        if let m = moreHelp { return m }
+        return switch self {
+        // 追加のもの（上で返している）
+        case .bloom, .kaleidoscope, .rgbSplit, .pixelate, .edgeNeon, .zoomBlur, .pixelSort, .datamosh, .ascii, .dither, .voronoiGlass, .reactionDiffusion, .laser, .synthwave, .logoParticles, .metaballs, .starfield, .fractal, .ripples, .lightning, .growth: ""
         case .mirror: "画面の半分を反対側に折り返す"
         case .colorize: "明るさをもとに、1 色で染める（カラー）か、パレットの色に置き換える（パレット）"
         case .levels: "黒と白の位置・ガンマで明るさとコントラストを整える"
@@ -958,14 +982,15 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
 
 /// ジェネレーター一覧の分類
 enum GeneratorCategory: Int, CaseIterable, Identifiable {
-    case color, pattern, shape, text, external
+    case color, pattern, shape, space, text, external
     var id: Int { rawValue }
     var label: String {
         switch self {
         case .color: "色・グラデーション"
         case .pattern: "線・模様"
         case .shape: "図形・粒"
-        case .text: "文字・時計"
+        case .space: "光・空間"
+        case .text: "文字・ロゴ・時計"
         case .external: "ほかのアプリ・カメラから"
         }
     }
@@ -976,7 +1001,8 @@ enum GeneratorCategory: Int, CaseIterable, Identifiable {
 extension EffectKind {
     /// ジェネレーターの分類（ジェネレーターでなければ nil）
     var generatorCategory: GeneratorCategory? {
-        switch self {
+        if let m = moreGeneratorCategory { return m }
+        return switch self {
         case .solid, .gradient: .color
         case .lines, .dots, .stripes, .grid, .noise: .pattern
         case .shapes, .phyllotaxis, .flow, .school, .tunnel, .particleLife, .fireflies: .shape
@@ -990,13 +1016,15 @@ extension EffectKind {
 
 /// エフェクト一覧の分類
 enum EffectCategory: Int, CaseIterable, Identifiable {
-    case color, shape, mask, time, retro, blend, generator
+    case color, light, shape, glitch, mask, time, retro, blend, generator
     var id: Int { rawValue }
     var label: String {
         switch self {
         case .generator: "ジェネレーター"
         case .color: "色"
+        case .light: "光・ぼかし"
         case .shape: "形"
+        case .glitch: "グリッチ・デジタル"
         case .mask: "マスク"
         case .time: "時間"
         case .retro: "アナログ機材"
@@ -1113,7 +1141,7 @@ extension EffectKind {
         case .particleLife: Self.particleLifeLooks
         case .fireflies: Self.fireflyLooks
         case .attractor: Self.attractorLooks
-        default: []
+        default: moreLooks
         }
     }
 }
@@ -1268,6 +1296,9 @@ struct Effect: Codable, Identifiable, Equatable {
         if kind == .physarum { color = RGB(r: 1.0, g: 0.85, b: 0.45) }
         if kind == .attractor || kind == .physarum || kind == .audioScope { palette = PalettePreset.all[1].colors }
         if kind.isText || kind == .tunnel || kind == .particleLife { palette = [PalettePreset.hex(0x6A00FF), PalettePreset.hex(0xFF00C8), PalettePreset.hex(0x00F0FF)] }
+        if let c = kind.moreDefaultColor { color = c }
+        if let p = kind.moreDefaultPalette { palette = p }
+        if kind == .logoParticles { text = "HALO" }
     }
 
     /// 設定を最初の状態に戻したもの（オン／オフ・文字・自由な形の点はそのまま。描いた形や打った文字は中身なので残す）

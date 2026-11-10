@@ -1654,6 +1654,17 @@ final class EffectProcessor {
         case .rasterScan:
             guard let (s, _) = life.state(key, now: now, origin: o, warm: 0, make: { RasterSim() }) else { return }
             s.render(e, input: input, into: dst, now: now, stack: stack, mixAmt: mixAmt, cb: cb)
+        case .kaleidoscope, .rgbSplit, .pixelate, .edgeNeon, .zoomBlur, .ascii, .dither, .voronoiGlass:
+            MoreFXRenderer.shared.render(e, input: input, into: dst, now: now, stack: stack, mixAmt: mixAmt, cb: cb)
+        case .bloom:
+            MoreFXRenderer.shared.bloom(e, input: input, into: dst, now: now, stack: stack, mixAmt: mixAmt, cb: cb)
+        case .pixelSort:
+            MoreFXRenderer.shared.pixelSort(e, input: input, into: dst, now: now, stack: stack, mixAmt: mixAmt, cb: cb)
+        case .datamosh:
+            guard let (s, dt) = life.state(key, now: now, origin: o, warm: 0, make: { MoshSim() }) else { return }
+            s.render(e, input: input, into: dst, dt: dt, now: now, stack: stack, mixAmt: mixAmt, cb: cb)
+        case _ where EffectKind.moreGenerators.contains(e.kind):
+            drawMoreGenerator(e, key: key, into: dst, stack: stack, now: now, cb: cb)
         default:
             break
         }

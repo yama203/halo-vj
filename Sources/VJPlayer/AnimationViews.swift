@@ -569,7 +569,8 @@ struct EffectCard: View {
             if effect.kind == .syphonIn { SyphonSourcePicker(effect: $effect) }
             if effect.kind == .camera { CameraSourcePicker(effect: $effect) }
             if effect.kind == .ndiIn { NDISourcePicker(effect: $effect) }
-            if effect.kind.usesColor && !(effect.kind.isText && effect.value(5) > 0.5)
+            if effect.kind == .logoParticles { LogoSourcePicker(effect: $effect) }
+            if effect.kind.moreShowsColor(effect) || effect.kind.usesColor && !(effect.kind.isText && effect.value(5) > 0.5)
                 && !(effect.kind == .tunnel && effect.value(13) > 0.5)
                 && !(effect.kind == .physarum && effect.value(8) > 0.5)
                 && !(effect.kind == .attractor && effect.value(11) > 0.5)
@@ -589,7 +590,7 @@ struct EffectCard: View {
                     }
                 }
             }
-            if effect.kind == .gradient || (effect.kind.isText && effect.value(5) > 0.5)
+            if effect.kind.moreShowsPalette(effect) || effect.kind == .gradient || (effect.kind.isText && effect.value(5) > 0.5)
                 || (effect.kind == .tunnel && effect.value(13) > 0.5 && effect.value(13) < 1.5)
                 || (effect.kind == .physarum && effect.value(8) > 0.5)
                 || (effect.kind == .particleLife && effect.value(9) > 0.5)

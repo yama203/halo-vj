@@ -278,6 +278,8 @@ enum SelfTest {
         testAutopilot(check: check)
         testAutopilotUndo(check: check, wait: wait)
         testOutputEvents(check: check, wait: wait)
+        testMoreKinds(check: check)
+        testReactionDiffusion(check: check)
         testDecks(check: check, wait: wait)
         testPads(check: check)
         testMultiSelect(check: check)
@@ -2763,6 +2765,150 @@ enum SelfTest {
         check(e.decks.count == 2 && e.activeByLayer[0] == nil && e.scenes.first { $0.id == sb.id }?.deck == nil
               && e.slots.count == 2 * e.gridSize && e.slots[e.slotIndex(deck: 1, layer: 1, column: 1)]?.generator?.kind == .noise,
               "デッキ：消すと中のクリップは止まって外れ、後ろのデッキが詰まる")
+    }
+
+    /// 反応拡散：変わり続ける（育ちきっても止まらない）・音で光って乱れる
+    static func testReactionDiffusion(check: (Bool, String) -> Void) {
+        let ctx = MetalContext.shared
+        let W = 320, H = 180
+        let td = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: W, height: H, mipmapped: false)
+        td.usage = [.shaderRead, .renderTarget]; td.storageMode = .shared
+        let blank = ctx.device.makeTexture(descriptor: td)!
+        func run(drift: Double, flow: Double = 0.5, death: Double = 0, audio: [Double]?, frames: Int, snapshots: [Int]) -> [[UInt8]] {
+            AudioReactive.shared.setOverrideForTest(audio)
+            defer { AudioReactive.shared.setOverrideForTest(nil) }
+            var e = Effect(kind: .reactionDiffusion)
+            e.values[7] = drift
+            e.values[9] = flow
+            e.values[10] = death
+            let fxp = EffectProcessor(); fxp.storageMode = .shared
+            var shots: [[UInt8]] = []
+            for f in 0..<frames {
+                let cb = ctx.queue.makeCommandBuffer()!
+                let out = fxp.apply(EffectStack(effects: [e]), to: blank, key: "rd", cb: cb, now: 1 + Double(f) / 30)
+                cb.commit(); cb.waitUntilCompleted()
+                if snapshots.contains(f) {
+                    var q = [UInt8](repeating: 0, count: W * H * 4)
+                    out.getBytes(&q, bytesPerRow: W * 4, from: MTLRegionMake2D(0, 0, W, H), mipmapLevel: 0)
+                    shots.append(q)
+                }
+            }
+            return shots
+        }
+        func diff(_ a: [UInt8], _ b: [UInt8]) -> Double {
+            var d = 0; for i in stride(from: 3, to: a.count, by: 4) { d += abs(Int(a[i]) - Int(b[i])) }
+            return Double(d) / Double(a.count / 4) / 255
+        }
+        func mean(_ a: [UInt8]) -> Double {
+            var s = 0; for i in stride(from: 0, to: a.count, by: 4) { s += Int(a[i]) + Int(a[i + 1]) + Int(a[i + 2]) }
+            return Double(s) / Double(a.count / 4 * 3) / 255
+        }
+        // 育ちきった後（30 秒・60 秒）から 2 秒で、どれだけ変わるか（音なし）
+        let still = run(drift: 0, flow: 0, audio: [0, 0, 0, 0, 0], frames: 1000, snapshots: [900, 960])
+        func dStillDeath() -> Double { diff(still[0], still[1]) * 5 }
+        let moving = run(drift: 0.5, flow: 0.5, death: 0.5, audio: [0, 0, 0, 0, 0], frames: 1861, snapshots: [900, 960, 1800, 1860])
+        // 枯れるだけ（流れ・変わり続けるは 0）でも、育っては死んでずっと入れかわる
+        let dying = run(drift: 0, flow: 0, death: 0.7, audio: [0, 0, 0, 0, 0], frames: 1861, snapshots: [1680, 1740, 1800, 1860])
+        let dDie = diff(dying[0], dying[1]) + diff(dying[2], dying[3])
+        check(dDie / 2 > 0.03 && dDie / 2 > dStillDeath(),
+              "反応拡散：枯れるで、育っては死んで入れかわり続ける（流れ・変わり続けるが 0 でも。2 秒の変化 \(String(format: "%.3f", dDie / 2))）")
+        let dStill = diff(still[0], still[1]), d30 = diff(moving[0], moving[1]), d60 = diff(moving[2], moving[3])
+        // 確かめ用：VJ_RD_DUMP=フォルダ で、動いている途中のコマを PNG に書き出す
+        if let dir = ProcessInfo.processInfo.environment["VJ_RD_DUMP"] {
+            for (i, q0) in (moving + dying).enumerated() {
+                var q = q0
+                for j in stride(from: 0, to: q.count, by: 4) { let b = q[j]; q[j] = q[j + 2]; q[j + 2] = b; q[j + 3] = 255 }
+                let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: W, pixelsHigh: H, bitsPerSample: 8, samplesPerPixel: 4,
+                                           hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: W * 4, bitsPerPixel: 32)!
+                q.withUnsafeBufferPointer { memcpy(rep.bitmapData!, $0.baseAddress!, q.count) }
+                try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: dir + "/rd_\(i).png"))
+            }
+        }
+        check(d30 > 0.05 && d60 > 0.05 && d30 > dStill * 5,
+              "反応拡散：はじめの値で、育ちきってもずっと動き続ける（2 秒の変化 30 秒後 \(String(format: "%.3f", d30))・60 秒後 \(String(format: "%.3f", d60)) ／ 流れも変化も 0 なら \(String(format: "%.3f", dStill))）")
+        // 変わり続ける（穴）：急に大きく変わらない。1 コマごとの変化の一番大きい所が小さい
+        do {
+            AudioReactive.shared.setOverrideForTest([0, 0, 0, 0, 0])
+            defer { AudioReactive.shared.setOverrideForTest(nil) }
+            var e = Effect(kind: .reactionDiffusion)
+            e.values[7] = 1; e.values[9] = 0; e.values[10] = 0
+            let fxp = EffectProcessor(); fxp.storageMode = .shared
+            var prev: [UInt8]?
+            var worst = 0.0
+            for f in 0..<1500 {
+                let cb = ctx.queue.makeCommandBuffer()!
+                let out = fxp.apply(EffectStack(effects: [e]), to: blank, key: "rdh", cb: cb, now: 1 + Double(f) / 30)
+                cb.commit(); cb.waitUntilCompleted()
+                guard f >= 600 else { continue }
+                var q = [UInt8](repeating: 0, count: W * H * 4)
+                out.getBytes(&q, bytesPerRow: W * 4, from: MTLRegionMake2D(0, 0, W, H), mipmapLevel: 0)
+                if let dir = ProcessInfo.processInfo.environment["VJ_RD_DUMP"], f % 15 == 0, f < 900 {
+                    var o = q
+                    for j in stride(from: 0, to: o.count, by: 4) { let b = o[j]; o[j] = o[j + 2]; o[j + 2] = b; o[j + 3] = 255 }
+                    let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: W, pixelsHigh: H, bitsPerSample: 8, samplesPerPixel: 4,
+                                               hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: W * 4, bitsPerPixel: 32)!
+                    o.withUnsafeBufferPointer { memcpy(rep.bitmapData!, $0.baseAddress!, o.count) }
+                    try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: dir + "/hole_\(f).png"))
+                }
+                if let p = prev {
+                    // 8×8 のかたまりごとの変化のうち、一番大きいもの（穴がポコっと開くと、かたまりが一度に消える）
+                    for by in stride(from: 0, to: H - 8, by: 8) { for bx in stride(from: 0, to: W - 8, by: 8) {
+                        var s = 0
+                        for y in by..<by + 8 { for x in bx..<bx + 8 { let i = (y * W + x) * 4 + 3; s += abs(Int(q[i]) - Int(p[i])) } }
+                        worst = max(worst, Double(s) / 64 / 255)
+                    } }
+                }
+                prev = q
+            }
+            check(worst < 0.35, "反応拡散：変わり続けるを上げても、穴はゆっくり開く（1 コマでのかたまりの変化の一番大きい所 \(String(format: "%.2f", worst))）")
+        }
+        // 音：大きな音とアタックで、明るくなって乱れる
+        let quiet = run(drift: 0, audio: [0, 0, 0, 0, 0], frames: 200, snapshots: [199])
+        let loud = run(drift: 0, audio: [1, 1, 0.5, 0.5, 1], frames: 200, snapshots: [199])
+        check(mean(loud[0]) > mean(quiet[0]) * 1.2,
+              "反応拡散：音の大きさで光り、アタックと低音で乱れて育つ（明るさ \(String(format: "%.3f", mean(quiet[0]))) → \(String(format: "%.3f", mean(loud[0])))）")
+    }
+
+    /// 追加のエフェクト・ジェネレーター：どれも描けて（何かが出て）、壊れた値（NaN）が出ない。値の数・分類・説明がそろっている
+    static func testMoreKinds(check: (Bool, String) -> Void) {
+        let ctx = MetalContext.shared
+        let W = 320, H = 180
+        let td = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: W, height: H, mipmapped: false)
+        td.usage = [.shaderRead, .renderTarget]; td.storageMode = .shared
+        let src = ctx.device.makeTexture(descriptor: td)!
+        // 入力：左右で色の違う、まだらの絵
+        var px = [UInt8](repeating: 255, count: W * H * 4)
+        for y in 0..<H { for x in 0..<W {
+            let i = (y * W + x) * 4
+            let v = UInt8((x * 255 / W + y * 3) % 256)
+            px[i] = v; px[i + 1] = UInt8((y * 255 / H)); px[i + 2] = x < W / 2 ? 230 : 40
+        } }
+        src.replace(region: MTLRegionMake2D(0, 0, W, H), mipmapLevel: 0, withBytes: px, bytesPerRow: W * 4)
+        var bad: [String] = []
+        for k in EffectKind.moreEffects + EffectKind.moreGenerators {
+            let e = Effect(kind: k)
+            guard e.values.count == k.params.count, k.moreHelp != nil, k.moreLabel != nil,
+                  k.isGenerator == EffectKind.moreGenerators.contains(k),
+                  !k.isGenerator || k.generatorCategory != nil else { bad.append("\(k.rawValue)（値・説明・分類）"); continue }
+            let fxp = EffectProcessor(); fxp.storageMode = .shared
+            var out = src
+            for f in 0..<20 {
+                let cb = ctx.queue.makeCommandBuffer()!
+                out = fxp.apply(EffectStack(effects: [e]), to: src, key: "m", cb: cb, now: 3 + Double(f) / 30)
+                cb.commit(); cb.waitUntilCompleted()
+            }
+            var q = [UInt8](repeating: 0, count: W * H * 4)
+            out.getBytes(&q, bytesPerRow: W * 4, from: MTLRegionMake2D(0, 0, W, H), mipmapLevel: 0)
+            // 何かが出ている（ジェネレーターは光っている所がある・エフェクトは真っ黒・真っ透明でない）
+            var lit = 0
+            for i in stride(from: 0, to: q.count, by: 4) where Int(q[i]) + Int(q[i + 1]) + Int(q[i + 2]) > 30 { lit += 1 }
+            if lit < W * H / 400 { bad.append("\(k.rawValue)（\(lit) 画素）") }
+        }
+        check(bad.isEmpty, "追加のエフェクト 11・ジェネレーター 10：どれも描ける・値と説明と分類がそろっている" + (bad.isEmpty ? "" : "（だめ：\(bad.joined(separator: "、"))）"))
+        // ロゴを粒に：文字の形の点が作れる（画像が無くても）
+        let pts = LogoParticleSim.samplePoints("HALO", count: 500)
+        let xs = pts.map(\.0.x)
+        check(pts.count == 500 && (xs.max() ?? 0) - (xs.min() ?? 0) > 0.5, "ロゴを粒に：文字の形に点を並べられる")
     }
 
     /// 出力が切り替わった知らせ：クリップ・まとめて・シーン（中のクリップは数えない）・止めた・自動操縦

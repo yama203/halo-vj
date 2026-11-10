@@ -884,5 +884,5 @@ final class AttractorSim {
 extension EffectKind {
     /// 前のコマを覚えて動き続けるもの（プレビュー用の書き出しで、コマを進めて描く）
     var isStateful: Bool { [.school, .physarum, .particleLife, .fireflies, .attractor, .timeWarp, .fluid,
-                               .glitchBox, .vhs, .videoFeedback, .rasterScan, .crt, .syphonIn, .camera, .audioScope, .ndiIn].contains(self) }
+                               .glitchBox, .vhs, .videoFeedback, .rasterScan, .crt, .syphonIn, .camera, .audioScope, .ndiIn].contains(self) || isMoreDrawn }
 }
