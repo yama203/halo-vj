@@ -160,7 +160,7 @@ final class TransformParams: ObservableObject, Animatable {
 /// 1つのレイヤー（クリップグリッドの1段）。段数は自由に増減できる。
 /// 段ごとに1クリップずつ同時に再生でき、上の段ほど手前に重なる。
 final class Layer: ObservableObject, Identifiable, Animatable, EffectHolder {
-    let id = UUID()
+    let id: UUID
     /// 上から何段目か（0 = 一番上 = 一番手前）。レイヤーを足したり消したりすると変わる
     @Published var index: Int
     var name: String { "L\(index + 1)" }
@@ -236,7 +236,8 @@ final class Layer: ObservableObject, Identifiable, Animatable, EffectHolder {
     }
     var onVolumeChanged: (() -> Void)?
 
-    init(index: Int) {
+    init(index: Int, id: UUID = UUID()) {
         self.index = index
+        self.id = id
     }
 }

@@ -78,6 +78,15 @@ enum Main {
             CardPreview.writeView(AnyView(ColorPadPreview(color: c)), path: args[i + 1])
             exit(0)
         }
+        if let i = args.firstIndex(of: "--map-editor-preview"), args.count > i + 1 {
+            // 開発用：出力のマッピングの窓を、見本のマッピングで書き出す（画面には出さない。Metal の絵は出ない）
+            //   VJPlayer --map-editor-preview out.png [input|output] [corners|mesh|crop|mask]
+            _ = NSApplication.shared
+            NSApp.setActivationPolicy(.prohibited)
+            MapEditorPreview.write(path: args[i + 1], tab: args.count > i + 2 ? args[i + 2] : "output",
+                                   mode: args.count > i + 3 ? args[i + 3] : "corners")
+            exit(0)
+        }
         if let i = args.firstIndex(of: "--card-preview"), args.count > i + 2, let k = EffectKind(rawValue: args[i + 1]) {
             // 開発用：エフェクトの設定パネルを 1 枚の画像に書き出す（画面には出さない）
             //   VJPlayer --card-preview strobe out.png
@@ -162,7 +171,7 @@ struct VJPlayerApp: App {
                 Button("全レイヤーを停止") { Engine.shared.stopAll() }
                     .keyboardShortcut(.escape, modifiers: [.shift])
                 Divider()
-                Button("出力の分割…") { OutputMapWindow.shared.show() }
+                Button("出力のマッピング…") { OutputMapWindow.shared.show() }
                     .keyboardShortcut("m", modifiers: [.command, .shift])
                 Button("照明（Art-Net / DMX）…") { DMXWindow.shared.show() }
                 Divider()
@@ -253,7 +262,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
         }
-        // 画面確認用：VJ_OUTPUT_MAP=ひな形の数 で、出力の分割の窓を開く（その数の横並びを入れて）
+        // 画面確認用：VJ_OUTPUT_MAP=ひな形の数 で、出力のマッピングの窓を開く（その数の横並びを入れて）
         if let v = env["VJ_OUTPUT_MAP"], let n = Int(v) {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
                 Engine.shared.outputMap.slices = OutputMap.preset(count: n, overlap: 0.15)
@@ -358,6 +367,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let shift = event.modifierFlags.contains(.shift)
         // テキスト入力中は横取りしない
         if NSApp.keyWindow?.firstResponder is NSTextView { return false }
+        // 出力のマッピングの舞台：矢印・Delete はそこで使う（クリップの削除・キーの割り当てに回さない）
+        if [51, 117, 123, 124, 125, 126].contains(event.keyCode), NSApp.keyWindow?.firstResponder is MapStageNSView { return false }
         // キーの割り当て（覚えている途中は、どのキーも覚える）
         if ControlHub.shared.key(event, down: true) { return true }
 

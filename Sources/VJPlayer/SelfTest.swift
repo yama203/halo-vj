@@ -479,6 +479,8 @@ enum SelfTest {
 
         // 25. 出力の分割
         testOutputMap(check: check)
+        testOutputMapping(check: check)
+        testMapEditor(check: check)
 
         // 26. 切り替え方（トランジション）
         testTransitions(check: check, wait: wait)
@@ -4081,6 +4083,401 @@ enum SelfTest {
         let back = Engine(persistent: false)
         back.apply(eng.makeState(relativeTo: nil), baseDir: nil)
         check(tp.contains { $0 > 100 } && back.outputMap == m, "出力の分割：テストパターンが出る。保存して読み込める")
+    }
+
+    /// 出力のマッピングの窓：吸い付く・矢印で動かす・点を足す／消す・形ごと動かす・メッシュ
+    static func testMapEditor(check: (Bool, String) -> Void) {
+        func near(_ a: MapP, _ b: MapP, _ e: Double = 1e-9) -> Bool { simd_length(a - b) <= e }
+        // 吸い付く：8 pt 以内のいちばん近い点。遠いものは無視。点が無ければ画面の端・中央
+        let targets = [MapP(0.5, 0.5), MapP(0.3, 0.3), MapP(0.508, 0.5)]
+        let scale = MapP(1000, 500)
+        let s1 = MapEdit.snap(MapP(0.505, 0.502), targets: targets, scale: scale)
+        let s2 = MapEdit.snap(MapP(0.42, 0.62), targets: targets, scale: scale)
+        let s3 = MapEdit.snap(MapP(0.996, 0.3), targets: [], scale: scale)
+        check(near(s1, MapP(0.508, 0.5)) && near(s2, MapP(0.42, 0.62)) && near(s3, MapP(1, 0.3)),
+              "マッピングの窓：吸い付くのは 8 pt 以内のいちばん近い点（遠いものは無視・画面の端にも）")
+
+        // 矢印：選んだ点だけ、出力の 1 ピクセルぶん（⇧ で 10）
+        var map = OutputMap()
+        var mask = OutputMask()
+        mask.points = [[0.2, 0.2], [0.6, 0.2], [0.6, 0.6], [0.2, 0.6]]
+        map.masks = [mask]
+        var sl = OutputSlice()
+        sl.corners = [[0.1, 0.1], [0.9, 0.15], [0.85, 0.9], [0.12, 0.8]]
+        sl.crop = [[0.5, 0.1], [0.9, 0.9], [0.1, 0.9]]
+        map.slices = [sl]
+        var m2 = map
+        MapEdit.nudge(&m2, .mask(mask.id), .corners, selected: [0, 2], dx: 1, dy: 0, outputSize: (1920, 1080))
+        let p = m2.masks[0].points
+        var m3 = map
+        MapEdit.nudge(&m3, .slice(sl.id), .corners, selected: [1], dx: 0, dy: 10, outputSize: (1920, 1080))
+        // 切り抜き（スライスの中の座標）でも、出力の上で 1 ピクセル
+        var m4 = map
+        MapEdit.nudge(&m4, .slice(sl.id), .crop, selected: [0], dx: 1, dy: 0, outputSize: (1920, 1080))
+        let o0 = map.slices[0].outputPoint(u: 0.5, v: 0.1)!, o1 = m4.slices[0].outputPoint(u: m4.slices[0].crop[0][0], v: m4.slices[0].crop[0][1])!
+        let dpx = (o1 - o0) * MapP(1920, 1080)
+        check(abs(p[0][0] - (0.2 + 1.0 / 1920)) < 1e-12 && abs(p[2][0] - (0.6 + 1.0 / 1920)) < 1e-12 && p[1] == [0.6, 0.2]
+              && p[0][1] == 0.2 && abs(m3.slices[0].corners[1][1] - (0.15 + 10.0 / 1080)) < 1e-12 && m3.slices[0].corners[0] == sl.corners[0]
+              && abs(dpx.x - 1) < 0.01 && abs(dpx.y) < 0.01,
+              String(format: "マッピングの窓：矢印で、選んだ点だけ出力の 1 ピクセル（⇧ で 10）動く（切り抜きの点も %.3f px）", dpx.x))
+
+        // 辺の上をクリック：その辺の 2 点の間に入る
+        var m5 = map
+        let at = MapEdit.insertPoint(&m5, .mask(mask.id), .corners, at: MapP(0.6, 0.4))
+        let at2 = MapEdit.insertIndex([MapP(0, 0), MapP(1, 0), MapP(1, 1), MapP(0, 1)], MapP(0.5, 1.01))
+        check(at == 2 && m5.masks[0].points.count == 5 && m5.masks[0].points[2] == [0.6, 0.4] && at2 == 3,
+              "マッピングの窓：辺の上をクリックすると、その辺の 2 点の間に点が入る")
+
+        // 消す：3 点は残す
+        let sq = [MapP(0, 0), MapP(1, 0), MapP(1, 1), MapP(0, 1)]
+        let d1 = MapEdit.deletePoints(sq, [0, 1])
+        let d2 = MapEdit.deletePoints(Array(sq.prefix(3)), [1])
+        let d3 = MapEdit.deletePoints(sq + [MapP(0.5, 0.5)], [4, 1])
+        var m6 = map
+        let ok6 = !MapEdit.deleteSelected(&m6, .slice(sl.id), .crop, [0, 1]) && m6.slices[0].crop.count == 3
+        check(d1.count == 3 && d1[0] == sq[1] && d2.count == 3 && d3 == [sq[0], sq[2], sq[3]] && ok6,
+              "マッピングの窓：点を消しても 3 点は残る")
+
+        // 形ごと動かす：四隅が全部同じだけ動く
+        var m7 = map
+        MapEdit.moveItem(&m7, .slice(sl.id), from: map, by: MapP(0.1, -0.05))
+        let movedAll = zip(m7.slices[0].corners, sl.corners).allSatisfy { abs($0[0] - $1[0] - 0.1) < 1e-12 && abs($0[1] - $1[1] + 0.05) < 1e-12 }
+        check(movedAll && m7.slices[0].crop == sl.crop, "マッピングの窓：面の中をドラッグすると、四隅が全部同じだけ動く")
+
+        // メッシュのモードに入ると 2×2 ができる。マスの数を変えても形は同じ
+        var s = sl
+        MapEdit.enterMesh(&s)
+        let entered = s.mesh?.cols == 2 && s.mesh?.rows == 2 && s.mesh?.points.count == 9 && s.mesh == .regular(cols: 2, rows: 2)
+        s.mesh!.points[4] = [0.62, 0.4]
+        let before = s.mesh!
+        MapEdit.setMeshSize(&s, cols: 4, rows: 4)
+        let after = s.mesh!
+        var worst = 0.0
+        for (u, v) in [(0.5, 0.5), (0.25, 0.25), (0.75, 0.5), (0.5, 0.75), (0.0, 1.0)] {
+            worst = max(worst, simd_length(after.position(u: u, v: v) - before.position(u: u, v: v)))
+        }
+        check(entered && after.cols == 4 && after.rows == 4 && after.points.count == 25 && worst < 0.01,
+              String(format: "マッピングの窓：メッシュに入ると 2×2 ができ、マスの数を変えても形が保たれる（ずれ %.4f）", worst))
+    }
+
+    /// 前の出力の分割の描き方（全画面の 1 枚でスライスを回し、光の量を足す）。今の描き方と同じ絵になるかを比べるためだけに使う
+    private static let oldSliceShaderSource = """
+    #include <metal_stdlib>
+    using namespace metal;
+    struct VO { float4 pos [[position]]; float2 uv; };
+    vertex VO os_v(uint vid [[vertex_id]]) {
+        float2 c = float2(float(vid & 1), float(vid >> 1));
+        VO o; o.pos = float4(c.x * 2.0 - 1.0, 1.0 - c.y * 2.0, 0.0, 1.0); o.uv = c; return o;
+    }
+    struct SliceU { float3x3 hinv; float4 input; float4 feather; float4 extra; };
+    struct SlicesU { int count; float master; int testPattern; float pad; };
+    static float3 sliceColor(float i) {
+        float3 k = abs(fract(float3(i * 0.13 + 0.05) + float3(0.0, 2.0 / 3.0, 1.0 / 3.0)) * 6.0 - 3.0);
+        return saturate(k - 1.0);
+    }
+    fragment float4 os_f(VO in [[stage_in]], constant SlicesU& u [[buffer(0)]], constant SliceU* sl [[buffer(1)]],
+                         texture2d<float> tex [[texture(0)]]) {
+        constexpr sampler s(filter::linear, address::clamp_to_edge);
+        float3 sum = 0.0;
+        for (int i = 0; i < u.count; i++) {
+            float3 h = sl[i].hinv * float3(in.uv, 1.0);
+            if (h.z <= 0.0) continue;
+            float2 l = h.xy / h.z;
+            if (any(l < 0.0) || any(l > 1.0)) continue;
+            float4 f = sl[i].feather;
+            float w = 1.0;
+            if (f.x > 0.0) w *= smoothstep(0.0, 1.0, l.x / f.x);
+            if (f.y > 0.0) w *= smoothstep(0.0, 1.0, (1.0 - l.x) / f.y);
+            if (f.z > 0.0) w *= smoothstep(0.0, 1.0, l.y / f.z);
+            if (f.w > 0.0) w *= smoothstep(0.0, 1.0, (1.0 - l.y) / f.w);
+            float3 c;
+            if (u.testPattern != 0) {
+                float2 g = abs(fract(l * 8.0) - 0.5);
+                float line = step(0.46, max(g.x, g.y));
+                float edge = step(min(min(l.x, 1.0 - l.x), min(l.y, 1.0 - l.y)), 0.01);
+                c = mix(sliceColor(sl[i].extra.x) * 0.55, float3(1.0), max(line, edge));
+            } else {
+                float2 uv = sl[i].input.xy + l * sl[i].input.zw;
+                c = tex.sample(s, uv).rgb;
+            }
+            sum += pow(max(c, 0.0), 2.2) * w;
+        }
+        return float4(pow(sum, 1.0 / 2.2) * u.master, 1.0);
+    }
+    """
+
+    /// 出力のマッピング：メッシュ・切り抜き・マスク・取る所の回転・重なり・色・レイヤーが元の絵・ガイド・.halomap
+    static func testOutputMapping(check: (Bool, String) -> Void) {
+        let ctx = MetalContext.shared
+        let W = 160, H = 90
+        func tex(_ w: Int, _ h: Int, _ f: ((Int, Int) -> (UInt8, UInt8, UInt8))? = nil) -> MTLTexture {
+            let td = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: w, height: h, mipmapped: false)
+            td.usage = [.shaderRead, .renderTarget]; td.storageMode = .shared
+            let t = ctx.device.makeTexture(descriptor: td)!
+            if let f {
+                var px = [UInt8](repeating: 255, count: w * h * 4)
+                for y in 0..<h { for x in 0..<w { let (r, g, b) = f(x, y); let i = (y * w + x) * 4; px[i] = b; px[i + 1] = g; px[i + 2] = r } }
+                t.replace(region: MTLRegionMake2D(0, 0, w, h), mipmapLevel: 0, withBytes: px, bytesPerRow: w * 4)
+            }
+            return t
+        }
+        func read(_ t: MTLTexture) -> [UInt8] {
+            var px = [UInt8](repeating: 0, count: t.width * t.height * 4)
+            t.getBytes(&px, bytesPerRow: t.width * 4, from: MTLRegionMake2D(0, 0, t.width, t.height), mipmapLevel: 0)
+            return px
+        }
+        func render(_ map: OutputMap, output: Int = 0, comp: MTLTexture?, layers: [UUID: MTLTexture] = [:],
+                    test: Bool = false, guide: MapGuide? = nil, master: Float = 1) -> [UInt8] {
+            let dst = tex(W, H)
+            let cb = ctx.queue.makeCommandBuffer()!
+            SliceRenderer.shared.draw(map, output: output, composite: comp, layers: layers, master: master, testPattern: test,
+                                      guide: guide, into: dst, cb: cb)
+            cb.commit(); cb.waitUntilCompleted()
+            return read(dst)
+        }
+        func rgb(_ p: [UInt8], _ x: Int, _ y: Int) -> (Int, Int, Int) { let i = (y * W + x) * 4; return (Int(p[i + 2]), Int(p[i + 1]), Int(p[i])) }
+        func isBlack(_ p: [UInt8], _ x: Int, _ y: Int) -> Bool { let c = rgb(p, x, y); return c.0 < 8 && c.1 < 8 && c.2 < 8 }
+        // 2 枚の差：大きく違う画素の割合と、平均の差
+        func diff(_ a: [UInt8], _ b: [UInt8]) -> (bad: Double, mean: Double) {
+            var bad = 0, sum = 0
+            for i in stride(from: 0, to: a.count, by: 4) {
+                let d = max(abs(Int(a[i]) - Int(b[i])), abs(Int(a[i + 1]) - Int(b[i + 1])), abs(Int(a[i + 2]) - Int(b[i + 2])))
+                if d > 12 { bad += 1 }
+                sum += d
+            }
+            let n = Double(a.count / 4)
+            return (Double(bad) / n, Double(sum) / n)
+        }
+        func one(_ s: OutputSlice) -> OutputMap { var m = OutputMap(); m.enabled = true; m.slices = [s]; return m }
+
+        // 1. 古い形の JSON（追加の項目なし）が読めて、書いて読み直しても同じ
+        let oldJSON = """
+        {"enabled":true,"slices":[{"id":"6B1F4E2A-1C3D-4E5F-8A9B-0C1D2E3F4A5B","name":"左から 1","enabled":true,"output":1,
+        "input":[0,0,0.6,1],"corners":[[0.1,0],[1,0],[1,1],[0,0.9]],"feather":[0,0.15,0,0]}]}
+        """
+        let oldMap = try? JSONDecoder().decode(OutputMap.self, from: Data(oldJSON.utf8))
+        let again = oldMap.flatMap { try? JSONEncoder().encode($0) }.flatMap { try? JSONDecoder().decode(OutputMap.self, from: $0) }
+        let os = oldMap?.slices.first
+        check(oldMap != nil && oldMap == again && os?.output == 1 && os?.input == [0, 0, 0.6, 1] && os?.feather[1] == 0.15
+              && os?.source == .composition && os?.mesh == nil && os?.crop.isEmpty == true && os?.opacity == 1
+              && os?.gain == [1, 1, 1] && oldMap?.masks.isEmpty == true && oldMap?.blendGamma == 2.2,
+              "出力のマッピング：古い形の JSON が読める（足した項目ははじめの値）。書いて読み直しても同じ")
+        // 古いプロジェクト（レイヤーの印なし）も読める
+        let oldLayerJSON = #"{"opacity":0.5,"blend":0,"volume":1}"#
+        let ol = try? JSONDecoder().decode(Engine.SavedLayer.self, from: Data(oldLayerJSON.utf8))
+        check(ol != nil && ol?.id == nil, "出力のマッピング：古いレイヤーの保存データ（印なし）も読める")
+
+        // 2. 今までの設定で、今までと同じ絵（四隅だけ・なじませあり・テストパターン）
+        let oldLib = try! ctx.device.makeLibrary(source: oldSliceShaderSource, options: nil)
+        let od = MTLRenderPipelineDescriptor()
+        od.vertexFunction = oldLib.makeFunction(name: "os_v")
+        od.fragmentFunction = oldLib.makeFunction(name: "os_f")
+        od.colorAttachments[0].pixelFormat = .bgra8Unorm
+        let oldPipe = try! ctx.device.makeRenderPipelineState(descriptor: od)
+        struct OldSliceU { var hinv: simd_float3x3; var input: SIMD4<Float>; var feather: SIMD4<Float>; var extra: SIMD4<Float> }
+        struct OldSlicesU { var count: Int32; var master: Float; var testPattern: Int32; var pad: Float = 0 }
+        func renderOld(_ map: OutputMap, output: Int = 0, comp: MTLTexture, test: Bool = false) -> [UInt8] {
+            var us: [OldSliceU] = []
+            for (i, s) in map.slices.enumerated() where s.enabled && s.output == output {
+                let q = s.corners.map { SIMD2(Float($0[0]), Float($0[1])) }
+                us.append(OldSliceU(hinv: Homography.squareToQuad(q).inverse, input: SIMD4(s.input.map(Float.init)),
+                                    feather: SIMD4(s.feather.map(Float.init)), extra: SIMD4(Float(i), 0, 0, 0)))
+            }
+            let dst = tex(W, H)
+            let cb = ctx.queue.makeCommandBuffer()!
+            let rpd = MTLRenderPassDescriptor()
+            rpd.colorAttachments[0].texture = dst
+            rpd.colorAttachments[0].loadAction = .clear
+            rpd.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
+            rpd.colorAttachments[0].storeAction = .store
+            let enc = cb.makeRenderCommandEncoder(descriptor: rpd)!
+            if !us.isEmpty {
+                var u = OldSlicesU(count: Int32(us.count), master: 1, testPattern: test ? 1 : 0)
+                enc.setRenderPipelineState(oldPipe)
+                enc.setFragmentBytes(&u, length: MemoryLayout<OldSlicesU>.stride, index: 0)
+                us.withUnsafeBytes { enc.setFragmentBytes($0.baseAddress!, length: $0.count, index: 1) }
+                enc.setFragmentTexture(comp, index: 0)
+                enc.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
+            }
+            enc.endEncoding()
+            cb.commit(); cb.waitUntilCompleted()
+            return read(dst)
+        }
+        let photo = tex(200, 100) { x, y in (UInt8(x * 255 / 199), UInt8(y * 255 / 99), UInt8((x + y) % 256)) }
+        var keystone = OutputSlice()
+        keystone.input = [0.1, 0.05, 0.7, 0.85]
+        keystone.corners = [[0.08, 0.05], [0.9, 0.12], [0.97, 0.92], [0.02, 0.85]]
+        var feathered = OutputMap(); feathered.enabled = true
+        feathered.slices = OutputMap.preset(count: 2, overlap: 0.3, separate: true)
+        feathered.slices[1].corners = [[0, 0.1], [1, 0], [0.9, 1], [0.05, 0.95]]
+        var sideBySide = OutputMap(); sideBySide.enabled = true; sideBySide.slices = OutputMap.preset(count: 3)
+        let cases: [(String, OutputMap, Int, Bool)] = [
+            ("四隅だけ", one(keystone), 0, false), ("なじませ 出力 1", feathered, 0, false), ("なじませ 出力 2", feathered, 1, false),
+            ("横に 3 つ", sideBySide, 0, false), ("テストパターン", one(keystone), 0, true), ("テストパターン 3 つ", sideBySide, 0, true),
+        ]
+        var worst = (bad: 0.0, mean: 0.0)
+        for (_, m, out, test) in cases {
+            let d = diff(render(m, output: out, comp: photo, test: test), renderOld(m, output: out, comp: photo, test: test))
+            worst = (max(worst.bad, d.bad), max(worst.mean, d.mean))
+        }
+        check(worst.bad < 0.01 && worst.mean < 1.0,
+              String(format: "出力のマッピング：今までの設定（四隅だけ・なじませ・テストパターン）は今までと同じ絵（違う画素 %.2f%%・平均の差 %.2f）",
+                     worst.bad * 100, worst.mean))
+
+        // 3. メッシュ：等間隔のままなら四隅だけと同じ。点を動かすとその辺りがずれる。resized で形が保たれる
+        var meshed = keystone
+        meshed.mesh = .regular(cols: 2, rows: 2)
+        let plainPic = render(one(keystone), comp: photo)
+        let dm = diff(render(one(meshed), comp: photo), plainPic)
+        var bent = meshed
+        bent.mesh!.points[bent.mesh!.index(col: 1, row: 1)] = [0.65, 0.5]
+        let bentPic = render(one(bent), comp: photo)
+        // まん中（出力のまん中あたり）はずれ、角の近くはほぼ同じ
+        let centerShift = abs(rgb(bentPic, 80, 45).0 - rgb(plainPic, 80, 45).0)
+        let cornerShift = abs(rgb(bentPic, 16, 10).0 - rgb(plainPic, 16, 10).0)
+        var smoothOff = bent; smoothOff.mesh!.smooth = false
+        let rs = bent.mesh!.resized(cols: 4, rows: 4)
+        var maxErr = 0.0, nodeErr = 0.0
+        for k in 0...20 {
+            for j in 0...20 {
+                let u = Double(k) / 20, v = Double(j) / 20
+                maxErr = max(maxErr, simd_length(rs.position(u: u, v: v) - bent.mesh!.position(u: u, v: v)))
+            }
+        }
+        for j in 0...4 { for i in 0...4 {
+            let u = Double(i) / 4, v = Double(j) / 4
+            nodeErr = max(nodeErr, simd_length(rs.point(col: i, row: j) - bent.mesh!.position(u: u, v: v)))
+        } }
+        let reg = SliceMesh.regular(cols: 3, rows: 2)
+        let regErr = (0...10).map { k -> Double in
+            let u = Double(k) / 10, v = Double(10 - k) / 10
+            return simd_length(reg.position(u: u, v: v) - SIMD2(u, v))
+        }.max() ?? 1
+        check(dm.bad < 0.005 && dm.mean < 0.5 && centerShift > 20 && cornerShift < 6 && regErr < 1e-9
+              && smoothOff.mesh!.position(u: 0.5, v: 0.5) == SIMD2(0.65, 0.5) && rs.cols == 4 && nodeErr < 1e-9 && maxErr < 0.02,
+              String(format: "出力のマッピング：メッシュは等間隔なら四隅だけと同じ（平均の差 %.2f）。点を動かすとまん中がずれ（%d）角はそのまま（%d）。点の数を変えても形が保たれる（%.3f）",
+                     dm.mean, centerShift, cornerShift, maxErr))
+
+        // 4. 切り抜き：三角の外が黒。反転で内が黒
+        let gray = tex(200, 100) { _, _ in (180, 180, 180) }
+        var cropped = OutputSlice()
+        cropped.crop = [[0, 0], [1, 0], [0, 1]]
+        let c1 = render(one(cropped), comp: gray)
+        cropped.cropInvert = true
+        let c2 = render(one(cropped), comp: gray)
+        check(rgb(c1, 20, 15).0 > 150 && isBlack(c1, 140, 80) && isBlack(c2, 20, 15) && rgb(c2, 140, 80).0 > 150,
+              "出力のマッピング：切り抜き（三角）の外は黒。反転すると中が黒")
+
+        // 5. マスク：形の中が黒。反転で外が黒。へこんだ形でも正しい
+        var masked = one(OutputSlice())
+        masked.masks = [OutputMask(points: [[0, 0], [0.5, 0], [0, 0.5]])]
+        let k1 = render(masked, comp: gray)
+        masked.masks[0].invert = true
+        let k2 = render(masked, comp: gray)
+        // へこんだ形（コの字）：へこみの所は塗らない
+        var concave = one(OutputSlice())
+        concave.masks = [OutputMask(points: [[0.1, 0.1], [0.9, 0.1], [0.9, 0.9], [0.1, 0.9], [0.1, 0.7], [0.6, 0.7], [0.6, 0.3], [0.1, 0.3]])]
+        let k3 = render(concave, comp: gray)
+        var otherOut = masked; otherOut.masks[0].output = 1; otherOut.masks[0].invert = false
+        let k4 = render(otherOut, comp: gray)
+        check(isBlack(k1, 10, 8) && rgb(k1, 140, 80).0 > 150 && rgb(k2, 10, 8).0 > 150 && isBlack(k2, 140, 80)
+              && isBlack(k3, 16 * 8, 45) && isBlack(k3, 40, 20) && isBlack(k3, 40, 70) && rgb(k3, 40, 45).0 > 150
+              && rgb(k3, 5, 45).0 > 150 && rgb(k4, 10, 8).0 > 150,
+              "出力のマッピング：マスクの形の中は黒・反転で外が黒。へこんだ形でも、へこみは塗らない。ほかの出力のマスクはかからない")
+
+        // 6. 取る所の回転 90° と反転（正方形の絵：左上 赤・右上 緑・左下 青・右下 白）
+        let quads = tex(100, 100) { x, y in
+            switch (x < 50, y < 50) {
+            case (true, true): (255, 0, 0)
+            case (false, true): (0, 255, 0)
+            case (true, false): (0, 0, 255)
+            default: (255, 255, 255)
+            }
+        }
+        func corner(_ p: [UInt8]) -> (Int, Int, Int) { rgb(p, 20, 12) }
+        var rot = OutputSlice(); rot.inputRotation = 90
+        var fh = OutputSlice(); fh.flipH = true
+        var fv = OutputSlice(); fv.flipV = true
+        let r0 = corner(render(one(OutputSlice()), comp: quads)), r90 = corner(render(one(rot), comp: quads))
+        let rh = corner(render(one(fh), comp: quads)), rv = corner(render(one(fv), comp: quads))
+        // 半分の大きさの取る所を 45° 回すと、角は元の絵の外 → 黒
+        var outside = OutputSlice(); outside.input = [0, 0, 1, 1]; outside.inputRotation = 45
+        let ro = render(one(outside), comp: quads)
+        check(r0.0 > 200 && r0.1 < 40 && r90.1 > 200 && r90.0 < 40 && rh.1 > 200 && rh.0 < 40 && rv.2 > 200 && rv.0 < 40
+              && isBlack(ro, 1, 1),
+              "出力のマッピング：取る所を 90° 回す（時計回り）と左上に右上の絵。左右反転で右上、上下反転で左下。元の絵の外は黒")
+
+        // 7. 重なり：後ろのスライスが手前
+        let redBlue = tex(200, 100) { x, _ in x < 100 ? (255, 0, 0) : (0, 0, 255) }
+        var under = OutputSlice(); under.input = [0, 0, 0.5, 1]
+        var over = OutputSlice(); over.input = [0.5, 0, 0.5, 1]; over.corners = [[0.25, 0.25], [0.75, 0.25], [0.75, 0.75], [0.25, 0.75]]
+        var stack = OutputMap(); stack.enabled = true; stack.slices = [under, over]
+        let st = render(stack, comp: redBlue)
+        check(rgb(st, 80, 45).2 > 200 && rgb(st, 80, 45).0 < 30 && rgb(st, 10, 10).0 > 200,
+              "出力のマッピング：重なった所は、後ろ（一覧の下）のスライスが手前に出る")
+
+        // 8. 色：不透明度 0.5 で光の量が約半分。明るさ・ゲイン
+        var half = OutputSlice(); half.opacity = 0.5
+        let hp = render(one(half), comp: gray)
+        let light = pow(Double(rgb(hp, 80, 45).0) / 255, 2.2) / pow(180.0 / 255, 2.2)
+        var tinted = OutputSlice(); tinted.gain = [1, 0, 1]; tinted.brightness = 0.1
+        let tp = rgb(render(one(tinted), comp: gray), 80, 45)
+        check(abs(light - 0.5) < 0.06 && tp.1 < 5 && tp.0 > 195 && tp.2 > 195,
+              String(format: "出力のマッピング：不透明度 0.5 で光の量が約半分（%.0f%%）。緑のゲイン 0 で緑が消え、明るさで明るく", light * 100))
+
+        // 9. レイヤーが元の絵：そのレイヤーの絵だけが出る
+        let eng = Engine(persistent: false)
+        eng.syncRenderState()
+        let id0 = eng.layers[0].id, id1 = eng.layers[1].id
+        let back = Engine(persistent: false)
+        back.apply(eng.makeState(relativeTo: nil), baseDir: nil)
+        back.syncRenderState()
+        let red = tex(64, 36) { _, _ in (255, 0, 0) }, blue = tex(64, 36) { _, _ in (0, 0, 255) }
+        let groups = [LayerGroup(draws: [LayerDraw(texture: blue, opacity: 1, blend: .normal, holder: nil)], opacity: 1, blend: .normal, key: 1),
+                      LayerGroup(draws: [LayerDraw(texture: red, opacity: 1, blend: .normal, holder: nil)], opacity: 1, blend: .normal, key: 0)]
+        var layerMap = OutputMap(); layerMap.enabled = true
+        var ls = OutputSlice(); ls.source = .layer(id1); ls.corners = [[0, 0], [0.5, 0], [0.5, 1], [0, 1]]
+        var cs = OutputSlice(); cs.corners = [[0.5, 0], [1, 0], [1, 1], [0.5, 1]]
+        var gone = OutputSlice(); gone.source = .layer(UUID()); gone.corners = [[0.25, 0.25], [0.75, 0.25], [0.75, 0.75], [0.25, 0.75]]
+        layerMap.slices = [ls, cs]
+        let sources = SliceLayerSources()
+        let cb = ctx.queue.makeCommandBuffer()!
+        let compositor = Compositor()
+        let whole = compositor.composite(groups, effects: EffectStack(), width: 200, height: 100, cb: cb)
+        let lt = sources.textures(for: layerMap, groups: groups, layerIndex: { eng.layerIndex(of: $0) }, width: 200, height: 100, cb: cb)
+        cb.commit(); cb.waitUntilCompleted()
+        let lp = render(layerMap, comp: whole, layers: lt)
+        var withGone = layerMap; withGone.slices.append(gone)
+        let gp = render(withGone, comp: whole, layers: lt)
+        check(eng.layerIndex(of: id1) == 1 && eng.layerIndex(of: UUID()) == nil && lt[id1] != nil
+              && rgb(lp, 30, 45).2 > 200 && rgb(lp, 30, 45).0 < 30 && rgb(lp, 130, 45).0 > 200 && isBlack(gp, 80, 45)
+              && back.layers[0].id == id0 && back.layers[1].id == id1,
+              "出力のマッピング：元の絵がレイヤーなら、そのレイヤーの絵だけが出る（無いレイヤーは黒）。レイヤーの印は保存して読み込める")
+
+        // 10. ガイド：選んだスライスの輪郭（黄色）が出る。エンジンから描画スレッドへ渡る
+        var gs = OutputSlice(); gs.corners = [[0.2, 0.2], [0.8, 0.2], [0.8, 0.8], [0.2, 0.8]]; gs.mesh = .regular(cols: 2, rows: 2)
+        let guided = render(one(gs), comp: gray, guide: MapGuide(target: .slice(gs.id), mode: .mesh, selected: [4]))
+        let edge = rgb(guided, 80, 18), inside = rgb(guided, 60, 30)
+        eng.mapGuide = MapGuide(target: .slice(gs.id))
+        let passed = eng.renderParams().mapGuide == eng.mapGuide
+        eng.mapGuide = nil
+        check(edge.0 > 200 && edge.1 > 170 && edge.2 < 60 && inside.0 > 150 && inside.2 > 150 && passed
+              && eng.renderParams().mapGuide == nil,
+              "出力のマッピング：ガイドで、選んだスライスの輪郭が黄色で出る（エンジンから描画へ渡る）")
+
+        // 11. .halomap に書いて読める
+        var full = feathered
+        full.slices[0].mesh = bent.mesh
+        full.slices[0].crop = [[0, 0], [1, 0], [0.5, 1]]
+        full.slices[1].source = .layer(id1)
+        full.slices[1].inputRotation = 30; full.slices[1].flipV = true; full.slices[1].gain = [1, 0.5, 0.2]
+        full.masks = [OutputMask(name: "柱", output: 1, points: [[0.1, 0.1], [0.3, 0.1], [0.2, 0.4]], invert: true)]
+        full.blendGamma = 1.8; full.backdrops = ["0": "/tmp/a.jpg"]; full.backdropOpacity = 0.3
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("selftest-\(UUID().uuidString).\(OutputMap.fileExtension)")
+        try? full.write(to: url)
+        let readBack = try? OutputMap.read(from: url)
+        try? FileManager.default.removeItem(at: url)
+        check(readBack == full, "出力のマッピング：.halomap に書いて読める（メッシュ・切り抜き・マスク・レイヤーも）")
     }
 
     /// カメラ・Syphon の絵を置く：合わせ方・左右反転。カメラを選んでいなければ透明

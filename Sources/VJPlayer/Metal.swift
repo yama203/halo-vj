@@ -2441,6 +2441,19 @@ final class RenderLoop {
             }
         }
 
+        // 出力の分割：元の絵がレイヤーのスライスがあれば、そのレイヤーだけを合成した絵を用意する（コンポジションと同じ大きさ）
+        var sliceLayerTextures: [UUID: MTLTexture] = [:]
+        if slicing && !params.testPattern && params.outputMap.slices.contains(where: { $0.enabled && $0.source.layerID != nil }),
+           let cb = ctx.queue.makeCommandBuffer() {
+            let size = sliceKey.flatMap { shared[$0]?.size }
+                ?? (fixedSize ?? (max(Int((1080 * params.compAspect).rounded()), 2), 1080))
+            sliceLayerTextures = sliceLayerSources.textures(for: params.outputMap, groups: groups,
+                                                            layerIndex: { [engine] in engine.layerIndex(of: $0) },
+                                                            width: size.0, height: size.1, cb: cb)
+            cb.addCompletedHandler { _ in _ = groups }
+            cb.commit()
+        }
+
         if let syphonKey, let tex = sharedTextures[syphonKey], let cb = ctx.queue.makeCommandBuffer() {
             if syphonOn { SyphonOutput.shared.publish(tex, cb: cb) }
             if dmxOn { DMXSampler.shared.sample(tex, cb: cb) }
@@ -2460,7 +2473,8 @@ final class RenderLoop {
                 // 出力の分割：この出力へ出すスライスを描く
                 guard let drawable = layer.nextDrawable(), let cb = ctx.queue.makeCommandBuffer() else { continue }
                 SliceRenderer.shared.draw(params.outputMap, output: output, composite: sliceKey.flatMap { sharedTextures[$0] },
-                                          master: params.master, testPattern: params.testPattern, into: drawable.texture, cb: cb)
+                                          layers: sliceLayerTextures, master: params.master, testPattern: params.testPattern,
+                                          guide: params.mapGuide, into: drawable.texture, cb: cb)
                 cb.present(drawable)
                 cb.commit()
             case .output where output != 0:
@@ -2507,6 +2521,8 @@ final class RenderLoop {
     private var sharedCompositors: [Int: Compositor] = [:]
     /// パッドのエフェクト用（縦横比ごと。描画スレッドだけが触る）
     private var padProcessors: [Int: EffectProcessor] = [:]
+    /// 出力の分割：元の絵がレイヤーのスライス用の合成（描画スレッドだけが触る）
+    private let sliceLayerSources = SliceLayerSources()
     /// いちばん新しい出力の合成（シーンのサムネイル用。lock の中で）
     private var _lastComposite: MTLTexture?
     func lastComposite() -> MTLTexture? { lock.withLock { _lastComposite } }

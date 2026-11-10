@@ -17,6 +17,8 @@ struct RenderParams {
     var outputMap = OutputMap()
     /// 合成の縦横比（出力の分割で、出力の画面と合成の形が違っても、合成はこの形で作る）
     var compAspect: Double = 16.0 / 9
+    /// 合わせる窓で選んでいるもののガイド（出力に出す。nil なら出さない）
+    var mapGuide: MapGuide?
 }
 
 /// 表示中の映像フレーム。GPU が描画し終わるまで参照を持ち続けるための入れ物。
@@ -361,6 +363,15 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
         }
     }
 
+    /// 合わせる窓のガイド（実際の出力に、選んだものの輪郭・点を出す）。保存しない。窓を閉じたら nil
+    @Published var mapGuide: MapGuide? {
+        didSet {
+            guard mapGuide != oldValue else { return }
+            let g = mapGuide
+            renderLock.withLock { renderState.mapGuide = g }
+        }
+    }
+
     /// 描画スレッドに渡す状態。メインスレッドで変更があるたびに作り直す（renderLock の中で触る）
     struct RenderState {
         struct LayerState {
@@ -408,6 +419,9 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
         var homographyInverse = matrix_identity_float3x3
         var testPattern = false
         var outputMap = OutputMap()
+        var mapGuide: MapGuide?
+        /// レイヤーの UUID（番号の順）。元の絵がレイヤーのスライスで、今の番号を引く
+        var layerIDs: [UUID] = []
         var compAspect: Double = 16.0 / 9
         var preview = Preview.none
         var previewTransform = AnimTransform()
@@ -1118,6 +1132,8 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
         (state.preview, state.previewTransform) = syncPreview()
         state.masterOpacity = Float(masterOpacity)
         state.outputMap = outputMap
+        state.mapGuide = mapGuide
+        state.layerIDs = layers.map(\.id)
         state.compAspect = Double(outputAspect)
         state.blackoutFade = blackoutFade
         state.compTransform = compTransform.animValue
@@ -1556,8 +1572,14 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
                                 testPattern: renderState.testPattern,
                                 master: mm * renderState.blackoutFade.value(at: now),
                                 compMaster: mm, format: renderState.format,
-                                outputMap: renderState.outputMap, compAspect: renderState.compAspect)
+                                outputMap: renderState.outputMap, compAspect: renderState.compAspect,
+                                mapGuide: renderState.mapGuide)
         }
+    }
+
+    /// レイヤーの UUID → 今のレイヤーの番号（描画スレッド用。無ければ nil）
+    func layerIndex(of id: UUID) -> Int? {
+        renderLock.withLock { renderState.layerIDs.firstIndex(of: id) }
     }
 
     /// レイヤープレビュー（1 枚ずつに並べたもの。テスト用）
@@ -1678,6 +1700,8 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
         var title: String?
         /// 切り替え方（無ければクロスフェード）
         var transition: Int?
+        /// レイヤーの印（出力のマッピングで「元の絵がこのレイヤー」を覚えておくため。古い保存データには無い）
+        var id: UUID?
     }
 
     struct SavedDeck: Codable {
@@ -1793,7 +1817,8 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
                            isAdjustment: $0.isAdjustment ? true : nil,
                            blendFX: $0.blend.isSpecial ? $0.blendFX : nil,
                            title: $0.title.isEmpty ? nil : $0.title,
-                           transition: $0.transition == .crossfade ? nil : $0.transition.rawValue)
+                           transition: $0.transition == .crossfade ? nil : $0.transition.rawValue,
+                           id: $0.id)
             },
             corners: corners.map { [$0.x, $0.y] },
             outputMap: outputMap.slices.isEmpty && !outputMap.enabled ? nil : outputMap,
@@ -1837,7 +1862,12 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
         // グリッドを作り直す（古い保存データは 4 列。段数は保存されたレイヤーの数）
         let savedColumns = min(max(state.columns ?? 4, 1), Self.maxColumns)
         let savedLayers = min(max(state.layers?.count ?? Self.defaultLayers, 1), Self.maxLayers)
-        let newLayers = (0..<savedLayers).map { Layer(index: $0) }
+        // レイヤーの印は保存したものを使う（同じ印が 2 つあれば新しく作る）
+        var seenIDs = Set<UUID>()
+        let newLayers = (0..<savedLayers).map { r -> Layer in
+            if let ls = state.layers, ls.indices.contains(r), let id = ls[r].id, seenIDs.insert(id).inserted { return Layer(index: r, id: id) }
+            return Layer(index: r)
+        }
         newLayers.forEach(wire)
         let savedDecks = (state.decks?.isEmpty == false ? state.decks! : [SavedDeck(id: UUID(), name: "デッキ 1")])
             .map { Deck(id: $0.id, name: $0.name) }
