@@ -334,6 +334,12 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
         }
     }
     lazy var autoRunner = AutopilotRunner(engine: self)
+    /// 出力が切り替わった知らせ（出力モニターを光らせる）
+    @Published var outputEvent: OutputEvent?
+    /// まとめる前の変化（同じ瞬間のもの）
+    var outputPending: [(String, OutputEvent.Kind, Bool)] = []
+    /// 0 より大きい間は、クリップの知らせを出さない（シーンを呼んでいる間）
+    var outputEventMute = 0
     /// この時刻までの変化は、元に戻すの歩にしない（自動操縦の切り替えとそのフェードの間）
     var undoAbsorbUntil = 0.0
 
@@ -758,6 +764,7 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
         let r = layerOf(index)
         // 人が出したら、自動操縦のそのレイヤーのルールはしばらく休む
         autoRunner.noteManual(layer: r)
+        noteOutputClip(layer: r, name: slot.name)
         // キューで消している途中のレイヤーを出し直したら、消すのをやめる
         cancelCueFade(layer: r)
         // キューで一時的に決めた「終わったら」は、出し直すと外れる（キューから出すときは、この後でまた入れる）
@@ -828,6 +835,7 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
     /// 1つのレイヤーを止めて消す
     func stopLayer(_ r: Int) {
         guard r >= 0, r < layers.count else { return }
+        if activeByLayer[r] != nil { noteOutputStop(layer: r) }
         finishCrossfade(r)
         crossfades[r] = Fade()
         if let a = activeByLayer[r] { slots[a]?.stopAndRearm(); slots[a]?.fadeGain = 1 }

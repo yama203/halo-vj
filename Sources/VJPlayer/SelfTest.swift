@@ -277,6 +277,7 @@ enum SelfTest {
         testSceneClipSettings(check: check, wait: wait)
         testAutopilot(check: check)
         testAutopilotUndo(check: check, wait: wait)
+        testOutputEvents(check: check, wait: wait)
         testDecks(check: check, wait: wait)
         testPads(check: check)
         testMultiSelect(check: check)
@@ -2762,6 +2763,33 @@ enum SelfTest {
         check(e.decks.count == 2 && e.activeByLayer[0] == nil && e.scenes.first { $0.id == sb.id }?.deck == nil
               && e.slots.count == 2 * e.gridSize && e.slots[e.slotIndex(deck: 1, layer: 1, column: 1)]?.generator?.kind == .noise,
               "デッキ：消すと中のクリップは止まって外れ、後ろのデッキが詰まる")
+    }
+
+    /// 出力が切り替わった知らせ：クリップ・まとめて・シーン（中のクリップは数えない）・止めた・自動操縦
+    static func testOutputEvents(check: (Bool, String) -> Void, wait: (Double) -> Void) {
+        let e = Engine(persistent: false)
+        let c = e.columns
+        e.placeGenerator(.solid, at: 0); e.placeGenerator(.noise, at: c); e.placeGenerator(.stripes, at: 1)
+        e.slots[0]?.title = "赤"
+        e.trigger(0); wait(0.05)
+        let one = e.outputEvent
+        e.trigger(1); e.trigger(c); wait(0.05)
+        let two = e.outputEvent
+        let sc = e.addScene()
+        e.stopAll(); wait(0.05)
+        let stop = e.outputEvent
+        e.recallScene(sc.id, fade: 0); wait(0.05)
+        let scene = e.outputEvent
+        e.autopilot = AutoPilot(rules: [AutoRule(target: .layer(0), unit: .minutes, every: 10, jitter: 0, pick: .sequence, fade: 0)],
+                                pauseAfterManual: 0)
+        e.setAutopilot(true)
+        e.autoRunner.skip(e.autopilot.rules[0].id); wait(0.05)
+        let auto = e.outputEvent
+        e.setAutopilot(false)
+        check(one?.kind == .clip && one?.text.contains("L1") == true && two?.text == "2 つのクリップを出した"
+              && stop?.text == "2 つのレイヤーを止めた" && scene?.kind == .scene && scene?.text.contains(sc.name) == true
+              && auto?.auto == true && auto?.kind == .clip,
+              "出力の知らせ：クリップ・まとめて・止めた・シーン（中のクリップは数えない）・自動操縦（\(one?.text ?? "-") / \(two?.text ?? "-") / \(stop?.text ?? "-") / \(scene?.text ?? "-") / \(auto?.text ?? "-")）")
     }
 
     /// 自動操縦：自動の切り替えは元に戻すの記録に入らない。人の操作は入る

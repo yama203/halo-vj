@@ -340,6 +340,24 @@ struct ParameterPanel: View {
     @AppStorage("inspectorPreviewWidth") private var previewWidthSetting = 0.0
     /// ドラッグを始めたときの幅
     @State private var dragStartWidth: CGFloat?
+    /// 中身が切り替わったときに、縁を一瞬光らせる（1 → 0）
+    @State private var flash = 0.0
+    @State private var flashName = ""
+    @AppStorage("flashOnSelect") private var flashOnSelect = true
+
+    /// 何を出しているか（変わったら光らせる）
+    private var shownKey: String {
+        "\(engine.inspectorTab.rawValue)-\(engine.selectedLayer)-\(engine.inspectedIndex ?? -1)-\(engine.sceneDraft?.sceneID.uuidString ?? "")"
+    }
+
+    /// タブごとの光の色（コンポジション：オレンジ・レイヤー：青・クリップ：緑）
+    static func tabColor(_ t: Engine.InspectorTab) -> Color {
+        switch t {
+        case .composition: Color.orange
+        case .layer: Color.accentColor
+        case .clip: Color.green
+        }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -366,6 +384,31 @@ struct ParameterPanel: View {
         .padding(framed ? 12 : 0)
         .frame(maxHeight: .infinity, alignment: .top)
         .background(RoundedRectangle(cornerRadius: 8).fill(framed ? UI.panelBackground : Color.clear))
+        // 切り替わったら：縁が光って、何に切り替わったかが右上に出て、すっと消える
+        .overlay {
+            let c = Self.tabColor(engine.inspectorTab)
+            ZStack(alignment: .topTrailing) {
+                RoundedRectangle(cornerRadius: 8).fill(c.opacity(0.07 * flash))
+                RoundedRectangle(cornerRadius: 8).strokeBorder(c.opacity(flash), lineWidth: 2.5)
+                    .shadow(color: c.opacity(0.8 * flash), radius: 10)
+                if part != .preview {
+                    Text(flashName)
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(.black)
+                        .padding(.horizontal, 10).padding(.vertical, 4)
+                        .background(Capsule().fill(c))
+                        .padding(framed ? 14 : 6)
+                        .opacity(min(flash * 1.6, 1))
+                }
+            }
+            .allowsHitTesting(false)
+        }
+        .onChange(of: shownKey) { _, _ in
+            guard flashOnSelect else { return }
+            flashName = engine.currentTabName
+            flash = 1
+            withAnimation(.easeOut(duration: 1.0)) { flash = 0 }
+        }
     }
 
     /// 自由レイアウトで、プレビューと設定を別々の区画に置くとき

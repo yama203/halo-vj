@@ -199,6 +199,7 @@ struct OutputMonitor: View {
                     }
                 }
             }
+            .overlay { OutputFlashOverlay() }
             .overlay(Rectangle().stroke(engine.isBlackout || engine.compMuted ? Color.red
                                         : editCorners ? Color.yellow.opacity(0.6) : Color.gray.opacity(0.35),
                                         lineWidth: engine.isBlackout || engine.compMuted ? 2 : 1))

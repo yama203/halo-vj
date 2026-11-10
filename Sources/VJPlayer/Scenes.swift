@@ -147,6 +147,10 @@ extension Engine {
         guard let sc = scenes.first(where: { $0.id == id }) else { return }
         // 人がシーンを出したら、自動操縦はしばらく休む
         autoRunner.noteManual(layer: nil)
+        // 出力モニターには「シーン ○○」とだけ出す（中で出すクリップ・止めるレイヤーは数えない）
+        noteOutputScene(sc.name)
+        outputEventMute += 1
+        defer { outputEventMute -= 1 }
         sceneTween?.invalidate()
         sceneTween = nil
         finishCueFade()
@@ -250,6 +254,9 @@ extension Engine {
             sceneTween = nil
             sceneProgress = nil
             step(1)
+            // フェードが終わって消えたレイヤーを止める（出力モニターには出さない。シーンとして出した後なので）
+            outputEventMute += 1
+            defer { outputEventMute -= 1 }
             for r in fadeOutStop {
                 stopLayer(r)
                 layers[r].opacity = sc.layers[r].opacity

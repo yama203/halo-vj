@@ -16,6 +16,9 @@ struct SettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            Section("画面") {
+                FlashSetting()
+            }
             Section("アップデート") {
                 UpdateSettingsSection()
             }
@@ -41,5 +44,19 @@ private struct SecondsSlider: View {
                     .frame(width: 60, alignment: .trailing)
             }
         }
+    }
+}
+
+/// クリップ・レイヤーを選んでパラメーターのパネルが切り替わったとき、縁を光らせるか
+private struct FlashSetting: View {
+    @AppStorage("flashOnSelect") private var flashOnSelect = true
+    @AppStorage("flashOnOutput") private var flashOnOutput = true
+    var body: some View {
+        Toggle("パラメーターのパネルが切り替わったら、縁を一瞬光らせる", isOn: $flashOnSelect)
+        Text("コンポジションはオレンジ・レイヤーは青・クリップは緑で光り、何に切り替わったかが右上に出る")
+            .font(.caption).foregroundStyle(.secondary)
+        Toggle("出力が切り替わったら、出力モニターを一瞬光らせる", isOn: $flashOnOutput)
+        Text("クリップは緑・シーンは紫・止めたときは灰色で光り、何に変わったかが左上に出る（自動操縦が変えたときは飛行機の印）")
+            .font(.caption).foregroundStyle(.secondary)
     }
 }
