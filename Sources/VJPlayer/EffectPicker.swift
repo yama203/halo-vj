@@ -50,6 +50,29 @@ struct EffectPicker: View {
 
     var body: some View {
         let list = results
+        HStack(alignment: .top, spacing: 12) {
+            search(list)
+            // 選んでいるものの、動く見本
+            VStack(alignment: .leading) {
+                if list.indices.contains(highlight) {
+                    KindPreviewCard(kind: list[highlight], width: 270)
+                }
+                Spacer(minLength: 0)
+            }
+            .frame(width: 270)
+        }
+        .padding(12)
+        .frame(width: 340 + 270 + 12, height: 420)
+        .onChange(of: query) { _, _ in highlight = 0 }
+        .onAppear {
+            DispatchQueue.main.async { focused = true }
+            KindPreview.shared.show(list.indices.contains(highlight) ? list[highlight] : nil)
+        }
+        .onChange(of: list.indices.contains(highlight) ? list[highlight] : nil) { _, k in KindPreview.shared.show(k) }
+        .onDisappear { KindPreview.shared.show(nil) }
+    }
+
+    private func search(_ list: [EffectKind]) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             if let targetLabel {
                 Text(targetLabel).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(2)
@@ -95,10 +118,7 @@ struct EffectPicker: View {
             Text("↑↓ で選んで Enter・クリックで足す・Esc で閉じる")
                 .font(.system(size: 10)).foregroundStyle(.secondary)
         }
-        .padding(12)
-        .frame(width: 340, height: 420)
-        .onChange(of: query) { _, _ in highlight = 0 }
-        .onAppear { DispatchQueue.main.async { focused = true } }
+        .frame(width: 316)
     }
 
     private func row(_ k: EffectKind, index: Int) -> some View {
@@ -195,7 +215,7 @@ final class EffectSearchPanel: NSObject, NSWindowDelegate {
         }, close: { [weak self] in self?.close() })
             .environment(\.colorScheme, .dark)
         let p = panel ?? {
-            let p = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 340, height: 420),
+            let p = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 622, height: 444),
                             styleMask: [.titled, .closable, .fullSizeContentView, .nonactivatingPanel],
                             backing: .buffered, defer: false)
             p.titleVisibility = .hidden
@@ -210,7 +230,7 @@ final class EffectSearchPanel: NSObject, NSWindowDelegate {
         p.contentView = NSHostingView(rootView: view)
         if let main = NSApp.mainWindow ?? NSApp.windows.first(where: { $0.isVisible && $0.canBecomeMain }) {
             let f = main.frame
-            p.setFrameOrigin(NSPoint(x: f.midX - 170, y: f.maxY - 420 - 120))
+            p.setFrameOrigin(NSPoint(x: f.midX - 311, y: f.maxY - 444 - 120))
         } else {
             p.center()
         }

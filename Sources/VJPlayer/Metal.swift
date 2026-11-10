@@ -2320,6 +2320,8 @@ final class RenderLoop {
             if !gate.shouldRender(now: now, fps: fps, halfPeriod: period / 2) { return }
         }
         let updated = engine.updateFrame()
+        // カーソルを合わせたエフェクト・ジェネレーターの見本（同じスレッドで描いて、作業テクスチャを取り合わないように）
+        KindPreview.shared.renderIfNeeded(now: now)
         let current: [(ObjectIdentifier, CAMetalLayer, TargetKind, Int)] = lock.withLock {
             stats.ticks += 1
             monitorTicks += 1

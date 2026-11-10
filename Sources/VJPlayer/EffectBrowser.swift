@@ -47,7 +47,6 @@ struct EffectBrowser: View {
                                     EffectTile(kind: k, tint: .teal) {
                                         if !engine.placeGeneratorInSelectedLayer(k) { NSSound.beep() }
                                     }
-                                    .help(k.help + "\nクリップの枠へドラッグして置く／ダブルクリックで選択中のレイヤーの空いている所に置く")
                                 }
                             }
                         }
@@ -112,10 +111,17 @@ struct EffectTile: View {
         .background(RoundedRectangle(cornerRadius: 6).fill(Color.white.opacity(hovering ? 0.10 : 0.05)))
         .overlay(RoundedRectangle(cornerRadius: 6).stroke(tint.opacity(hovering ? 0.6 : 0.25)))
         .contentShape(Rectangle())
-        .onHover { hovering = $0 }
-        .onTapGesture(count: 2, perform: onDoubleClick)
-        .onDrag { NSItemProvider(object: kind.dragString as NSString) }
-        .help(kind.help + "\nドラッグして付ける／ダブルクリックで今のタブに付ける")
+        .onHover { inside in
+            hovering = inside
+            // カーソルを合わせると、そばに動く見本を出す（説明もそこに出すので、ふつうのヒントは出さない）
+            if inside { KindPreviewPanel.shared.hover(kind) } else { KindPreviewPanel.shared.leave(kind) }
+        }
+        .onDisappear { KindPreviewPanel.shared.leave(kind) }
+        .onTapGesture(count: 2) { KindPreviewPanel.shared.hide(); onDoubleClick() }
+        .onDrag {
+            KindPreviewPanel.shared.hide()
+            return NSItemProvider(object: kind.dragString as NSString)
+        }
     }
 }
 

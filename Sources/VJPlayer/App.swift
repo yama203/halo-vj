@@ -18,6 +18,12 @@ enum Main {
             SelfTest.textPreview(path: args[i + 1], time: t)
             exit(0)
         }
+        if let i = args.firstIndex(of: "--kind-sheet"), args.count > i + 1 {
+            // 開発用：カーソルを合わせたときの見本を全部並べて書き出す  VJPlayer --kind-sheet out.png [秒] [effects|generators|all|名前,…]
+            let secs = args.count > i + 2 ? Double(args[i + 2]) ?? 2 : 2
+            SelfTest.kindSheet(path: args[i + 1], secs: secs, which: args.count > i + 3 ? args[i + 3] : "all")
+            exit(0)
+        }
         if let i = args.firstIndex(of: "--gen-preview"), args.count > i + 2, let k = EffectKind(rawValue: args[i + 1]) {
             // 開発用：ジェネレーターを 1 枚書き出す  VJPlayer --gen-preview phyllotaxis out.png [秒] [値 値 …] [--random 0.8]
             let rest = Array(args.dropFirst(i + 3))
@@ -287,6 +293,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if sc.indices.contains(n - 1) { Engine.shared.editScene(sc[n - 1].id) }
             }
         }
+        // 画面確認用：VJ_KIND_PREVIEW=種類 で、カーソルを合わせたときの見本の窓を出しておく（アプリが前に無くても消さない）
+        if let v = ProcessInfo.processInfo.environment["VJ_KIND_PREVIEW"], let k = EffectKind(rawValue: v) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                KindPreviewPanel.shared.keepWhenInactive = true
+                KindPreviewPanel.shared.hover(k)
+            }
+        }
         // 画面確認用：VJ_SELECT_CLIP=番号 で起動時にそのクリップを選んでおく
         if let v = ProcessInfo.processInfo.environment["VJ_SELECT_CLIP"], let i = Int(v) {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
@@ -448,6 +461,10 @@ enum CardPreview {
 
     /// 開発用：エフェクトを探す窓を画像に（query で絞り込んだところ。gen = ジェネレーターも）
     static func writePicker(query: String, generators: Bool, path: String) {
+        // 見本の絵を先に描いておく（描画ループは動いていないので、ここで進める）
+        if let k = EffectPicker.results(query, includeGenerators: generators).first {
+            KindPreview.shared.adoptForSheet(k, KindPreview.shared.renderForSheet(k, secs: 2))
+        }
         let root = EffectPickerPreview(query: query, generators: generators)
             .background(Color(white: 0.16))
             .environment(\.colorScheme, .dark)
