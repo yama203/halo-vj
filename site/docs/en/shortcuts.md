@@ -55,6 +55,7 @@ Halo VJ key commands and mouse actions with modifier keys.
 | `⇧`-drag a layer's volume | Fine adjustment |
 | `Shift`-drag the speed control | Fine adjustment |
 | `⇧` + In/Out ◀ ▶ | Move 10 frames at a time |
+| `⌥`-click an effect's dice button | Randomize values just a little (→ [Parameter Panel](parameters.md)) |
 
 ## Search window
 

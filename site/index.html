@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Halo VJ</title>
-<meta name="description" content="Mac 用の VJ ソフト。シーン、FX パッド、HAP、約 30 種類のジェネレーター、Syphon・NDI・OSC・MIDI・Art-Net、出力のマッピング。無料。">
+<meta name="description" content="Mac 用の VJ ソフト。シーン、FX パッド、HAP、40 種類のジェネレーター、37 種類のエフェクト、Syphon・NDI・OSC・MIDI・Art-Net、出力のマッピング。無料。">
 <meta property="og:title" content="Halo VJ">
 <meta property="og:description" content="Mac 用の VJ ソフト。無料。">
 <meta property="og:type" content="website">
@@ -317,8 +317,8 @@
       <div class="card" style="--c: var(--cyan)">
         <div class="badge"><svg class="ic" aria-hidden="true"><use href="#i-spark"/></svg></div>
         <h3><span lang="ja">ジェネレーターとエフェクト</span><span lang="en">Generators and effects</span></h3>
-        <p><span lang="ja">素材がなくても使えるジェネレーターを約 30 種類、エフェクトも約 30 種類収録。マスクや調整レイヤーも使えます。</span><span lang="en">About 30 generators that keep moving without any footage. About 30 effects, masks and adjustment layers.</span></p>
-        <div class="tags"><span lang="ja">テキスト・時計</span><span lang="en">Text and clock</span><span lang="ja">カメラ入力</span><span lang="en">Camera input</span></div>
+        <p><span lang="ja">素材がなくても使えるジェネレーターを 40 種類、エフェクトを 37 種類収録。マスクや調整レイヤーも使えます。</span><span lang="en">40 generators that keep moving without any footage. 37 effects, masks and adjustment layers.</span></p>
+        <div class="tags"><span lang="ja">テキスト・時計</span><span lang="en">Text and clock</span><span lang="ja">カメラ入力</span><span lang="en">Camera input</span><span lang="ja">サイコロ・プリセット</span><span lang="en">Dice and presets</span></div>
       </div>
       <div class="card" style="--c: var(--cyan)">
         <div class="badge"><svg class="ic" aria-hidden="true"><use href="#i-wave"/></svg></div>
@@ -335,7 +335,7 @@
       <div class="card" style="--c: var(--yellow)">
         <div class="badge"><svg class="ic" aria-hidden="true"><use href="#i-screen"/></svg></div>
         <h3><span lang="ja">出力</span><span lang="en">Output</span></h3>
-        <p><span lang="ja">複数プロジェクターへのマッピング、エッジブレンディング、コーナーピン補正、テストパターン、録画に対応しています。</span><span lang="en">Mapping across projectors, edge blending, corner pin, test patterns and recording.</span></p>
+        <p><span lang="ja">複数プロジェクターへのマッピング（メッシュ・切り抜き・マスク）、エッジブレンディング、コーナーピン補正、テストパターン、録画に対応しています。</span><span lang="en">Mapping across projectors (mesh, crop and masks), edge blending, corner pin, test patterns and recording.</span></p>
         <div class="tags"><span lang="ja">マッピング</span><span lang="en">Mapping</span><span lang="ja">録画</span><span lang="en">Recording</span></div>
       </div>
     </div>
@@ -535,8 +535,8 @@
   <section id="generators">
     <h2 class="sec c"><svg class="ic" aria-hidden="true"><use href="#i-spark"/></svg><span lang="ja">ジェネレーター</span><span lang="en">Generators</span></h2>
     <p class="lead">
-      <span lang="ja">クリップと同じようにグリッドに置くだけで、リアルタイムに動き続けます。パラメーターは音や BPM に連動させることもできます。</span>
-      <span lang="en">Place one as a clip and it keeps moving in real time. Values can follow the audio or the BPM.</span>
+      <span lang="ja">クリップと同じようにグリッドに置くだけで、リアルタイムに動き続けます。パラメーターは音や BPM に連動させることもできます。画質（高・3/4・半分）を選べば、GPU の負荷を軽くできます。</span>
+      <span lang="en">Place one as a clip and it keeps moving in real time. Values can follow the audio or the BPM. Pick the quality (full, 3/4 or half) to lighten the GPU load.</span>
     </p>
     <div class="motion" id="gen-grid"></div>
   </section>
@@ -544,10 +544,15 @@
   <section id="effects">
     <h2 class="sec m"><svg class="ic" aria-hidden="true"><use href="#i-knob"/></svg><span lang="ja">エフェクト</span><span lang="en">Effects</span></h2>
     <p class="lead">
-      <span lang="ja">クリップ、レイヤー、コンポジション、FX パッドのどこにでもかけられます（下の例は、ジェネレーターにかけたものです）。</span>
-      <span lang="en">Add them to a clip, a layer, the composition or an FX pad. (These examples are applied to generators.)</span>
+      <span lang="ja">クリップ、レイヤー、コンポジション、FX パッドのどこにでもかけられます。値はサイコロでランダムに変えたり、名前を付けてプリセットに保存したりできます（下の例は、ジェネレーターにかけたものです）。</span>
+      <span lang="en">Add them to a clip, a layer, the composition or an FX pad. Roll the dice for random values, or save a set of values as a named preset. (These examples are applied to generators.)</span>
     </p>
     <div class="motion" id="fx-grid"></div>
+    <p style="margin-top:14px">
+      <span lang="ja">一覧でカーソルを合わせると、動く見本が出ます。よく使うものは星を付けて、いちばん上に並べられます。</span>
+      <span lang="en">Hover over one in the list to see a moving preview. Star the ones you use often to keep them at the top.</span>
+      <a href="docs/?p=parameters"><span lang="ja">サイコロとプリセットの使い方 →</span><span lang="en">More about dice and presets →</span></a>
+    </p>
   </section>
 
   <section id="install">
@@ -637,7 +642,15 @@
       ['g-fractal', 'フラクタル', 'Fractal'],
       ['g-growth', '育つ線（回路・枝）', 'Growth'],
       ['g-tunnel', 'トンネル', 'Tunnel'],
-      ['g-phyllotaxis', 'フィロタキシス', 'Phyllotaxis']
+      ['g-phyllotaxis', 'フィロタキシス', 'Phyllotaxis'],
+      ['g-plasma', 'プラズマ', 'Plasma'],
+      ['g-aurora', 'オーロラ', 'Aurora'],
+      ['g-nebula', '星雲・煙', 'Nebula / Smoke'],
+      ['g-truchet', 'トルシェ模様', 'Truchet Tiles'],
+      ['g-hexGrid', '六角のタイル', 'Hexagon Tiles'],
+      ['g-codeRain', '文字の雨', 'Code Rain'],
+      ['g-wireframe', '回るワイヤーフレーム', 'Spinning Wireframe'],
+      ['g-moire', 'モアレ', 'Moiré']
     ];
     var fx = [
       ['e-kaleidoscope', '万華鏡', 'Kaleidoscope', '光の流れ', 'Light Flow'],
@@ -647,7 +660,15 @@
       ['e-crt', 'CRT モニター', 'CRT Monitor', 'シンセウェイブ', 'Synthwave'],
       ['e-rgbSplit', '色ずれ（RGB ずらし）', 'RGB Split', 'レーザーショー', 'Laser Show'],
       ['e-edgeNeon', '輪郭ネオン', 'Edge Neon', 'フラクタル', 'Fractal'],
-      ['e-videoFeedback', 'ビデオフィードバック', 'Video Feedback', 'レーザーショー', 'Laser Show']
+      ['e-videoFeedback', 'ビデオフィードバック', 'Video Feedback', 'レーザーショー', 'Laser Show'],
+      ['e-blur', 'ぼかし', 'Blur', 'レーザーショー', 'Laser Show'],
+      ['e-lens', 'レンズ（魚眼・渦・ふくらみ）', 'Lens', 'シンセウェイブ', 'Synthwave'],
+      ['e-polar', '極座標', 'Polar', 'シンセウェイブ', 'Synthwave'],
+      ['e-tile', 'タイル', 'Tile', 'フラクタル', 'Fractal'],
+      ['e-keyer', 'キー抜き', 'Keyer', 'フラクタル', 'Fractal'],
+      ['e-ledWall', 'LED パネル', 'LED Wall', 'シンセウェイブ', 'Synthwave'],
+      ['e-slices', 'スライス', 'Slices', 'レーザーショー', 'Laser Show'],
+      ['e-shake', 'ゆれ', 'Shake', 'シンセウェイブ', 'Synthwave']
     ];
     function tile(x, isFx) {
       var base = isFx ? '<small><span lang="ja">' + x[3] + 'に適用</span><span lang="en">on ' + x[4] + '</span></small>' : '';
