@@ -271,11 +271,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 Engine.shared.outputFormat = f
             }
         }
-        // 画面確認用：VJ_RECORD=保存するファイル:秒 で、3 秒後からその秒数だけ録画する（録画の設定は書き換えない）
+        // 画面確認用：VJ_RECORD=保存するファイル:秒 で、3 秒後（VJ_RECORD_DELAY=秒 で変えられる。育つジェネレーターを待つとき）から
+        // その秒数だけ録画する（録画の設定は書き換えない）
         if let v = env["VJ_RECORD"], let i = v.lastIndex(of: ":"), let secs = Double(v[v.index(after: i)...]) {
             let url = URL(fileURLWithPath: String(v[..<i]))
+            let delay = env["VJ_RECORD_DELAY"].flatMap(Double.init) ?? 3
             Recorder.shared.forTests = true
-            DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
                 let ok = Recorder.shared.start(to: url)
                 FileHandle.standardError.write("RECORD start \(ok) \(Recorder.shared.lastError ?? "")\n".data(using: .utf8)!)
                 DispatchQueue.main.asyncAfter(deadline: .now() + secs) {

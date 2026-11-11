@@ -4,23 +4,28 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Halo VJ</title>
-<meta name="description" content="Mac 用の VJ ソフト。HAP、ジェネレーター、Syphon・NDI・OSC・MIDI・Art-Net、出力のマッピング。無料。">
+<meta name="description" content="Mac 用の VJ ソフト。シーン、FX パッド、HAP、約 30 種類のジェネレーター、Syphon・NDI・OSC・MIDI・Art-Net、出力のマッピング。無料。">
 <meta property="og:title" content="Halo VJ">
 <meta property="og:description" content="Mac 用の VJ ソフト。無料。">
 <meta property="og:type" content="website">
-<meta property="og:image" content="https://yama203.github.io/halo-vj/assets/ui-full.jpg">
+<meta property="og:image" content="https://yama203.github.io/halo-vj/assets/shots/ui-ja-small.jpg">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="color-scheme" content="dark">
 <link rel="icon" href="assets/favicon.png">
 <style>
   :root {
-    --bg: #16161a;
-    --panel: #1e1e23;
-    --line: #2e2e35;
-    --text: #dddce3;
-    --muted: #8f8e9b;
+    --bg: #141418;
+    --panel: #1c1c22;
+    --panel-2: #22222a;
+    --line: #2e2e36;
+    --text: #e1e0e8;
+    --muted: #92919e;
     --link: #8ec7e6;
-    --max: 880px;
+    /* アイコンの 3 色 */
+    --magenta: #ff4fa3;
+    --yellow: #ffc74a;
+    --cyan: #3fd2ff;
+    --max: 1080px;
   }
   * { box-sizing: border-box; }
   body {
@@ -31,14 +36,16 @@
     font-size: 15px;
     line-height: 1.8;
     -webkit-font-smoothing: antialiased;
+    /* 一番上の光（.hero::before）が横にはみ出してもスクロールさせない */
+    overflow-x: clip;
   }
   html[data-lang="ja"] [lang="en"], html[data-lang="en"] [lang="ja"] { display: none !important; }
   a { color: var(--link); text-decoration: none; }
   a:hover { text-decoration: underline; }
-  img { display: block; max-width: 100%; height: auto; }
+  img, video { display: block; max-width: 100%; height: auto; }
   .wrap { max-width: var(--max); margin: 0 auto; padding: 0 20px; }
 
-  header { border-bottom: 1px solid var(--line); }
+  header { border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 10; background: rgba(20, 20, 24, .9); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
   .bar { display: flex; align-items: center; gap: 20px; height: 52px; font-size: 14px; }
   .brand { display: flex; align-items: center; gap: 8px; color: var(--text); font-weight: 600; }
   .brand:hover { text-decoration: none; }
@@ -50,43 +57,109 @@
   .lang button { background: none; border: 0; padding: 0; font: inherit; color: var(--muted); cursor: pointer; }
   .lang button[aria-pressed="true"] { color: var(--text); }
 
-  .hero { padding: 64px 0 40px; text-align: center; }
-  .hero img { width: 88px; height: 88px; margin: 0 auto 16px; }
-  h1 { font-size: 30px; font-weight: 600; margin: 0 0 4px; }
+  /* 一番上 */
+  .hero { position: relative; padding: 64px 0 28px; text-align: center; }
+  .hero::before {
+    content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none;
+    background:
+      radial-gradient(30% 60% at 30% 40%, rgba(255, 79, 163, .10), transparent 70%),
+      radial-gradient(30% 60% at 70% 30%, rgba(63, 210, 255, .09), transparent 70%),
+      radial-gradient(25% 50% at 50% 80%, rgba(255, 199, 74, .06), transparent 70%);
+  }
+  .hero img.icon { width: 96px; height: 96px; margin: 0 auto 14px; }
+  h1 { font-size: 34px; font-weight: 600; margin: 0 0 4px; letter-spacing: .01em; }
   .tagline { margin: 0 0 24px; color: var(--muted); font-size: 16px; }
   .buttons { display: flex; justify-content: center; flex-wrap: wrap; gap: 10px; }
   .btn {
-    display: inline-block; padding: 7px 18px; border-radius: 6px;
+    display: inline-block; padding: 8px 20px; border-radius: 8px;
     border: 1px solid var(--line); background: var(--panel); color: var(--text); font-size: 14px;
   }
   .btn:hover { border-color: #4a4a55; text-decoration: none; }
+  .btn.primary { background: var(--text); color: var(--bg); border-color: var(--text); font-weight: 600; }
+  .btn.primary:hover { background: #fff; }
   .meta { margin: 14px 0 0; font-size: 13px; color: var(--muted); }
 
-  .shot { margin: 0; }
-  .shot img { border: 1px solid var(--line); border-radius: 8px; }
+  /* 画面写真（クリックで拡大） */
+  .shot { margin: 8px 0 0; }
+  .shot button {
+    display: block; width: 100%; padding: 0; border: 0; background: none; cursor: zoom-in;
+    border-radius: 10px; overflow: hidden;
+    box-shadow: 0 0 0 1px var(--line), 0 24px 60px rgba(0, 0, 0, .5);
+  }
+  .shot figcaption { text-align: center; color: var(--muted); font-size: 13px; margin-top: 10px; }
 
-  section { padding: 44px 0 0; }
-  h2 { font-size: 17px; font-weight: 600; margin: 0 0 14px; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
-  dl { margin: 0; display: grid; grid-template-columns: 180px 1fr; gap: 6px 20px; }
-  dt { color: var(--muted); }
-  dd { margin: 0; }
-  ul, ol { margin: 0; padding-left: 1.3em; }
-  p { margin: 0 0 10px; }
+  .lightbox {
+    position: fixed; inset: 0; z-index: 50; display: none; align-items: center; justify-content: center;
+    background: rgba(0, 0, 0, .88); padding: 24px; cursor: zoom-out;
+  }
+  .lightbox.open { display: flex; }
+  .lightbox img { max-width: 100%; max-height: 100%; width: auto; border-radius: 6px; }
+  .lightbox .close {
+    position: absolute; top: 14px; right: 18px; color: #fff; font-size: 28px; line-height: 1;
+    background: none; border: 0; cursor: pointer;
+  }
 
-  .gallery { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
-  .gallery figure { margin: 0; }
-  .gallery img { aspect-ratio: 16 / 9; object-fit: cover; width: 100%; border-radius: 4px; border: 1px solid var(--line); }
-  .gallery figcaption { font-size: 12px; color: var(--muted); margin-top: 3px; }
+  /* 節 */
+  section { padding: 72px 0 0; }
+  .label { font-size: 12px; letter-spacing: .12em; text-transform: uppercase; margin: 0 0 6px; }
+  .label.m { color: var(--magenta); } .label.y { color: var(--yellow); } .label.c { color: var(--cyan); }
+  h2 { font-size: 24px; font-weight: 600; margin: 0 0 10px; }
+  .lead { color: var(--muted); margin: 0 0 28px; max-width: 680px; }
+  p { margin: 0 0 12px; }
 
-  footer { margin-top: 56px; border-top: 1px solid var(--line); padding: 20px 0 40px; color: var(--muted); font-size: 12px; }
+  /* 機能のカード */
+  .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  .card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 18px 18px 16px;
+    border-top: 2px solid var(--c, var(--line));
+  }
+  .card h3 { font-size: 16px; font-weight: 600; margin: 0 0 6px; }
+  .card p { color: #bdbcc8; font-size: 14px; margin: 0; }
+  .card .tags { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 5px; }
+  .card .tags span { font-size: 12px; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 0 8px; }
+
+  /* シーン・FX パッドの節 */
+  .feature { display: grid; grid-template-columns: 1fr 1fr; gap: 36px; align-items: start; }
+  .feature.flip .media { order: 2; }
+  .feature ul { margin: 0 0 12px; padding-left: 1.2em; color: #c9c8d3; }
+  .feature li { margin: 4px 0; }
+  .feature h3 { font-size: 15px; font-weight: 600; margin: 18px 0 6px; }
+  .media img, .media video { border-radius: 8px; box-shadow: 0 0 0 1px var(--line); }
+  .media .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
+  .media figure { margin: 0; }
+  .media figcaption { font-size: 12px; color: var(--muted); margin-top: 4px; }
+
+  /* 動く見本 */
+  .motion { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+  .motion figure { margin: 0; }
+  .motion video { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 6px; background: #000; box-shadow: 0 0 0 1px var(--line); }
+  .motion figcaption { font-size: 13px; margin-top: 4px; }
+  .motion figcaption small { display: block; color: var(--muted); font-size: 12px; }
+
+  /* インストール・補足 */
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .two .card { border-top-width: 1px; }
+  .two h3 { font-size: 16px; margin: 0 0 8px; }
+  .two ol, .two ul { margin: 0; padding-left: 1.3em; font-size: 14px; color: #c9c8d3; }
+  .two li + li { margin-top: 4px; }
+
+  footer { margin-top: 72px; border-top: 1px solid var(--line); padding: 20px 0 40px; color: var(--muted); font-size: 12px; }
   footer p { margin: 0; }
 
-  @media (max-width: 640px) {
+  @media (max-width: 860px) {
+    .cards { grid-template-columns: 1fr 1fr; }
+    .feature { grid-template-columns: 1fr; gap: 20px; }
+    .feature.flip .media { order: 0; }
+    .motion { grid-template-columns: repeat(3, 1fr); }
+    .two { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 600px) {
+    .wrap { padding: 0 16px; }
     .bar nav .hide-sm { display: none; }
-    .hero { padding: 44px 0 32px; }
-    dl { grid-template-columns: 1fr; gap: 0; }
-    dd { margin-bottom: 10px; }
-    .gallery { grid-template-columns: repeat(2, 1fr); }
+    .hero { padding-top: 44px; }
+    .cards { grid-template-columns: 1fr; }
+    .motion { grid-template-columns: 1fr 1fr; }
+    section { padding-top: 56px; }
   }
 </style>
 </head>
@@ -109,117 +182,215 @@
 <main class="wrap">
 
   <div class="hero">
-    <img src="assets/icon-256.png" alt="">
+    <img class="icon" src="assets/icon-256.png" alt="">
     <h1>Halo VJ</h1>
     <p class="tagline">
       <span lang="ja">Mac 用の VJ ソフト</span>
       <span lang="en">VJ software for Mac</span>
     </p>
     <div class="buttons">
-      <a class="btn js-download" href="https://github.com/yama203/halo-vj/releases/latest"><span lang="ja">ダウンロード</span><span lang="en">Download</span></a>
+      <a class="btn primary js-download" href="https://github.com/yama203/halo-vj/releases/latest"><span lang="ja">ダウンロード</span><span lang="en">Download</span></a>
       <a class="btn" href="docs/"><span lang="ja">使い方</span><span lang="en">Documentation</span></a>
     </div>
     <p class="meta">
       <span class="js-version"></span>
-      <span lang="ja">無料 ・ Apple シリコンの Mac ・ macOS 14 以上</span>
-      <span lang="en">Free · Apple silicon Mac · macOS 14 or later</span>
+      <span lang="ja">無料 ・ Apple シリコン搭載 Mac ・ macOS 14 以降 ・ 日本語 / English</span>
+      <span lang="en">Free · Apple silicon Mac · macOS 14 or later · English / Japanese</span>
     </p>
   </div>
 
   <figure class="shot">
-    <img src="assets/ui-full.jpg" alt="Halo VJ の画面" width="2000" height="1270">
+    <button type="button" class="js-zoom" data-ja="assets/shots/ui-ja.jpg" data-en="assets/shots/ui-en.jpg" aria-label="画面写真を拡大">
+      <img lang="ja" src="assets/shots/ui-ja-small.jpg" srcset="assets/shots/ui-ja-small.jpg 1200w, assets/shots/ui-ja.jpg 2400w" sizes="(max-width: 1080px) 100vw, 1040px" alt="Halo VJ の画面" width="1200" height="750">
+      <img lang="en" src="assets/shots/ui-en-small.jpg" srcset="assets/shots/ui-en-small.jpg 1200w, assets/shots/ui-en.jpg 2400w" sizes="(max-width: 1080px) 100vw, 1040px" alt="Halo VJ interface" width="1200" height="750" loading="lazy">
+    </button>
+    <figcaption>
+      <span lang="ja">グリッド、出力モニター、シーン、パラメーター、FX パッド（クリックで拡大）</span>
+      <span lang="en">Grid, output monitor, scenes, parameters and FX pads (click to enlarge)</span>
+    </figcaption>
   </figure>
 
   <section id="features">
-    <h2><span lang="ja">機能</span><span lang="en">Features</span></h2>
-    <dl lang="ja">
-      <dt>クリップの再生</dt>
-      <dd>レイヤーとクリップのグリッド。クリック、キーボード、MIDI で再生。重ね方、不透明度、切り替えのフェード。</dd>
-      <dt>素材</dt>
-      <dd>HAP（Hap / Alpha / Q / Q Alpha / R）、ProRes などの動画。PNG・JPEG・PSD・PDF・SVG などの静止画。GIF・WebP のアニメーション。</dd>
-      <dt>ジェネレーター</dt>
-      <dd>約 30 種類。テキスト、時計、カメラ入力を含む。</dd>
-      <dt>エフェクト</dt>
-      <dd>約 30 種類。マスク、調整レイヤー、FX パッド。</dd>
-      <dt>音・BPM</dt>
-      <dd>値を音の大きさや BPM に合わせて動かす。BPM の自動検出。</dd>
-      <dt>映像の入出力</dt>
-      <dd>Syphon、NDI®（どちらも入力と出力）。</dd>
-      <dt>制御</dt>
-      <dd>OSC、MIDI。Art-Net / DMX で照明へ出力。</dd>
-      <dt>出力</dt>
-      <dd>複数面のマッピング、四隅の補正、テストパターン、録画。</dd>
-      <dt>そのほか</dt>
-      <dd>シーン、キュー、自動操縦。素材をまとめて保存。自動アップデート。</dd>
-    </dl>
-    <dl lang="en">
-      <dt>Clip playback</dt>
-      <dd>A grid of layers and clips. Trigger by click, keyboard or MIDI. Blend modes, opacity, fade transitions.</dd>
-      <dt>Media</dt>
-      <dd>HAP (Hap / Alpha / Q / Q Alpha / R), ProRes and other video. Stills such as PNG, JPEG, PSD, PDF and SVG. Animated GIF and WebP.</dd>
-      <dt>Generators</dt>
-      <dd>About 30, including text, clock and camera input.</dd>
-      <dt>Effects</dt>
-      <dd>About 30. Masks, adjustment layers, FX pads.</dd>
-      <dt>Audio / BPM</dt>
-      <dd>Drive parameters from audio level or BPM. Automatic BPM detection.</dd>
-      <dt>Video I/O</dt>
-      <dd>Syphon and NDI®, both input and output.</dd>
-      <dt>Control</dt>
-      <dd>OSC and MIDI. Art-Net / DMX output to lighting.</dd>
-      <dt>Output</dt>
-      <dd>Multi-surface mapping, corner pinning, test patterns, recording.</dd>
-      <dt>Other</dt>
-      <dd>Scenes, cues, autopilot. Collect media into one folder. Automatic updates.</dd>
-    </dl>
-  </section>
-
-  <section id="generators">
-    <h2><span lang="ja">ジェネレーターの例</span><span lang="en">Some of the generators</span></h2>
-    <div class="gallery">
-      <figure><img src="assets/gen/synthwave.jpg" alt="" loading="lazy"><figcaption><span lang="ja">シンセウェイブ</span><span lang="en">Synthwave</span></figcaption></figure>
-      <figure><img src="assets/gen/physarum.jpg" alt="" loading="lazy"><figcaption><span lang="ja">粘菌</span><span lang="en">Physarum</span></figcaption></figure>
-      <figure><img src="assets/gen/attractor.jpg" alt="" loading="lazy"><figcaption><span lang="ja">ストレンジ・アトラクター</span><span lang="en">Strange attractor</span></figcaption></figure>
-      <figure><img src="assets/gen/flow.jpg" alt="" loading="lazy"><figcaption><span lang="ja">光の流れ</span><span lang="en">Light flow</span></figcaption></figure>
-      <figure><img src="assets/gen/reactionDiffusion.jpg" alt="" loading="lazy"><figcaption><span lang="ja">反応拡散</span><span lang="en">Reaction-diffusion</span></figcaption></figure>
-      <figure><img src="assets/gen/fractal.jpg" alt="" loading="lazy"><figcaption><span lang="ja">フラクタル</span><span lang="en">Fractal</span></figcaption></figure>
-      <figure><img src="assets/gen/laser.jpg" alt="" loading="lazy"><figcaption><span lang="ja">レーザーショー</span><span lang="en">Laser show</span></figcaption></figure>
-      <figure><img src="assets/gen/metaballs.jpg" alt="" loading="lazy"><figcaption><span lang="ja">メタボール</span><span lang="en">Metaballs</span></figcaption></figure>
-      <figure><img src="assets/gen/particleLife.jpg" alt="" loading="lazy"><figcaption><span lang="ja">パーティクル・ライフ</span><span lang="en">Particle life</span></figcaption></figure>
-      <figure><img src="assets/gen/phyllotaxis.jpg" alt="" loading="lazy"><figcaption><span lang="ja">フィロタキシス</span><span lang="en">Phyllotaxis</span></figcaption></figure>
-      <figure><img src="assets/gen/growth.jpg" alt="" loading="lazy"><figcaption><span lang="ja">育つ線（回路）</span><span lang="en">Growth (circuits)</span></figcaption></figure>
-      <figure><img src="assets/gen/starfield.jpg" alt="" loading="lazy"><figcaption><span lang="ja">星空ワープ</span><span lang="en">Starfield warp</span></figcaption></figure>
+    <p class="label c"><span lang="ja">機能</span><span lang="en">Features</span></p>
+    <h2><span lang="ja">主な機能</span><span lang="en">What it does</span></h2>
+    <div class="cards">
+      <div class="card" style="--c: var(--magenta)">
+        <h3><span lang="ja">クリップの再生</span><span lang="en">Clip playback</span></h3>
+        <p><span lang="ja">レイヤーとクリップをグリッドに並べて、クリック・キーボード・MIDI で瞬時に再生できます。</span><span lang="en">A grid of layers and clips. Triggers instantly by click, keyboard or MIDI.</span></p>
+        <div class="tags"><span lang="ja">ブレンドモード</span><span lang="en">Blend modes</span><span lang="ja">トランジション</span><span lang="en">Transitions</span><span lang="ja">デッキ</span><span lang="en">Decks</span></div>
+      </div>
+      <div class="card" style="--c: var(--yellow)">
+        <h3><span lang="ja">対応フォーマット</span><span lang="en">Media</span></h3>
+        <p><span lang="ja">HAP は GPU でデコードするので、4K でも軽快に動きます。ProRes や静止画、GIF・WebP のアニメーションにも対応しています。</span><span lang="en">HAP is decoded on the GPU, so even 4K stays light. ProRes, stills, animated GIF and WebP too.</span></p>
+        <div class="tags"><span>HAP / Q / Alpha</span><span>ProRes</span><span>PNG · PSD · PDF · SVG</span></div>
+      </div>
+      <div class="card" style="--c: var(--cyan)">
+        <h3><span lang="ja">ジェネレーターとエフェクト</span><span lang="en">Generators and effects</span></h3>
+        <p><span lang="ja">素材がなくても使えるジェネレーターを約 30 種類、エフェクトも約 30 種類収録。マスクや調整レイヤーも使えます。</span><span lang="en">About 30 generators that keep moving without any footage. About 30 effects, masks and adjustment layers.</span></p>
+        <div class="tags"><span lang="ja">テキスト・時計</span><span lang="en">Text and clock</span><span lang="ja">カメラ入力</span><span lang="en">Camera input</span></div>
+      </div>
+      <div class="card" style="--c: var(--cyan)">
+        <h3><span lang="ja">音と BPM</span><span lang="en">Audio and BPM</span></h3>
+        <p><span lang="ja">あらゆるパラメーターを、音量や BPM に連動させて動かせます。BPM は音から自動検出もできます。</span><span lang="en">Any value can follow the audio level or the BPM. The BPM can be detected from the audio.</span></p>
+        <div class="tags"><span lang="ja">オーディオリアクティブ</span><span lang="en">Audio reactive</span><span lang="ja">タップテンポ</span><span lang="en">Tap tempo</span></div>
+      </div>
+      <div class="card" style="--c: var(--magenta)">
+        <h3><span lang="ja">外部連携</span><span lang="en">Connections</span></h3>
+        <p><span lang="ja">映像の入出力のほか、iPad や MIDI コントローラーからの操作、照明への出力に対応しています。</span><span lang="en">Video in and out, control from an iPad or MIDI controller, output to lighting.</span></p>
+        <div class="tags"><span>Syphon</span><span>NDI®</span><span>OSC</span><span>MIDI</span><span>Art-Net / DMX</span></div>
+      </div>
+      <div class="card" style="--c: var(--yellow)">
+        <h3><span lang="ja">出力</span><span lang="en">Output</span></h3>
+        <p><span lang="ja">複数プロジェクターへのマッピング、エッジブレンディング、コーナーピン補正、テストパターン、録画に対応しています。</span><span lang="en">Mapping across projectors, edge blending, corner pin, test patterns and recording.</span></p>
+        <div class="tags"><span lang="ja">マッピング</span><span lang="en">Mapping</span><span lang="ja">録画</span><span lang="en">Recording</span></div>
+      </div>
     </div>
   </section>
 
-  <section id="install">
-    <h2><span lang="ja">インストール</span><span lang="en">Installation</span></h2>
-    <ol lang="ja">
-      <li><a class="js-download" href="https://github.com/yama203/halo-vj/releases/latest">zip をダウンロード</a>して開く。</li>
-      <li>「Halo VJ」を「アプリケーション」フォルダに入れる。</li>
-      <li>初めて開くときに止められたら、システム設定 →「プライバシーとセキュリティ」→「このまま開く」。</li>
-    </ol>
-    <ol lang="en">
-      <li><a class="js-download" href="https://github.com/yama203/halo-vj/releases/latest">Download the zip</a> and open it.</li>
-      <li>Move “Halo VJ” to the Applications folder.</li>
-      <li>If macOS blocks the first launch: System Settings → Privacy &amp; Security → “Open Anyway”.</li>
-    </ol>
+  <section id="scenes">
+    <div class="feature">
+      <div class="media">
+        <img lang="ja" src="assets/shots/scenes-ja.jpg" alt="「シーン」パネル" width="820" height="580" loading="lazy">
+        <img lang="en" src="assets/shots/scenes-en.jpg" alt="Scenes panel" width="820" height="580" loading="lazy">
+      </div>
+      <div>
+        <p class="label m"><span lang="ja">シーン</span><span lang="en">Scenes</span></p>
+        <h2><span lang="ja">気に入った組み合わせを、ワンクリックで呼び出す</span><span lang="en">Recall a whole look at once</span></h2>
+        <p>
+          <span lang="ja">「今の状態をシーンに保存」を押すと、そのときの出力をサムネイル付きでまるごと保存できます。サムネイルをクリックすれば、そのシーンに切り替わります。</span>
+          <span lang="en">“Save Current State as Scene” saves the whole current output with a thumbnail. Click the image to switch to that scene.</span>
+        </p>
+        <h3><span lang="ja">保存される内容</span><span lang="en">What a scene holds</span></h3>
+        <ul lang="ja">
+          <li>各レイヤーで再生中のクリップ</li>
+          <li>レイヤーとコンポジションの不透明度・ブレンドモード・位置・エフェクト</li>
+          <li>再生中のクリップのエフェクト・位置・サイズ・パラメーターのアニメーション</li>
+        </ul>
+        <ul lang="en">
+          <li>The clip playing on each layer</li>
+          <li>Opacity, blend mode, position and effects of layers and the composition</li>
+          <li>Effects, position, size and motion of the playing clips</li>
+        </ul>
+        <h3><span lang="ja">切り替え</span><span lang="en">Switching</span></h3>
+        <ul lang="ja">
+          <li>フェード時間（0〜8 秒）はシーンごとに設定可能。クリップはクロスフェードし、パラメーターもなめらかに変化</li>
+          <li>切り替え前後で同じクリップは、頭出しされずにそのまま再生</li>
+          <li>キューに並べておけば、スペースキーで順番に送り出せる</li>
+        </ul>
+        <ul lang="en">
+          <li>A fade time (instant to 8 s) per scene. Clips crossfade and values move smoothly</li>
+          <li>Clips that stay the same are not restarted</li>
+          <li>Line scenes up as cues and step through them with the Space key</li>
+        </ul>
+        <h3><span lang="ja">本番中でも編集できる</span><span lang="en">Edit while on air</span></h3>
+        <p>
+          <span lang="ja">シーンの名前部分をクリックすると、出力はそのままでシーンの内容を編集できます。編集中のシーンはプレビューで確認でき、変更はすぐに反映されます。</span>
+          <span lang="en">Click the name strip to edit a scene while the output keeps running. The preview shows the scene, and changes apply right away.</span>
+        </p>
+        <p><a href="docs/?p=scenes"><span lang="ja">シーンの詳しい使い方 →</span><span lang="en">More about scenes →</span></a></p>
+      </div>
+    </div>
   </section>
 
-  <section id="notes">
-    <h2><span lang="ja">補足</span><span lang="en">Notes</span></h2>
-    <ul lang="ja">
-      <li>開発中のソフトです（1.0 より前）。</li>
-      <li>画面の表示は日本語と英語（Mac の言語の設定で切り替わる）。</li>
-      <li>NDI を使うには、NDI のランタイムが入っている必要があります。</li>
-      <li>不具合や要望は <a href="https://github.com/yama203/halo-vj/issues">GitHub の Issues</a> へ。変更の履歴は <a href="https://github.com/yama203/halo-vj/releases">Releases</a>。</li>
-    </ul>
-    <ul lang="en">
-      <li>Work in progress (pre-1.0).</li>
-      <li>The interface is in Japanese and English (follows your Mac's language setting).</li>
-      <li>NDI requires the NDI runtime to be installed.</li>
-      <li>Bug reports and requests: <a href="https://github.com/yama203/halo-vj/issues">GitHub Issues</a>. Changelog: <a href="https://github.com/yama203/halo-vj/releases">Releases</a>.</li>
-    </ul>
+  <section id="fx-pads">
+    <div class="feature flip">
+      <div class="media">
+        <img lang="ja" src="assets/shots/pads-ja.jpg" alt="「FX パッド」パネル" loading="lazy">
+        <img lang="en" src="assets/shots/pads-en.jpg" alt="FX Pads panel" loading="lazy">
+        <div class="pair">
+          <figure>
+            <video class="js-motion" muted loop playsinline preload="none" poster="assets/motion/e-glitchBox.jpg"><source src="assets/motion/e-glitchBox.mp4" type="video/mp4"></video>
+            <figcaption><span lang="ja">グリッチボックス</span><span lang="en">Glitch Box</span></figcaption>
+          </figure>
+          <figure>
+            <video class="js-motion" muted loop playsinline preload="none" poster="assets/motion/e-kaleidoscope.jpg"><source src="assets/motion/e-kaleidoscope.mp4" type="video/mp4"></video>
+            <figcaption><span lang="ja">万華鏡</span><span lang="en">Kaleidoscope</span></figcaption>
+          </figure>
+        </div>
+      </div>
+      <div>
+        <p class="label y"><span lang="ja">FX パッド</span><span lang="en">FX Pads</span></p>
+        <h2><span lang="ja">押している間だけ、エフェクトをかける</span><span lang="en">Effects that last as long as you hold</span></h2>
+        <p>
+          <span lang="ja">パッドを押している間だけ出力の最終段にエフェクトがかかり、離すと元に戻ります。シーンとは独立しているので、シーンを切り替えてもそのまま使えます。</span>
+          <span lang="en">While a pad is held, its effects apply at the very end of the output, and they disappear when you let go. They work regardless of scene changes.</span>
+        </p>
+        <h3><span lang="ja">操作</span><span lang="en">Playing them</span></h3>
+        <ul lang="ja">
+          <li>キーボードの <code>1</code>〜<code>0</code>（変更可）や MIDI のボタンに対応。複数の同時押しも可能</li>
+          <li>ストロボのように時間で変化するエフェクトは、押した瞬間からスタート</li>
+          <li>かかり始めと消え際の時間（0〜4 秒）は、パッドごとに設定可能</li>
+        </ul>
+        <ul lang="en">
+          <li>Press them with the <code>1</code>–<code>0</code> keys (reassignable) or MIDI buttons, any number at once</li>
+          <li>Time-based effects such as strobe start from the moment you press</li>
+          <li>Each pad has its own attack and release time (instant to 4 s)</li>
+        </ul>
+        <h3><span lang="ja">登録</span><span lang="en">Setting them up</span></h3>
+        <p>
+          <span lang="ja">「エフェクト」パネルからパッドにドラッグするだけで登録できます。1 つのパッドに複数のエフェクトを重ねることもでき、パッドは最大 16 個まで増やせます。</span>
+          <span lang="en">Just drag from the “Effects” panel onto a pad. A pad can hold any number of effects, and you can have up to 16 pads.</span>
+        </p>
+        <p><a href="docs/?p=fx-pads"><span lang="ja">FX パッドの詳しい使い方 →</span><span lang="en">More about FX pads →</span></a></p>
+      </div>
+    </div>
+  </section>
+
+  <section id="generators">
+    <p class="label c"><span lang="ja">ジェネレーター</span><span lang="en">Generators</span></p>
+    <h2><span lang="ja">素材がなくても、映像が出せる</span><span lang="en">Visuals without footage</span></h2>
+    <p class="lead">
+      <span lang="ja">クリップと同じようにグリッドに置くだけで、リアルタイムに動き続けます。パラメーターは音や BPM に連動させることもできます。</span>
+      <span lang="en">Place one as a clip and it keeps moving in real time. Values can follow the audio or the BPM.</span>
+    </p>
+    <div class="motion" id="gen-grid"></div>
+  </section>
+
+  <section id="effects">
+    <p class="label m"><span lang="ja">エフェクト</span><span lang="en">Effects</span></p>
+    <h2><span lang="ja">エフェクトの例</span><span lang="en">Some of the effects</span></h2>
+    <p class="lead">
+      <span lang="ja">クリップ、レイヤー、コンポジション、FX パッドのどこにでもかけられます（下の例は、ジェネレーターにかけたものです）。</span>
+      <span lang="en">Add them to a clip, a layer, the composition or an FX pad. (These examples are applied to generators.)</span>
+    </p>
+    <div class="motion" id="fx-grid"></div>
+  </section>
+
+  <section id="install">
+    <p class="label y"><span lang="ja">インストール</span><span lang="en">Installation</span></p>
+    <h2><span lang="ja">インストールと注意事項</span><span lang="en">Install and notes</span></h2>
+    <div class="two">
+      <div class="card">
+        <h3><span lang="ja">インストール方法</span><span lang="en">How to install</span></h3>
+        <ol lang="ja">
+          <li><a class="js-download" href="https://github.com/yama203/halo-vj/releases/latest">zip をダウンロード</a>して展開します。</li>
+          <li>「Halo VJ」を「アプリケーション」フォルダに移動します。</li>
+          <li>初回起動時にブロックされた場合は、システム設定 →「プライバシーとセキュリティ」→「このまま開く」を選びます。</li>
+          <li>以降は、アプリが自動でアップデートを確認します。</li>
+        </ol>
+        <ol lang="en">
+          <li><a class="js-download" href="https://github.com/yama203/halo-vj/releases/latest">Download the zip</a> and open it.</li>
+          <li>Move “Halo VJ” to the Applications folder.</li>
+          <li>If macOS blocks the first launch: System Settings → Privacy &amp; Security → “Open Anyway”.</li>
+          <li>After that, the app checks for new versions by itself.</li>
+        </ol>
+      </div>
+      <div class="card">
+        <h3><span lang="ja">注意事項</span><span lang="en">Notes</span></h3>
+        <ul lang="ja">
+          <li>開発中のソフトです（バージョン 1.0 未満）。</li>
+          <li>表示言語は日本語と英語に対応しています（設定で切り替え可能）。</li>
+          <li>NDI を使うには、NDI ランタイムのインストールが必要です。</li>
+          <li>不具合の報告や要望は <a href="https://github.com/yama203/halo-vj/issues">GitHub の Issues</a> へ。更新履歴は <a href="https://github.com/yama203/halo-vj/releases">Releases</a> で確認できます。</li>
+        </ul>
+        <ul lang="en">
+          <li>Work in progress (pre-1.0).</li>
+          <li>The interface is in English and Japanese (switchable in Settings).</li>
+          <li>NDI requires the NDI runtime to be installed.</li>
+          <li>Bug reports and requests: <a href="https://github.com/yama203/halo-vj/issues">GitHub Issues</a>. Changelog: <a href="https://github.com/yama203/halo-vj/releases">Releases</a>.</li>
+        </ul>
+      </div>
+    </div>
   </section>
 
 </main>
@@ -230,10 +401,16 @@
   </div>
 </footer>
 
+<div class="lightbox" id="lightbox" role="dialog" aria-modal="true" aria-label="画面写真">
+  <button type="button" class="close" aria-label="閉じる">×</button>
+  <img alt="">
+</div>
+
 <script>
-  // 言語：保存した選択 → ブラウザの言語（日本語以外は英語）
   (function () {
     var root = document.documentElement;
+
+    // 言語：保存した選択 → ブラウザの言語（日本語以外は英語）
     function setLang(l) {
       root.setAttribute('data-lang', l);
       root.setAttribute('lang', l);
@@ -244,24 +421,84 @@
     }
     var saved = null;
     try { saved = localStorage.getItem('halo-lang'); } catch (e) {}
-    var nav = (navigator.language || 'ja').toLowerCase();
-    setLang(saved || (nav.indexOf('ja') === 0 ? 'ja' : 'en'));
+    setLang(saved || ((navigator.language || 'ja').toLowerCase().indexOf('ja') === 0 ? 'ja' : 'en'));
     document.querySelectorAll('[data-set-lang]').forEach(function (b) {
       b.addEventListener('click', function () { setLang(b.getAttribute('data-set-lang')); });
     });
-  })();
 
-  // いちばん新しい版：zip へ直接のリンクと版の番号（取れなければ Releases のページのまま）
-  fetch('https://api.github.com/repos/yama203/halo-vj/releases/latest')
-    .then(function (r) { return r.ok ? r.json() : null; })
-    .then(function (rel) {
-      if (!rel) return;
-      var zip = (rel.assets || []).filter(function (a) { return /\.zip$/.test(a.name); })[0];
-      if (zip) document.querySelectorAll('.js-download').forEach(function (a) { a.href = zip.browser_download_url; });
-      var v = document.querySelector('.js-version');
-      if (v && rel.tag_name) v.textContent = rel.tag_name + ' ・ ';
-    })
-    .catch(function () {});
+    // 動く見本：[ファイル名, 日本語, 英語, (エフェクトの下の絵)]
+    var gens = [
+      ['g-synthwave', 'シンセウェイブの地形', 'Synthwave Terrain'],
+      ['g-physarum', '粘菌', 'Physarum'],
+      ['g-attractor', 'ストレンジ・アトラクター', 'Strange Attractor'],
+      ['g-flow', '光の流れ', 'Light Flow'],
+      ['g-reactionDiffusion', '反応拡散', 'Reaction-Diffusion'],
+      ['g-particleLife', 'パーティクル・ライフ', 'Particle Life'],
+      ['g-laser', 'レーザーショー', 'Laser Show'],
+      ['g-metaballs', 'メタボール', 'Metaballs'],
+      ['g-fractal', 'フラクタル', 'Fractal'],
+      ['g-growth', '育つ線（回路・枝）', 'Growth'],
+      ['g-tunnel', 'トンネル', 'Tunnel'],
+      ['g-phyllotaxis', 'フィロタキシス', 'Phyllotaxis']
+    ];
+    var fx = [
+      ['e-kaleidoscope', '万華鏡', 'Kaleidoscope', '光の流れ', 'Light Flow'],
+      ['e-glitchBox', 'グリッチボックス', 'Glitch Box', 'シンセウェイブ', 'Synthwave'],
+      ['e-vhs', 'VHS テープ', 'VHS Tape', 'フラクタル', 'Fractal'],
+      ['e-pixelSort', 'ピクセルソート', 'Pixel Sort', 'フラクタル', 'Fractal'],
+      ['e-crt', 'CRT モニター', 'CRT Monitor', 'シンセウェイブ', 'Synthwave'],
+      ['e-rgbSplit', '色ずれ（RGB ずらし）', 'RGB Split', 'レーザーショー', 'Laser Show'],
+      ['e-edgeNeon', '輪郭ネオン', 'Edge Neon', 'フラクタル', 'Fractal'],
+      ['e-videoFeedback', 'ビデオフィードバック', 'Video Feedback', 'レーザーショー', 'Laser Show']
+    ];
+    function tile(x, isFx) {
+      var base = isFx ? '<small><span lang="ja">' + x[3] + 'に適用</span><span lang="en">on ' + x[4] + '</span></small>' : '';
+      return '<figure><video class="js-motion" muted loop playsinline preload="none" poster="assets/motion/' + x[0] + '.jpg">' +
+             '<source src="assets/motion/' + x[0] + '.mp4" type="video/mp4"></video>' +
+             '<figcaption><span lang="ja">' + x[1] + '</span><span lang="en">' + x[2] + '</span>' + base + '</figcaption></figure>';
+    }
+    document.getElementById('gen-grid').innerHTML = gens.map(function (x) { return tile(x, false); }).join('');
+    document.getElementById('fx-grid').innerHTML = fx.map(function (x) { return tile(x, true); }).join('');
+
+    // 見えている見本だけ動かす（動きを減らす設定なら止めたまま）
+    var still = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+    var videos = document.querySelectorAll('.js-motion');
+    if (!still && 'IntersectionObserver' in window) {
+      var io = new IntersectionObserver(function (es) {
+        es.forEach(function (e) {
+          var v = e.target;
+          if (e.isIntersecting) { if (v.preload === 'none') { v.preload = 'auto'; v.load(); } v.play().catch(function () {}); }
+          else v.pause();
+        });
+      }, { rootMargin: '100px' });
+      videos.forEach(function (v) { io.observe(v); });
+    }
+
+    // 画面写真の拡大
+    var box = document.getElementById('lightbox');
+    var boxImg = box.querySelector('img');
+    document.querySelectorAll('.js-zoom').forEach(function (b) {
+      b.addEventListener('click', function () {
+        boxImg.src = b.getAttribute(root.getAttribute('data-lang') === 'en' ? 'data-en' : 'data-ja');
+        box.classList.add('open');
+      });
+    });
+    function close() { box.classList.remove('open'); }
+    box.addEventListener('click', close);
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') close(); });
+
+    // いちばん新しい版：zip へ直接のリンクと版の番号（取れなければ Releases のページのまま）
+    fetch('https://api.github.com/repos/yama203/halo-vj/releases/latest')
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (rel) {
+        if (!rel) return;
+        var zip = (rel.assets || []).filter(function (a) { return /\.zip$/.test(a.name); })[0];
+        if (zip) document.querySelectorAll('.js-download').forEach(function (a) { a.href = zip.browser_download_url; });
+        var v = document.querySelector('.js-version');
+        if (v && rel.tag_name) v.textContent = rel.tag_name + ' ・ ';
+      })
+      .catch(function () {});
+  })();
 </script>
 </body>
 </html>
