@@ -2873,6 +2873,18 @@ enum SelfTest {
 
     /// 追加のエフェクト・ジェネレーター：どれも描けて（何かが出て）、壊れた値（NaN）が出ない。値の数・分類・説明がそろっている
     static func testMoreKinds(check: (Bool, String) -> Void) {
+        // 画質：保存して読み込める。古いデータ（項目なし）は「高」。外の映像の取り込みには出さない
+        do {
+            var q = Effect(kind: .synthwave); q.quality = 2
+            let back = (try? JSONEncoder().encode(q)).flatMap { try? JSONDecoder().decode(Effect.self, from: $0) }
+            let old = try? JSONDecoder().decode(Effect.self, from: Data(#"{"kind":"synthwave"}"#.utf8))
+            check(back?.quality == 2 && back?.qualityScale == 0.5 && old?.quality == 0 && old?.qualityScale == 1
+                  && q.hasQuality && !Effect(kind: .camera).hasQuality && !Effect(kind: .mirror).hasQuality,
+                  "ジェネレーターの画質：保存して読み込める。古いデータは「高」。カメラなどの取り込み・エフェクトには無い")
+            check(Effect(kind: .synthwave).quality == 2 && Effect(kind: .text).quality == 0 && Effect(kind: .clock).quality == 0,
+                  "ジェネレーターの画質：新しく置くものは「低」。文字・時計は「高」")
+        }
+
         let ctx = MetalContext.shared
         let W = 320, H = 180
         let td = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: W, height: H, mipmapped: false)
@@ -3331,7 +3343,7 @@ enum SelfTest {
         e.trigger(0)
         e.updateFrame()
         let f = e.frame(layer: 0)
-        check(f != nil && f?.texture.height == 1080 && f?.pixelBuffer == nil, "ジェネレーターを再生すると、描いた絵がレイヤーに出る")
+        check(f != nil && f?.texture.height == 540 && f?.pixelBuffer == nil, "ジェネレーターを再生すると、描いた絵がレイヤーに出る（新しく置いたものは画質「低」なので半分の大きさ）")
         check(e.duplicateSlot(0, to: 1) && e.slots[1]?.generator?.kind == .solid && e.slots[1]?.generator?.color.g == 1,
               "ジェネレーターを複製できる（設定ごと）")
         let state = e.makeState(relativeTo: nil)
@@ -5019,7 +5031,9 @@ enum SelfTest {
 
     static func genPreview(kind: EffectKind, path: String, time: Double, values: [Double], random: Double?) {
         let ctx = MetalContext.shared
-        let W = 1280, H = 720
+        // VJ_PREVIEW_SIZE=幅x高さ で大きさを変えられる（重さを実際の出力の大きさで測る）
+        let sz = ProcessInfo.processInfo.environment["VJ_PREVIEW_SIZE"]?.split(separator: "x").compactMap { Int($0) }
+        let W = sz?.count == 2 ? sz![0] : 1280, H = sz?.count == 2 ? sz![1] : 720
         let td = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: W, height: H, mipmapped: false)
         td.usage = [.shaderRead]
         var blank = ctx.device.makeTexture(descriptor: td)!
@@ -5081,7 +5095,7 @@ enum SelfTest {
                                    hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: W * 4, bitsPerPixel: 32)!
         px.withUnsafeBufferPointer { memcpy(rep.bitmapData!, $0.baseAddress!, px.count) }
         try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
-        print(String(format: "書き出しました: %@（GPU %.2f ms / 1280×720）", path, ms))
+        print(String(format: "書き出しました: %@（GPU %.2f ms / %d×%d）", path, ms, W, H))
     }
 
     /// 開発用：オーバードライブ加算の GPU 時間を測る（1 コマあたり ms）

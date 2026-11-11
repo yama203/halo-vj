@@ -2320,6 +2320,7 @@ final class RenderLoop {
             if !gate.shouldRender(now: now, fps: fps, halfPeriod: period / 2) { return }
         }
         let updated = engine.updateFrame()
+        GPUProbe.tick(extra: lock.withLock { targets.values.filter(\.visible).map { "\($0.kind)\(Int($0.layer.drawableSize.width))x\(Int($0.layer.drawableSize.height))" }.joined(separator: " ") })
         // カーソルを合わせたエフェクト・ジェネレーターの見本（同じスレッドで描いて、作業テクスチャを取り合わないように）
         KindPreview.shared.renderIfNeeded(now: now)
         // 使われなくなったカメラ・Syphon の受け取り口を閉じる（クリップを消したあと、カメラが点いたままにならないように）
@@ -2440,6 +2441,7 @@ final class RenderLoop {
                 }
                 // GPU が使い終わるまで映像バッファを保持する
                 cb.addCompletedHandler { _ in _ = groups }
+                GPUProbe.track(cb, "合成\(v.size.0)x\(v.size.1)")
                 cb.commit()
             }
         }
@@ -2561,6 +2563,7 @@ final class RenderLoop {
 
     private func draw(_ drawable: CAMetalDrawable, composite: MTLTexture?, params: RenderParams, cb: MTLCommandBuffer) {
         encodeDraw(into: drawable.texture, composite: composite, params: params, cb: cb)
+        GPUProbe.track(cb, "画面\(drawable.texture.width)x\(drawable.texture.height)")
         cb.present(drawable)
         cb.commit()
     }
@@ -2685,5 +2688,41 @@ enum Homography {
             SIMD3(d, e, f),
             SIMD3(g, h, 1),
         ])
+    }
+}
+
+/// 開発用：VJ_GPU_LOG=1 で、GPU の時間を何に使っているかを 2 秒ごとに書き出す（1 コマあたりの ms）
+enum GPUProbe {
+    static let on = ProcessInfo.processInfo.environment["VJ_GPU_LOG"] != nil
+    private static let lock = NSLock()
+    private static var sums: [String: (ms: Double, n: Int)] = [:]
+    private static var ticks = 0
+    private static var last = CACurrentMediaTime()
+
+    /// commit の前に呼ぶ
+    static func track(_ cb: MTLCommandBuffer, _ name: String) {
+        guard on else { return }
+        cb.addCompletedHandler { cb in
+            let ms = (cb.gpuEndTime - cb.gpuStartTime) * 1000
+            lock.withLock { let o = sums[name] ?? (0, 0); sums[name] = (o.ms + ms, o.n + 1) }
+        }
+    }
+
+    /// 描画ループが 1 コマごとに呼ぶ
+    static func tick(extra: @autoclosure () -> String) {
+        guard on else { return }
+        let now = CACurrentMediaTime()
+        let out: String? = lock.withLock {
+            ticks += 1
+            guard now - last >= 2 else { return nil }
+            let t = Double(max(ticks, 1))
+            let total = sums.values.reduce(0) { $0 + $1.ms }
+            let parts = sums.sorted { $0.value.ms > $1.value.ms }
+                .map { String(format: "%@ %.2f(×%.1f)", $0.key, $0.value.ms / t, Double($0.value.n) / t) }.joined(separator: "  ")
+            let s = String(format: "GPU %.1f コマ/秒  合計 %.2f ms/コマ ｜ ", t / (now - last), total / t) + parts
+            sums = [:]; ticks = 0; last = now
+            return s
+        }
+        if let out { print(out + " ｜ " + extra()); fflush(stdout) }
     }
 }

@@ -1377,7 +1377,7 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
                 }
             }
         } else if case .generator(let g, let origin) = preview {
-            if let holder = renderGenerator(g, origin: origin, key: "gp", now: now) {
+            if let holder = renderGenerator(g, origin: origin, key: "gp", now: now, preview: true) {
                 renderLock.withLock { previewFrame = holder }
             }
         } else {
@@ -1397,7 +1397,7 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
                         }
                     }
                 case .generator(let g, let origin)?:
-                    if let holder = renderGenerator(g, origin: origin, key: "gs\(r)", now: now) {
+                    if let holder = renderGenerator(g, origin: origin, key: "gs\(r)", now: now, preview: true) {
                         renderLock.withLock { if scenePreview != nil { sceneFrames[r] = holder } }
                     }
                 default: break
@@ -1410,7 +1410,8 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
     // MARK: ジェネレーター（描画スレッド）
 
     private let generatorFX = EffectProcessor()
-    private var generatorBlank: MTLTexture?
+    /// 何も無い絵（大きさごと）
+    private var generatorBlanks: [Int: MTLTexture] = [:]
     /// 出力していないジェネレーターのプレビューで、秒の動きを数え始める時刻
     private var generatorPreviewStart: [ObjectIdentifier: Double] = [:]
 
@@ -1423,20 +1424,36 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
     }
 
     /// ジェネレーターの今の絵を描く（描画スレッドから）。同じ番号の絵は前のコマの描画が終わってから描き直される
-    private func renderGenerator(_ g: Effect, origin: Double, key: String, now: Double) -> FrameHolder? {
-        let (size, beat) = renderLock.withLock { (renderState.generatorSize, renderState.beat) }
+    /// プレビューだけに出すジェネレーターの高さの上限（パネルの小さな画面用。出力と同じ大きさで描くのは無駄なので）
+    static let previewGeneratorHeight = 540
+
+    private func renderGenerator(_ g: Effect, origin: Double, key: String, now: Double, preview: Bool = false) -> FrameHolder? {
+        var (size, beat) = renderLock.withLock { (renderState.generatorSize, renderState.beat) }
+        // 画質：小さく描いて、重ねるときに引き伸ばす
+        if g.hasQuality && g.quality > 0 {
+            let k = g.qualityScale
+            size = (max(Int((Double(size.0) * k).rounded()), 2), max(Int((Double(size.1) * k).rounded()), 2))
+        }
+        if preview && size.1 > Self.previewGeneratorHeight {
+            let k = Double(Self.previewGeneratorHeight) / Double(size.1)
+            size = (max(Int((Double(size.0) * k).rounded()), 1), Self.previewGeneratorHeight)
+        }
         let ctx = MetalContext.shared
-        if generatorBlank?.width != size.0 || generatorBlank?.height != size.1 {
+        // 何も無い絵は大きさごとに持つ（画質で大きさが変わる）
+        let blankKey = size.0 * 100_000 + size.1
+        if generatorBlanks.count > 8 { generatorBlanks = [:] }
+        if generatorBlanks[blankKey]?.width != size.0 || generatorBlanks[blankKey]?.height != size.1 {
             let td = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: size.0, height: size.1,
                                                               mipmapped: false)
             td.usage = [.shaderRead]
             td.storageMode = .private
-            generatorBlank = ctx.device.makeTexture(descriptor: td)
+            generatorBlanks[blankKey] = ctx.device.makeTexture(descriptor: td)
         }
-        guard let blank = generatorBlank, let cb = ctx.queue.makeCommandBuffer() else { return nil }
+        guard let blank = generatorBlanks[blankKey], let cb = ctx.queue.makeCommandBuffer() else { return nil }
         var e = g
         e.enabled = true
         let out = generatorFX.apply(EffectStack(effects: [e], beat: beat, origin: origin), to: blank, key: key, cb: cb, now: now)
+        GPUProbe.track(cb, "ジェネレーター\(key) \(size.0)x\(size.1)")
         cb.commit()
         return out === blank ? nil : FrameHolder(texture: out)
     }

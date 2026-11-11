@@ -1240,6 +1240,13 @@ struct Effect: Codable, Identifiable, Equatable {
     var anims: [String: ParamAnim] = [:]
     /// エフェクトの不透明度（かかり具合）。0 = 元の絵のまま、1 = いっぱいにかかる
     var mix: Double = 1
+    /// ジェネレーターの画質（0 = そのまま、1 = 3/4、2 = 半分の大きさで描いて引き伸ばす。GPU の負担を減らす）
+    var quality = 0
+    static let qualityLabels = ["高（そのまま）", "中（3/4）", "低（半分）"]
+    /// 描く大きさの倍率
+    var qualityScale: Double { quality == 1 ? 0.75 : quality == 2 ? 0.5 : 1 }
+    /// 画質を選べるか（ジェネレーターだけ。外の映像の取り込みは元の大きさのまま）
+    var hasQuality: Bool { kind.isGenerator && ![.syphonIn, .camera, .ndiIn].contains(kind) }
     static let mixKey = "mix"
     /// 不透明度を出すエフェクトか（コマの間引き・重ね方の値には無い）
     var hasMix: Bool { kind != .posterizeTime && !kind.isBlend && !kind.isGenerator }
@@ -1286,6 +1293,8 @@ struct Effect: Codable, Identifiable, Equatable {
     init(kind: EffectKind) {
         self.kind = kind
         values = kind.params.map(\.defaultValue)
+        // 新しく置くジェネレーターは画質「低」から（GPU の負担を減らす）。文字・時計はぼやけると読みにくいので「高」
+        if hasQuality && !kind.isText && kind != .clock { quality = 2 }
         if kind == .strobe || kind.usesColor { color = .white }
         if kind == .gradient { palette = PalettePreset.all[3].colors }
         // 文字は暗い色だと沈むので、明るい色だけのパレット
@@ -1330,7 +1339,7 @@ struct Effect: Codable, Identifiable, Equatable {
         return value(5, at: t, beat: beat, origin: origin) * (1 - decay * f / duty)
     }
 
-    enum CodingKeys: String, CodingKey { case id, kind, enabled, values, color, palette, anims, points, mix, text }
+    enum CodingKeys: String, CodingKey { case id, kind, enabled, values, color, palette, anims, points, mix, text, quality }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -1350,6 +1359,7 @@ struct Effect: Codable, Identifiable, Equatable {
         points = try c.decodeIfPresent([MaskPoint].self, forKey: .points) ?? MaskPoint.defaultShape
         mix = try c.decodeIfPresent(Double.self, forKey: .mix) ?? 1
         text = try c.decodeIfPresent(String.self, forKey: .text) ?? TextLook.defaultText
+        quality = min(max(try c.decodeIfPresent(Int.self, forKey: .quality) ?? 0, 0), 2)
         // 値が足りない（あとから値が増えた）ときは初期値で埋める
         while values.count < kind.params.count { values.append(kind.params[values.count].defaultValue) }
         // 以前の「かかり具合」（反転・カラーライズ）は、エフェクトの不透明度に引き継ぐ（同じ働きなので 1 つにまとめた）

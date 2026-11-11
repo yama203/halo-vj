@@ -569,6 +569,17 @@ struct EffectCard: View {
                     PaletteEditor(palette: $effect.palette)
                 }
             }
+            if effect.hasQuality {
+                HStack(spacing: 8) {
+                    Text("画質").font(.system(size: 12)).foregroundStyle(.secondary).fixedSize()
+                    ChoiceButtons(selection: $effect.quality,
+                                  items: Effect.qualityLabels.indices.map { ($0, Effect.qualityLabels[$0]) })
+                        .frame(maxWidth: 320)
+                }
+                .padding(.leading, UI.paramLabelInset)
+                .frame(height: UI.rowHeight)
+                .help("小さく描いて引き伸ばす。GPU の負担が減る（半分なら約 1/4）。線や細かい模様は少しぼやける")
+            }
             if effect.kind == .polyMask { PolyMaskControls(effect: $effect) }
             if effect.kind == .syphonIn { SyphonSourcePicker(effect: $effect) }
             if effect.kind == .camera { CameraSourcePicker(effect: $effect) }

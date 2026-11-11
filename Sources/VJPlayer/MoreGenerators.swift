@@ -93,12 +93,32 @@ fragment float4 mg_laser(VO in [[stage_in]], constant MU& u [[buffer(0)]]) {
 
 // ===== シンセウェイブの地形 =====
 // a = 進んだ距離, 山の高さ, 格子の細かさ, 線の太さ(px) / b = 太陽, 視点の高さ, 霧, うねり / c.x = 色の付け方
-static float terrain(float2 xz, float amp, float wob, float T) {
+// 地形のノイズは、乱数の表（256×256・くり返し）から読む。格子の 4 つの角を gather の 1 回で取る（sin を 4 回より軽い）
+static float vnT(texture2d<float> nt, float2 p) {
+    float2 i = floor(p), f = fract(p);
+    float2 w = f * f * (3.0 - 2.0 * f);
+    float2 im = i - 256.0 * floor(i / 256.0);
+    constexpr sampler gs(filter::nearest, address::repeat, coord::normalized);
+    // 4 つの texel の真ん中（角どうしの間）を指す。w = (i,j)・z = (i+1,j)・x = (i,j+1)・y = (i+1,j+1)
+    float4 g = nt.gather(gs, (im + 1.0) / 256.0);
+    return mix(mix(g.w, g.z, w.x), mix(g.x, g.y, w.x), w.y);
+}
+// oct：重ねる細かさの数（遠くは少なく。1 ピクセルより細かい凸凹は、見えないうえにちらつき・欠けの元になる）
+static float fbmT(texture2d<float> nt, float2 p, int oct) {
+    float s = 0.0, a = 0.5;
+    for (int i = 0; i < 5; i++) { if (i >= oct) break; s += a * vnT(nt, p); p *= 2.03; a *= 0.5; }
+    return s;
+}
+static float terrain(texture2d<float> nt, float2 xz, float amp, float wob, float T, float dist) {
+    // 真ん中の道（|x| < 1.2）は平らなので、重いノイズを計算しない
+    if (abs(xz.x) <= 1.2) return 0.0;
     float side = smoothstep(1.2, 5.0, abs(xz.x));
-    float m = fbm(xz * 0.12) * 1.6 + fbm(xz * 0.35) * 0.4;
+    // 遠いほど細かい凸凹を省く（近くは 5 段、遠くは 2〜3 段）
+    int fine = dist < 12.0 ? 5 : (dist < 25.0 ? 4 : (dist < 40.0 ? 3 : 2));
+    float m = fbmT(nt, xz * 0.12, 5) * 1.6 + fbmT(nt, xz * 0.35, fine) * 0.4;
     return amp * m * m * side * 3.0 * (1.0 + wob * 0.35 * sin(T * 1.3 + xz.y * 0.05));
 }
-fragment float4 mg_synth(VO in [[stage_in]], constant MU& u [[buffer(0)]]) {
+fragment float4 mg_synth(VO in [[stage_in]], constant MU& u [[buffer(0)]], texture2d<float> nt [[texture(0)]]) {
     float A = u.size.x / max(u.size.y, 1.0);
     float2 sp = float2((in.uv.x - 0.5) * A, 0.5 - in.uv.y);
     float camH = 0.4 + u.b.y * 1.5;
@@ -125,16 +145,47 @@ fragment float4 mg_synth(VO in [[stage_in]], constant MU& u [[buffer(0)]]) {
         col += sunA * 0.25 * exp(-r * 4.0) * step(0.0, sp.y);
     }
     // 地面・山を探す
+    // 山の高さの上限（fbm は 0…0.97 なので m は 1.94 まで）。これより上には何も無い
+    float hmax = u.a.y * 1.94 * 1.94 * 3.0 * (1.0 + abs(u.b.w) * 0.35) + 0.001;
     float t = 0.05;
     bool hit = false;
     float3 pos = 0.0;
-    for (int i = 0; i < 64; i++) {
+    float hHit = 0.0;
+    // 山より高い所から上を向いている光は、何にも当たらない（空）
+    bool skip = rd.y >= 0.0 && ro.y >= hmax;
+    // 下を向いている光は、山の上限の高さまでは何も無いので、そこまで一気に進む
+    if (rd.y < 0.0 && ro.y > hmax) t = max(t, (ro.y - hmax) / -rd.y);
+    // 地面（高さ 0）より先には行かない（山の高さは 0 以上なので、それまでに必ず当たる）
+    float tFloor = rd.y < 0.0 ? ro.y / -rd.y : 1e9;
+    float tPrev = t;
+    for (int i = 0; i < 96 && !skip; i++) {
+        if (t >= tFloor) {
+            // 地面まで来た。山のすそで地面より手前に当たっていないかは、下の詰め直しで確かめる
+            t = tFloor; hit = true; break;
+        }
         pos = ro + rd * t;
-        float h = terrain(pos.xz, u.a.y, u.b.w, u.time);
+        float h = terrain(nt, pos.xz, u.a.y, u.b.w, u.time, t);
         float dh = pos.y - h;
-        if (dh < 0.002 * t) { hit = true; break; }
-        t += max(dh * 0.55, 0.03 + t * 0.012);
+        if (dh < 0.0) { hit = true; break; }
+        // 上を向いていて、もう山より高ければ、この先も当たらない
+        if (rd.y >= 0.0 && pos.y >= hmax) break;
+        tPrev = t;
+        // 一歩の最小は小さめに（大きいと、遠くの細い尾根を飛び越して、山が欠けたり浮いたかけらになる）
+        t += max(dh * 0.55, 0.02 + t * 0.005);
         if (t > 60.0) break;
+    }
+    if (hit) {
+        // 当たった所を細かく詰める（前の点は山の上、今の点は山の中）。
+        // 粗いままだと、隣どうしの点で当たる位置が飛び飛びになって、格子の線が縞・もやもやになる
+        float a0 = tPrev, a1 = t;
+        for (int k = 0; k < 8; k++) {
+            float m = 0.5 * (a0 + a1);
+            float3 pm = ro + rd * m;
+            if (pm.y - terrain(nt, pm.xz, u.a.y, u.b.w, u.time, m) < 0.0) a1 = m; else a0 = m;
+        }
+        t = a1;
+        pos = ro + rd * t;
+        hHit = terrain(nt, pos.xz, u.a.y, u.b.w, u.time, t);
     }
     if (hit) {
         float g = max(u.a.z, 1.0) / 10.0;
@@ -143,12 +194,15 @@ fragment float4 mg_synth(VO in [[stage_in]], constant MU& u [[buffer(0)]]) {
         float2 gl = abs(fract(q - 0.5) - 0.5) / max(fw, 1e-4);
         float lw = u.a.w * 0.6;
         float line = 1.0 - smoothstep(lw, lw + 1.0, min(gl.x, gl.y));
-        float h = terrain(pos.xz, u.a.y, u.b.w, u.time);
+        float h = hHit;
         float3 fill = float3(0.03, 0.0, 0.08);
         float3 lc = mix(lineC, lineC2, saturate(h * 0.6));
         float3 c = mix(fill, lc * 1.4, line);
         float fog = 1.0 - exp(-t * (0.02 + u.b.z * 0.08));
-        col = mix(c, sky, fog);
+        // 霧は空の色へ。描く距離の限界（60）の手前では、太陽も入れた後ろの景色へ溶かす
+        // （限界でぷつっと切れて、太陽の前に遠い山のかけらが黒く浮くのを防ぐ。近くの山は透けない）
+        float far = smoothstep(42.0, 60.0, t);
+        col = mix(mix(c, sky, fog), col, far);
     }
     return float4(col, 1.0);
 }
@@ -564,7 +618,8 @@ final class MoreGenRenderer {
             u.c = SIMD4(v(8).rounded(), v(10), blink, 0)
         case .synthwave:
             name = "mg_synth"
-            u.a = SIMD4(t * v(0) * 2, v(1), v(2), v(3))
+            // 線の太さは 1080p のときのピクセル数。描く大きさ（画質）が変わっても、見た目の太さは同じに
+            u.a = SIMD4(t * v(0) * 2, v(1), v(2), v(3) * Float(dst.height) / 1080)
             u.b = SIMD4(v(4), v(5), v(6), v(7))
             u.c = SIMD4(v(8).rounded(), 0, 0, 0)
         case .metaballs:
@@ -592,7 +647,33 @@ final class MoreGenRenderer {
             u.c = SIMD4(v(8).rounded(), target.x, target.y, 0)
         default: return
         }
+        if e.kind == .synthwave {
+            full(dst, name, &u, cb: cb) { [noiseTable] enc in enc.setFragmentTexture(noiseTable, index: 0) }
+            return
+        }
         full(dst, name, &u, cb: cb)
+    }
+
+    /// 地形のノイズの乱数の表（256×256。決まった種で作るので、いつも同じ山になる）
+    private let noiseTable: MTLTexture? = MoreGenRenderer.makeNoiseTable(device: MetalContext.shared.device)
+
+    static func makeNoiseTable(device: MTLDevice) -> MTLTexture? {
+        let n = 256
+        // 決まった種の乱数（SplitMix64）
+        var x: UInt64 = 0x5EED_5A7E
+        func next() -> UInt64 {
+            x &+= 0x9E37_79B9_7F4A_7C15
+            var z = x
+            z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
+            z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
+            return z ^ (z >> 31)
+        }
+        let vals = (0..<(n * n)).map { _ in Float(next() >> 40) / Float(1 << 24) }
+        let td = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .r32Float, width: n, height: n, mipmapped: false)
+        td.usage = [.shaderRead]
+        guard let t = device.makeTexture(descriptor: td) else { return nil }
+        vals.withUnsafeBytes { t.replace(region: MTLRegionMake2D(0, 0, n, n), mipmapLevel: 0, withBytes: $0.baseAddress!, bytesPerRow: n * 4) }
+        return t
     }
 }
 
