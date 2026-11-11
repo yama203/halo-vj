@@ -2322,6 +2322,9 @@ final class RenderLoop {
         let updated = engine.updateFrame()
         // カーソルを合わせたエフェクト・ジェネレーターの見本（同じスレッドで描いて、作業テクスチャを取り合わないように）
         KindPreview.shared.renderIfNeeded(now: now)
+        // 使われなくなったカメラ・Syphon の受け取り口を閉じる（クリップを消したあと、カメラが点いたままにならないように）
+        CameraInputs.shared.closeIdle(now: now)
+        SyphonInputs.shared.closeIdle(now: now)
         let current: [(ObjectIdentifier, CAMetalLayer, TargetKind, Int)] = lock.withLock {
             stats.ticks += 1
             monitorTicks += 1

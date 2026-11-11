@@ -109,13 +109,19 @@ final class SyphonInputs {
     private let lock = NSLock()
     private var clients: [String: (client: SyphonMetalClient, last: MTLTexture?, used: Double)] = [:]
 
+    /// しばらく使っていない受け取り口を閉じる（描画ループが毎コマ呼ぶ）
+    func closeIdle(now: Double = CACurrentMediaTime()) {
+        lock.withLock {
+            guard !clients.isEmpty else { return }
+            for (k, v) in clients where now - v.used > 10 { v.client.stop(); clients[k] = nil }
+        }
+    }
+
     /// key（アプリ名＋サーバー名）の今の絵（無ければ nil）。どのスレッドからでも
     func frame(_ key: String) -> MTLTexture? {
         let now = CACurrentMediaTime()
         return lock.withLock {
             if clients[key] == nil {
-                // しばらく使っていない受け取り口は閉じる
-                for (k, v) in clients where now - v.used > 10 { v.client.stop(); clients[k] = nil }
                 let parts = key.components(separatedBy: "\n")
                 guard parts.count == 2,
                       let desc = SyphonServerDirectory.shared().servers(matchingName: parts[1], appName: parts[0]).first

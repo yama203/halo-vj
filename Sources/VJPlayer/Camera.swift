@@ -77,13 +77,27 @@ final class CameraInputs: ObservableObject {
         }
     }
 
+    /// 使われなくなったカメラを閉じるまでの秒数（クリップを消す・止めると、このくらいでカメラの緑の印が消える）
+    static let idleSeconds = 3.0
+
+    /// しばらく絵を取りに来ていないカメラを閉じる（描画ループが毎コマ呼ぶ）。
+    /// 前は「別のカメラを開くとき」にしか閉じなかったので、クリップを消してもカメラが点いたままだった
+    func closeIdle(now: Double = CACurrentMediaTime()) {
+        lock.withLock {
+            guard !sessions.isEmpty else { return }
+            for (k, s) in sessions where now - s.used > Self.idleSeconds { s.stop(); sessions[k] = nil }
+        }
+    }
+
+    /// 開いているカメラの数（テスト用）
+    var openCount: Int { lock.withLock { sessions.count } }
+
     /// 機器の今の絵（無ければ nil）。どのスレッドからでも
     func frame(_ id: String) -> (MTLTexture, CVMetalTexture)? {
         guard AVCaptureDevice.authorizationStatus(for: .video) == .authorized else { return nil }
         let now = CACurrentMediaTime()
         return lock.withLock {
             if sessions[id] == nil {
-                for (k, s) in sessions where now - s.used > 10 { s.stop(); sessions[k] = nil }
                 guard let s = CameraSession(id: id) else { return nil }
                 sessions[id] = s
             }
