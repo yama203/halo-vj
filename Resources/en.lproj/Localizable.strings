@@ -1,5 +1,14 @@
 /* Halo VJ の英語の訳。見出しは画面の日本語（ソースの L("…")）。抜けは tools/i18n_check.py で確かめる */
 
+/* EffectDice.swift・EffectPresets.swift（サイコロ・プリセット） */
+"値をランダムに（⌥：少しだけ）" = "Randomize values (⌥: just a little)";
+"プリセット %@" = "Preset %@";
+"まだプリセットはありません" = "No presets yet";
+"今の値を保存…" = "Save Current Values…";
+"プリセットの名前（「%@」のプリセット。空なら番号）" = "Preset name (for “%@”; leave empty for a number)";
+"プリセットを消す" = "Delete Preset";
+"プリセット（値の組を名前で保存・呼び出す）" = "Presets (save and recall named sets of values)";
+
 
 /* Animation.swift */
 "固定" = "Fixed";

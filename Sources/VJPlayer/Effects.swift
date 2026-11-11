@@ -666,9 +666,9 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
                 EffectParam(label: L("うねりの速さ"), range: 0...3, defaultValue: 0.3, perPoint: 0.003,
                             format: { String(format: "%.2f", $0) }),
                 EffectParam(label: L("中心の位置 X"), range: -0.5...0.5, defaultValue: 0, perPoint: 0.001,
-                            format: EffectParam.percent, animRange: -0.2...0.2),
+                            format: EffectParam.percent, animRange: -0.2...0.2, noDice: true),
                 EffectParam(label: L("中心の位置 Y"), range: -0.5...0.5, defaultValue: 0, perPoint: 0.001,
-                            format: EffectParam.percent, animRange: -0.2...0.2),
+                            format: EffectParam.percent, animRange: -0.2...0.2, noDice: true),
                 EffectParam(label: L("まわりの区切り"), range: 2...48, defaultValue: 12, perPoint: 0.05, step: 1,
                             format: { String(format: "%.0f", $0) }),
                 EffectParam(label: L("色の付け方"), range: 0...2, defaultValue: 0, choices: [L("1 色"), L("パレット"), L("虹色")]),
@@ -871,15 +871,15 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
                 EffectParam(label: L("形"), range: 0...1, defaultValue: 0, choices: [L("四角"), L("丸")]),
                 EffectParam(label: L("反転（中を隠す）"), range: 0...1, defaultValue: 0, isToggle: true),
                 EffectParam(label: L("位置 X"), range: -1...1, defaultValue: 0, perPoint: 0.002,
-                            format: { String(format: "%+.1f%%", $0 * 100) }, animRange: -0.3...0.3),
+                            format: { String(format: "%+.1f%%", $0 * 100) }, animRange: -0.3...0.3, noDice: true),
                 EffectParam(label: L("位置 Y"), range: -1...1, defaultValue: 0, perPoint: 0.002,
-                            format: { String(format: "%+.1f%%", $0 * 100) }, animRange: -0.3...0.3),
+                            format: { String(format: "%+.1f%%", $0 * 100) }, animRange: -0.3...0.3, noDice: true),
                 EffectParam(label: L("幅"), range: 0...2, defaultValue: 0.6, perPoint: 0.002, format: EffectParam.percent,
-                            animRange: 0.2...0.8),
+                            animRange: 0.2...0.8, noDice: true),
                 EffectParam(label: L("高さ"), range: 0...2, defaultValue: 0.6, perPoint: 0.002, format: EffectParam.percent,
-                            animRange: 0.2...0.8),
+                            animRange: 0.2...0.8, noDice: true),
                 EffectParam(label: L("角度"), range: 0...360, defaultValue: 0, perPoint: 1,
-                            format: { String(format: "%.0f°", $0) }, animRange: 0...360),
+                            format: { String(format: "%.0f°", $0) }, animRange: 0...360, noDice: true),
                 EffectParam(label: L("ぼかし"), range: 0...0.5, defaultValue: 0.02, perPoint: 0.0005,
                             format: { String(format: "%.1f%%", $0 * 100) }),
             ]
@@ -1160,6 +1160,8 @@ struct EffectParam {
     var format: (Double) -> String = { String(format: "%.2f", $0) }
     /// アニメーションを付けたときの最初の範囲（無ければ値の範囲全体）
     var animRange: ClosedRange<Double>? = nil
+    /// サイコロ（値をランダムに）で変えない値（位置・大きさなどの形を決める値。保存しない）
+    var noDice = false
 
     /// 動かせるか（選択肢・オン/オフは動かさない）
     var animatable: Bool { choices == nil && !isToggle }

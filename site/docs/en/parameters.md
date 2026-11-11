@@ -50,6 +50,24 @@ Click the swatch of an effect or generator “Color”, or a palette color, to o
 
 Added effects are listed in the effects section of the panel. → [Adding and Reordering Effects](effects.md)
 
+### Dice (randomize values)
+
+Click the dice button in the header of an effect or generator to randomize its values. One ⌘Z undoes it.
+
+- Hold ⌥ while clicking to change values “just a little” (within ±15% of the range around the current value). Choices are left as they are.
+- Not changed: on/off values, values with an animation, opacity, quality, text and font, position and size (such as mask position or center), and input selection.
+- Colors change only in hue (white, black, and gray stay as they are).
+- Not available for Camera, Syphon, NDI, Text, and Clock.
+
+### Presets
+
+Use the bookmark button in the header to save the current set of values under a name and recall it later.
+
+- Choose “Save Current Values…” and enter a name. The same name overwrites; an empty name gets a number, like “Preset 1”.
+- Choose a preset from the list to load its values (⌘Z undoes it). It loads values, color, palette, and animation settings. On/off, opacity, quality, and text stay as they are.
+- Presets are kept per effect type and are shared by all projects (`~/Library/Application Support/Halo VJ/effect-presets.json`).
+- Remove one with “Delete Preset”.
+
 ## Narrow panel
 
 When the panel is made narrow, it rearranges into a single column, usable without horizontal scrolling.

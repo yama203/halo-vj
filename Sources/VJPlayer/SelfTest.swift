@@ -501,6 +501,9 @@ enum SelfTest {
         testNDI(check: check, wait: wait)
         testReviewFixes(paths: paths, check: check, wait: wait)
 
+        // 32. サイコロ（値をランダムに）・エフェクトのプリセット
+        testDiceAndPresets(check: check)
+
         let out = AudioOutput.shared.engine.outputNode
         let feeding = AudioOutput.shared.engine.inputConnectionPoint(for: out, inputBus: 0)?.node as? AVAudioMixerNode
         check(AudioOutput.shared.silenced && feeding !== AudioOutput.shared.masterMixer && feeding?.outputVolume == 0,

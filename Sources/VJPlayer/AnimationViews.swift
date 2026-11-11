@@ -494,9 +494,15 @@ struct EffectCard: View {
                 .contentShape(Rectangle())
                 .onTapGesture { toggleOpen() }
                 .help(effect.kind.help + L("（クリックで開く／閉じる）"))
-                resetButton
-                Button(role: .destructive) { remove() } label: { Image(systemName: "trash").frame(width: 18) }
-                    .help(L("このエフェクトを外す"))
+                // 細いときはボタンを小さくして、名前の場所を空ける
+                HStack(spacing: narrow ? 4 : 8) {
+                    resetButton
+                    if effect.kind.hasDice { EffectDiceButton(effect: $effect) }
+                    EffectPresetMenu(effect: $effect)
+                    Button(role: .destructive) { remove() } label: { Image(systemName: "trash").frame(width: 18) }
+                        .help(L("このエフェクトを外す"))
+                }
+                .controlSize(narrow ? .small : .regular)
             }
             .controlSize(.regular)
             .frame(height: 26)
