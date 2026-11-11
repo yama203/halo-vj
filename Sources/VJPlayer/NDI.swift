@@ -172,6 +172,10 @@ final class NDIReceiver {
     private var latest: MTLTexture?
     private var pool: [MTLTexture] = []
     private var next = 0
+    /// 描画に渡した絵（新しいものから 3 枚まで）。GPU がまだ読んでいるかもしれないので、これには書かない
+    private var handed: [ObjectIdentifier] = []
+    /// 絵の入れ物の数（渡した 3 枚と、いちばん新しい 1 枚を避けても、必ず 1 枚は空いている数）
+    static let poolSize = 5
     private var poolAlpha = true
     private var running = true
     private var _finished = false
@@ -188,7 +192,16 @@ final class NDIReceiver {
         t.start()
     }
 
-    var frame: MTLTexture? { lock.withLock { used = CACurrentMediaTime(); return latest } }
+    var frame: MTLTexture? {
+        lock.withLock {
+            used = CACurrentMediaTime()
+            if let l = latest, handed.last != ObjectIdentifier(l) {
+                handed.append(ObjectIdentifier(l))
+                if handed.count > 3 { handed.removeFirst() }
+            }
+            return latest
+        }
+    }
 
     func stop() { lock.withLock { running = false } }
 
@@ -214,20 +227,24 @@ final class NDIReceiver {
         let w = Int(v.width), h = Int(v.height)
         guard w > 0, h > 0, let data = v.data else { return }
         let alpha = v.has_alpha != 0
-        // 3 枚を順に使う（GPU が読んでいる絵には書かない）
+        // 5 枚を順に使う。描画に渡した絵（GPU が読んでいるかもしれない）と、いちばん新しい絵には書かない
         if pool.first.map({ $0.width != w || $0.height != h }) ?? true || poolAlpha != alpha {
             let td = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: w, height: h, mipmapped: false)
             td.usage = [.shaderRead]
             td.storageMode = .shared
             // BGRX のときは、不透明度を 1 として読む
             if !alpha { td.swizzle = MTLTextureSwizzleChannels(red: .red, green: .green, blue: .blue, alpha: .one) }
-            pool = (0..<3).compactMap { _ in MetalContext.shared.device.makeTexture(descriptor: td) }
+            pool = (0..<Self.poolSize).compactMap { _ in MetalContext.shared.device.makeTexture(descriptor: td) }
             poolAlpha = alpha
             next = 0
+            lock.withLock { handed = [] }
         }
-        guard pool.count == 3 else { return }
-        let t = pool[next]
-        next = (next + 1) % 3
+        guard pool.count == Self.poolSize else { return }
+        let busy: Set<ObjectIdentifier> = lock.withLock { Set(handed + (latest.map { [ObjectIdentifier($0)] } ?? [])) }
+        guard let i = (0..<Self.poolSize).map({ (next + $0) % Self.poolSize })
+            .first(where: { !busy.contains(ObjectIdentifier(pool[$0])) }) else { return }
+        let t = pool[i]
+        next = (i + 1) % Self.poolSize
         t.replace(region: MTLRegionMake2D(0, 0, w, h), mipmapLevel: 0, withBytes: data, bytesPerRow: Int(v.stride))
         lock.withLock { latest = t; frames += 1 }
     }

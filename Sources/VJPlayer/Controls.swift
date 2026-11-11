@@ -64,8 +64,9 @@ final class ControlHub: ObservableObject {
     @Published private(set) var learning: (address: String, title: String)?
     /// つながっている MIDI の機器
     @Published private(set) var devices: [String] = []
-    /// 最近届いた MIDI（画面に出す）
-    @Published private(set) var lastMIDI = ""
+    /// 最近届いた MIDI（画面に出す）。届くたびに変わるので、別の入れ物にしておく
+    /// （ここが @Published だと、グリッドの全部のクリップの印・メニューまで描き直してしまう）
+    let lastMIDI = RecentLines(keep: 1)
     var forTests = false
 
     private var client = MIDIClientRef()
@@ -229,7 +230,7 @@ final class ControlHub: ObservableObject {
             OSCHub.shared.handle(OSCMessage(address: a, args: [.float(Float(v))]), runCommands: false)
         }
         DispatchQueue.main.async {
-            self.lastMIDI = L("\(device)：") + t.label + String(format: " = %.0f", v * 127)
+            self.lastMIDI.add(L("\(device)：") + t.label + String(format: " = %.0f", v * 127))
             self.fire(t, value: v)
         }
     }
@@ -276,7 +277,32 @@ final class ControlHub: ObservableObject {
     }
 }
 
+/// 最近届いたもの（画面に出すだけ）。MIDI・OSC が届くたびに書くので、ControlHub・OSCHub とは別にして、
+/// これを見ている欄（設定の「届いた：」）だけが描き直されるようにする。メインスレッドで使う
+final class RecentLines: ObservableObject {
+    @Published private(set) var lines: [String] = []
+    let keep: Int
+    init(keep: Int) { self.keep = keep }
+    /// いちばん上に足す（新しい順。keep 行まで）
+    func add(_ line: String) {
+        var l = lines
+        l.insert(line, at: 0)
+        if l.count > keep { l.removeLast(l.count - keep) }
+        lines = l
+    }
+}
+
 // MARK: - 画面
+
+/// 設定の欄の「届いた：」（最近届いた MIDI）
+private struct LastMIDIText: View {
+    @ObservedObject var recent: RecentLines
+    var body: some View {
+        if let l = recent.lines.first {
+            Text(L("届いた：") + l).font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary)
+        }
+    }
+}
 
 /// 「覚える」の途中に、画面の上に出す案内
 struct ControlLearnBanner: View {
@@ -341,9 +367,7 @@ struct ControlSettings: View {
         VStack(alignment: .leading, spacing: 6) {
             Text(hub.devices.isEmpty ? L("MIDI の機器：つながっていません") : L("MIDI の機器：") + hub.devices.joined(separator: L("・")))
                 .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            if !hub.lastMIDI.isEmpty {
-                Text(L("届いた：") + hub.lastMIDI).font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary)
-            }
+            LastMIDIText(recent: hub.lastMIDI)
             Text(L("クリップ・パッドは右クリックの「MIDI・キーで…（覚える）」で割り当てる。つまみ・フェーダーは、値の波形ボタンで動かし方を「OSC・MIDI」にして「覚える」"))
                 .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             HStack(spacing: 4) {

@@ -188,10 +188,8 @@ extension Engine {
                 placed[i] = .some(makeSlot(saved, baseDir: base))
             }
         }
-        for (i, s) in placed.sorted(by: { $0.key < $1.key }) {
-            let new = s ?? nil
-            if slots[i] !== new { setSlot(i, new) }
-        }
+        // 場所を移っただけのクリップは入れ直さずに付け替える（再生中なら、そのまま再生を続ける）
+        restoreSlots(slots.indices.map { placed[$0] ?? nil })
         // ⇧クリックの選択は番号で持っているので、戻したら空に（違うクリップを指さないように）
         multiSelection = []
         // 編集中のシーンは、戻したシーンで読み直す（古い下書きのまま次の操作で上書きしないように）

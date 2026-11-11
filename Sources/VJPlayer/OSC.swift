@@ -122,8 +122,9 @@ final class OSCHub: ObservableObject {
     @Published var sendHost = "127.0.0.1" { didSet { if oldValue != sendHost { restartSender(); save() } } }
     @Published var sendPort: Int = 7000 { didSet { if oldValue != sendPort { restartSender(); save() } } }
     @Published private(set) var status = ""
-    /// 最近届いたメッセージ（画面に出す。新しい順）
-    @Published private(set) var recent: [String] = []
+    /// 最近届いたメッセージ（画面に出す。新しい順）。届くたびに変わるので、別の入れ物にしておく
+    /// （ここが @Published だと、OSCHub を見ている上のバーの「連携」ボタンなどまで描き直してしまう）
+    let recent = RecentLines(keep: 6)
     /// 「覚える」：次に届いたアドレスを渡す
     @Published private(set) var learning = false
     var forTests = false
@@ -202,8 +203,7 @@ final class OSCHub: ObservableObject {
             }
         }.joined(separator: " ")
         DispatchQueue.main.async {
-            self.recent.insert(line, at: 0)
-            if self.recent.count > 6 { self.recent.removeLast(self.recent.count - 6) }
+            self.recent.add(line)
             if let learned {
                 self.learning = false
                 learned(m.address)
@@ -495,15 +495,7 @@ struct LinkSettings: View {
                         .font(.system(size: 11)).foregroundStyle(.secondary).textSelection(.enabled)
                     Text(L("どの値も、波形ボタンで動かし方を「OSC」にして「覚える」を押し、iPad のフェーダーを動かすと、そのフェーダーで動く"))
                         .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                    if !osc.recent.isEmpty {
-                        VStack(alignment: .leading, spacing: 1) {
-                            ForEach(Array(osc.recent.enumerated()), id: \.offset) { _, l in
-                                Text(l).font(.system(size: 10, design: .monospaced)).lineLimit(1)
-                            }
-                        }
-                        .padding(4).frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color.black.opacity(0.25), in: RoundedRectangle(cornerRadius: 4))
-                    }
+                    OSCRecentList(recent: osc.recent)
                     DisclosureGroup(L("決まったアドレス"), isExpanded: $showHelp) {
                         VStack(alignment: .leading, spacing: 2) {
                             ForEach(OSCCommands.help, id: \.0) { a, h in
@@ -535,6 +527,22 @@ struct LinkSettings: View {
                 .padding(4)
             }
             Text(osc.status).font(.system(size: 11)).foregroundStyle(.secondary)
+        }
+    }
+}
+
+/// 「連携」の、最近届いた OSC の一覧（届くたびに、ここだけ描き直す）
+private struct OSCRecentList: View {
+    @ObservedObject var recent: RecentLines
+    var body: some View {
+        if !recent.lines.isEmpty {
+            VStack(alignment: .leading, spacing: 1) {
+                ForEach(Array(recent.lines.enumerated()), id: \.offset) { _, l in
+                    Text(l).font(.system(size: 10, design: .monospaced)).lineLimit(1)
+                }
+            }
+            .padding(4).frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.black.opacity(0.25), in: RoundedRectangle(cornerRadius: 4))
         }
     }
 }

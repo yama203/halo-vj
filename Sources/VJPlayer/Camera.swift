@@ -73,6 +73,10 @@ final class CameraInputs: ObservableObject {
     /// 開けなかったカメラと、その時刻（retrySeconds の間は開き直さない）
     private var failedAt: [String: Double] = [:]
     static let retrySeconds = 3.0
+    /// 開いている途中のカメラ（同じカメラを二重に開かないように）
+    private var opening: Set<String> = []
+    /// カメラを開く仕事をするキュー（開くのは数十〜数百 ms かかるので、描画のスレッドではしない）
+    private let openQueue = DispatchQueue(label: "VJPlayer.camera.open")
 
     func requestAccess() {
         AVCaptureDevice.requestAccess(for: .video) { _ in
@@ -100,15 +104,32 @@ final class CameraInputs: ObservableObject {
         guard AVCaptureDevice.authorizationStatus(for: .video) == .authorized else { return nil }
         let now = CACurrentMediaTime()
         return lock.withLock {
-            if sessions[id] == nil {
-                // 開けなかったカメラは、しばらく開き直さない（毎コマ開こうとして重くならないように）
-                if let t = failedAt[id], now - t < Self.retrySeconds { return nil }
-                guard let s = CameraSession(id: id) else { failedAt[id] = now; return nil }
-                failedAt[id] = nil
-                sessions[id] = s
+            if let s = sessions[id] {
+                s.used = now
+                return s.frame()
             }
-            sessions[id]?.used = now
-            return sessions[id]?.frame()
+            // 開いている途中なら、できあがるまで黒（nil）
+            if opening.contains(id) { return nil }
+            // 開けなかったカメラは、しばらく開き直さない（毎コマ開こうとして重くならないように）
+            if let t = failedAt[id], now - t < Self.retrySeconds { return nil }
+            // 開くのは重いので、カメラ用のキューで開く（描画を止めない）。できあがるまでは黒（nil）
+            opening.insert(id)
+            openQueue.async { self.open(id) }
+            return nil
+        }
+    }
+
+    /// カメラを開いて、使える一覧に入れる（openQueue の上で）。
+    /// 開いている途中は sessions に入っていないので closeIdle は触らない。入れたあと使われなければ、
+    /// idleSeconds で closeIdle がふつうに閉じる
+    private func open(_ id: String) {
+        let s = CameraSession(id: id)
+        lock.withLock {
+            opening.remove(id)
+            guard let s else { failedAt[id] = CACurrentMediaTime(); return }
+            failedAt[id] = nil
+            s.used = CACurrentMediaTime()
+            sessions[id] = s
         }
     }
 }

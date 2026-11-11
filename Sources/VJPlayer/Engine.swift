@@ -1083,6 +1083,59 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
         scheduleSave()
     }
 
+    /// スロットの中身を new にそろえる（元に戻すとき）。
+    /// 同じクリップが場所を移るだけのときは入れ直さず、moveSlot と同じやり方で付け替える
+    /// （setSlot で入れ直すと、移る前の場所で再生中だったクリップが止まってしまうため）
+    func restoreSlots(_ new: [ClipSlot?]) {
+        guard new.count == slots.count else { return }
+        var oldIndex: [ObjectIdentifier: Int] = [:]
+        for (i, s) in slots.enumerated() { if let s { oldIndex[ObjectIdentifier(s)] = i } }
+        var count: [ObjectIdentifier: Int] = [:]
+        for s in new.compactMap({ $0 }) { count[ObjectIdentifier(s), default: 0] += 1 }
+        // 場所を移るクリップ（元の場所 → 新しい場所）。同じクリップが 2 か所に出るときは、ふつうに入れ直す
+        var moved: [Int: Int] = [:]
+        for (i, s) in new.enumerated() {
+            guard let s, count[ObjectIdentifier(s)] == 1, let j = oldIndex[ObjectIdentifier(s)], j != i else { continue }
+            moved[j] = i
+        }
+        if !moved.isEmpty {
+            for r in layers.indices { finishCrossfade(r) }
+            // 移ってくる先にある、どこにも残らないクリップは先に外す（再生中なら止める）
+            for to in moved.values where moved[to] == nil && slots[to] != nil { setSlot(to, nil) }
+
+            func newIndex(_ i: Int) -> Int { moved[i] ?? i }
+            let playing = activeByLayer.compactMap { $0 }
+            let selectedOld = activeByLayer[selectedLayer]
+            let before = slots
+            for j in moved.keys { slots[j] = nil }
+            for (j, i) in moved {
+                slots[i] = before[j]
+                slots[i]?.layerVolume = layers[layerOf(i)].audible ? Float(layers[layerOf(i)].volume) : 0
+            }
+            var newActive: [Int?] = Array(repeating: nil, count: layerCount)
+            // 移ったクリップを優先して、各レイヤーに1つだけ残す
+            for old in playing.filter({ moved[$0] != nil }) + playing.filter({ moved[$0] == nil }) {
+                let i = newIndex(old), r = layerOf(i)
+                if newActive[r] == nil { newActive[r] = i } else { slots[i]?.stopAndRearm() }
+            }
+            let changed = layers.indices.filter { newActive[$0] != activeByLayer[$0] }
+            activeByLayer = newActive
+            renderLock.withLock {
+                for r in changed { frames[r] = nil }
+            }
+            for r in changed {
+                if let i = newActive[r] { slots[i]?.invalidateShownFrame() }
+            }
+            if let s = selectedOld, moved[s] != nil { selectedLayer = layerOf(newIndex(s)) }
+            if let i = inspectedIndex {
+                if let to = moved[i] { inspectedIndex = to } else if slots[i] == nil && new[i] == nil { inspectedIndex = nil }
+            }
+            syncRenderState()
+        }
+        // 残り（新しく作ったクリップ・無くなったクリップ）は、1 つずつ入れ直す
+        for i in slots.indices where slots[i] !== new[i] { setSlot(i, new[i]) }
+    }
+
     func clear(_ index: Int) {
         setSlot(index, nil)
         multiSelection.remove(index)   // 消したクリップは選択から外す

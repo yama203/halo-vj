@@ -203,5 +203,26 @@ extension SelfTest {
             e.clear(1)
             check(moved && e.multiSelection == [2], "複数選択：クリップを動かすと選択もついていき、消したクリップは選択から外れる")
         }
+
+        // D1. 再生中のクリップを動かして戻しても、止まらずに元の場所で再生を続ける
+        do {
+            let e = Engine(persistent: false)
+            _ = e.placeGenerator(.solid, at: 0)
+            let gen = e.slots[0]
+            e.trigger(0)
+            wait(0.1)
+            e.commitUndoStep()
+            e.moveSlot(0, to: 2)
+            e.commitUndoStep()
+            let movedOK = e.slots[2] === gen && e.activeByLayer[0] == 2
+            e.undo()
+            let back = e.slots[0] === gen && e.slots[2] == nil && e.activeByLayer[0] == 0 && gen?.isPlaying == true
+                && e.inspectedIndex.map { $0 == 0 } ?? true
+            e.redo()
+            let again = e.slots[2] === gen && e.slots[0] == nil && e.activeByLayer[0] == 2 && gen?.isPlaying == true
+            check(movedOK && back && again,
+                  "元に戻す：再生中のクリップを動かして戻しても、止まらずに元の場所で再生を続ける（やり直すと、また移った先で続ける）")
+            e.stopAll()
+        }
     }
 }
