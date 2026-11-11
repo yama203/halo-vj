@@ -27,7 +27,7 @@ enum AnimMode: Int, Codable, CaseIterable, Identifiable {
     var label: String {
         switch self {
         case .off: L("固定")
-        case .time: L("秒")
+        case .time: L("秒", note: "動かし方")
         case .beat: "BPM"
         case .audio: L("音")
         case .osc: L("OSC・MIDI")

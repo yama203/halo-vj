@@ -12,7 +12,7 @@ enum Transition: Int, CaseIterable, Codable, Identifiable {
         case .wipe: L("ワイプ")
         case .circle: L("円")
         case .noise: L("ノイズ")
-        case .luma: L("明るさ")
+        case .luma: L("明るさ", note: "切り替え")
         case .glitch: L("グリッチ")
         }
     }

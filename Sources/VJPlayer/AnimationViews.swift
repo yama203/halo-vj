@@ -832,7 +832,7 @@ struct EffectCard: View {
             let row = narrow ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8)) : AnyLayout(HStackLayout(spacing: 16))
             row {
                 segmented(0, [L("色で光る"), L("消える"), L("反転")], width: narrow ? paramsWidth - 24 : UI.paramColumnWidth)
-                segmented(1, ["BPM", L("秒")], width: 120)
+                segmented(1, ["BPM", L("秒", note: "選択")], width: 120)
             }
             if effect.value(1) < 0.5 {
                 HStack(spacing: 8) {

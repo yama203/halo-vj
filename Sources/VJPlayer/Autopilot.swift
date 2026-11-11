@@ -17,8 +17,8 @@ struct AutoRule: Codable, Identifiable, Equatable {
         var label: String {
             switch self {
             case .bars: L("小節")
-            case .seconds: L("秒")
-            case .minutes: L("分")
+            case .seconds: L("秒", note: "単位")
+            case .minutes: L("分", note: "単位")
             }
         }
     }

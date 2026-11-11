@@ -906,7 +906,7 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
             // 光る／消える を BPM（拍）か 1 秒あたりの回数で繰り返す。光る色は下の「色」で選ぶ
             return [
                 EffectParam(label: L("光り方"), range: 0...2, defaultValue: 0, choices: [L("色で光る"), L("消える"), L("反転")]),
-                EffectParam(label: L("合わせるもの"), range: 0...1, defaultValue: 0, choices: ["BPM", L("秒")]),
+                EffectParam(label: L("合わせるもの"), range: 0...1, defaultValue: 0, choices: ["BPM", L("秒", note: "選択")]),
                 EffectParam(label: L("間隔"), range: 0...6, defaultValue: 3,
                             choices: Self.strobeBeats.map { ParamAnim.beatsLabel($0) }),
                 EffectParam(label: L("1 秒の回数"), range: 0.5...30, defaultValue: 8, perPoint: 0.05,

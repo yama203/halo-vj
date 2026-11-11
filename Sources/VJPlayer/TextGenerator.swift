@@ -10,7 +10,7 @@ import Metal
 enum TextLook {
     static let defaultText = "HALO VJ"
 
-    static let motions = [L("止める"), L("横に流れる"), L("縦に流れる"), L("敷き詰め"), L("1 文字ずつ"), L("拍で弾む")]
+    static let motions = [L("止める"), L("横に流れる"), L("縦に流れる", note: "文字"), L("敷き詰め"), L("1 文字ずつ"), L("拍で弾む")]
     /// 行の切り替えの間隔（拍。0 = 全部の行を一度に出す）
     static let switchBeats: [Double] = [0, 1, 2, 4, 8]
 
@@ -258,7 +258,7 @@ final class TextRasterCache {
 /// 時計の文字（今の時刻・カウントダウン・タイマー・ストップウォッチ）
 enum ClockText {
     static let modes = [L("今の時刻"), L("カウントダウン（時刻まで）"), L("タイマー"), L("ストップウォッチ")]
-    static let formats = [L("自動"), L("時:分:秒"), L("時:分"), L("分:秒"), L("秒")]
+    static let formats = [L("自動"), L("時:分:秒"), L("時:分"), L("分:秒"), L("秒", note: "表示")]
     static let defaultFinish = "HAPPY NEW YEAR"
 
     /// 文字と、弾み（最後の 10 秒で 1 秒ごとに大きく）

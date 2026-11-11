@@ -3,7 +3,7 @@
 
 /* Animation.swift */
 "固定" = "Fixed";
-"秒" = "Time";
+"秒#動かし方" = "Time";
 "音" = "Audio";
 "OSC・MIDI" = "OSC / MIDI";
 "→ 順" = "→ Forward";
@@ -81,6 +81,7 @@
 "目標の時刻" = "Target Time";
 "時" = "h";
 "分" = "m";
+"秒" = "s";
 "長さ" = "Length";
 "表示" = "Display";
 "自動：1 時間以上は 時:分:秒、それより短いと 分:秒。カウントダウン・タイマーの最後の 10 秒は数字だけ" = "Auto: h:mm:ss for an hour or more, otherwise m:ss. The last 10 seconds of a countdown or timer show only the number";
@@ -89,6 +90,7 @@
 "色で光る" = "Flash Color";
 "消える" = "Disappear";
 "反転" = "Invert";
+"秒#選択" = "Seconds";
 "間隔" = "Interval";
 "何拍ごとに光るか（BPM に合わせる）" = "Flash every how many beats (follows the BPM)";
 "パレット" = "Palette";
@@ -133,7 +135,7 @@
 "照明（Art-Net / DMX）" = "Lighting (Art-Net / DMX)";
 "Art-Net で送る" = "Send over Art-Net";
 "送り先" = "Destination";
-"明るさ" = "Luma";
+"明るさ" = "Brightness";
 "ガンマ" = "Gamma";
 "LED は暗い所が明るく見えがちなので、2.2 くらいで画面の見た目に近くなる" = "LEDs tend to make dark areas look bright; around 2.2 gets close to how it looks on screen";
 "取る所：点・線の端をドラッグ" = "Sample area: drag the point or the ends of the line";
@@ -183,6 +185,8 @@
 
 /* Autopilot.swift */
 "小節" = "bars";
+"秒#単位" = "sec";
+"分#単位" = "min";
 "ばらばら" = "Random";
 "順に" = "In order";
 "シーン" = "Scenes";
@@ -1088,6 +1092,7 @@
 /* Layer.swift */
 "クロス" = "Cross";
 "ワイプ" = "Wipe";
+"明るさ#切り替え" = "Luma";
 "だんだん重ねて入れ替わる" = "Gradually blends over";
 "左から右へ、ふちをぼかして拭き取るように" = "Wipes from left to right with a soft edge";
 "真ん中から円が広がって" = "A circle expands from the center";
@@ -1707,6 +1712,7 @@
 /* TextGenerator.swift */
 "止める" = "Still";
 "横に流れる" = "Scroll horizontally";
+"縦に流れる#文字" = "Scroll vertically";
 "敷き詰め" = "Tile";
 "1 文字ずつ" = "One character at a time";
 "拍で弾む" = "Bounce on beat";
@@ -1725,6 +1731,7 @@
 "時:分:秒" = "h:mm:ss";
 "時:分" = "h:mm";
 "分:秒" = "m:ss";
+"秒#表示" = "Seconds";
 
 /* ThumbStyle.swift */
 "透明な所がある素材（マウスを乗せると、市松模様の上で透明の範囲を見せる）" = "Media with transparency (hover to show the transparent area over a checkerboard)";
