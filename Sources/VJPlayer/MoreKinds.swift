@@ -5,7 +5,8 @@ import Foundation
 extension EffectKind {
     static let moreEffects: [EffectKind] = [.bloom, .kaleidoscope, .rgbSplit, .pixelate, .edgeNeon, .zoomBlur,
                                             .pixelSort, .datamosh, .ascii, .dither, .voronoiGlass,
-                                            .blur, .lens, .polar, .tile, .keyer, .ledWall, .slices, .shake]
+                                            .blur, .lens, .polar, .tile, .keyer, .ledWall, .slices, .shake,
+                                            .film, .tiltShift, .emboss, .stretch, .displace, .droste]
     static let moreGenerators: [EffectKind] = [.reactionDiffusion, .laser, .synthwave, .logoParticles, .metaballs,
                                                .starfield, .fractal, .ripples, .lightning, .growth,
                                                .plasma, .aurora, .nebula, .truchet, .hexGrid, .codeRain, .wireframe, .moire]
@@ -32,6 +33,12 @@ extension EffectKind {
         case .ledWall: L("LED パネル")
         case .slices: L("スライス（帯ごとにずらす）")
         case .shake: L("ゆれ（カメラの揺れ・ズームの脈）")
+        case .film: L("フィルム（粒子・周辺減光・傷）")
+        case .tiltShift: L("ミニチュア風（上下をぼかす）")
+        case .emboss: L("浮き彫り")
+        case .stretch: L("引き伸ばし")
+        case .displace: L("明るさでずらす")
+        case .droste: L("入れ子（絵の中に同じ絵）")
         case .reactionDiffusion: L("反応拡散（育つ模様）")
         case .laser: L("レーザーショー")
         case .synthwave: L("シンセウェイブの地形")
@@ -75,6 +82,12 @@ extension EffectKind {
         case .ledWall: "lightbulb.led.wide"
         case .slices: "rectangle.split.1x2"
         case .shake: "iphone.radiowaves.left.and.right"
+        case .film: "film"
+        case .tiltShift: "camera.filters"
+        case .emboss: "square.on.square.intersection.dashed"
+        case .stretch: "arrow.left.and.right.square"
+        case .displace: "square.stack.3d.up"
+        case .droste: "rectangle.inset.filled"
         case .reactionDiffusion: "allergens"
         case .laser: "rays"
         case .synthwave: "mountain.2"
@@ -106,6 +119,10 @@ extension EffectKind {
         case .lens, .polar, .tile, .shake: .shape
         case .keyer: .color
         case .ledWall, .slices: .glitch
+        case .film: .retro
+        case .tiltShift, .emboss: .light
+        case .stretch: .glitch
+        case .displace, .droste: .shape
         case _ where Self.moreGenerators.contains(self): .generator
         default: nil
         }
@@ -321,6 +338,76 @@ extension EffectKind {
                 EffectParam(label: L("ズームの脈"), range: 0...0.5, defaultValue: 0, format: pc, animRange: 0...0.15),
                 EffectParam(label: L("ぶれ"), range: 0...1, defaultValue: 0.3, format: pc, animRange: 0...0.8),
                 EffectParam(label: L("端"), range: 0...3, defaultValue: 3, choices: [L("のばす"), L("折り返す"), L("透明"), L("少し拡大して隠す")]),
+            ]
+        case .film:
+            return [
+                EffectParam(label: L("粒子"), range: 0...1, defaultValue: 0.35, format: pc, animRange: 0...0.8),
+                EffectParam(label: L("粒の大きさ"), range: 1...6, defaultValue: 1.5, perPoint: 0.01, format: px, animRange: 1...3),
+                EffectParam(label: L("周辺を暗く"), range: 0...1, defaultValue: 0.4, format: pc, animRange: 0...0.8),
+                EffectParam(label: L("周辺の広さ"), range: 0.2...1.5, defaultValue: 0.9, format: pc, animRange: 0.5...1.2),
+                EffectParam(label: L("傷"), range: 0...1, defaultValue: 0.3, format: pc, animRange: 0...0.8),
+                EffectParam(label: L("ごみ"), range: 0...1, defaultValue: 0.3, format: pc, animRange: 0...0.8),
+                EffectParam(label: L("ちらつき"), range: 0...1, defaultValue: 0.25, format: pc, animRange: 0...0.6),
+                EffectParam(label: L("ゆれ"), range: 0...1, defaultValue: 0.15, format: pc, animRange: 0...0.5),
+                EffectParam(label: L("色あせ"), range: 0...1, defaultValue: 0.3, format: pc, animRange: 0...0.8),
+                EffectParam(label: L("コマ数"), range: 6...60, defaultValue: 24, perPoint: 0.05, step: 1,
+                            format: { String(format: "%.0f fps", $0) }, animRange: 12...24),
+            ]
+        case .tiltShift:
+            return [
+                EffectParam(label: L("ぼかし"), range: 0...80, defaultValue: 18, perPoint: 0.1, format: px, animRange: 6...40),
+                EffectParam(label: L("帯の位置"), range: 0...1, defaultValue: 0.5, format: pc, animRange: 0.3...0.7),
+                EffectParam(label: L("帯の幅"), range: 0...1, defaultValue: 0.25, format: pc, animRange: 0.1...0.4),
+                EffectParam(label: L("ぼけ始めのやわらかさ"), range: 0.01...1, defaultValue: 0.4, format: pc, animRange: 0.2...0.7),
+                EffectParam(label: L("角度"), range: -90...90, defaultValue: 0, perPoint: 0.3, format: deg, animRange: -20...20),
+                EffectParam(label: L("形"), range: 0...1, defaultValue: 0, choices: [L("帯"), L("丸")]),
+                EffectParam(label: L("彩度"), range: 0...2, defaultValue: 1.3, format: pc, animRange: 1...1.6),
+                EffectParam(label: L("コントラスト"), range: 0...2, defaultValue: 1.1, format: pc, animRange: 1...1.3),
+            ]
+        case .emboss:
+            return [
+                EffectParam(label: L("強さ"), range: 0...8, defaultValue: 2, perPoint: 0.01, format: pc, animRange: 1...4),
+                EffectParam(label: L("光の向き"), range: 0...360, defaultValue: 135, perPoint: 0.5, format: deg, animRange: 0...360),
+                EffectParam(label: L("光の回る速さ"), range: -180...180, defaultValue: 0, perPoint: 0.5, format: degs, animRange: -60...60),
+                EffectParam(label: L("太さ"), range: 0.5...8, defaultValue: 2, perPoint: 0.02, format: px, animRange: 1...4),
+                EffectParam(label: L("色の残し方"), range: 0...2, defaultValue: 0, choices: [L("灰色の浮き彫り"), L("元の色に重ねる"), L("金属")]),
+                EffectParam(label: L("元の絵"), range: 0...1, defaultValue: 0, format: pc, animRange: 0...0.5),
+                EffectParam(label: L("なめらかに"), range: 0...1, defaultValue: 0.3, format: pc, animRange: 0...1),
+            ]
+        case .stretch:
+            return [
+                EffectParam(label: L("向き"), range: 0...4, defaultValue: 0, choices: [L("右へ"), L("左へ"), L("下へ"), L("上へ"), L("両側へ")]),
+                EffectParam(label: L("位置"), range: 0...1, defaultValue: 0.5, format: pc, animRange: 0.2...0.8),
+                EffectParam(label: L("位置の揺れ"), range: 0...1, defaultValue: 0, format: pc, animRange: 0...0.5),
+                EffectParam(label: L("揺れの細かさ"), range: 1...60, defaultValue: 8, perPoint: 0.05, format: { String(format: "%.1f", $0) }, animRange: 3...20),
+                EffectParam(label: L("揺れの流れる速さ"), range: -4...4, defaultValue: 0.5, perPoint: 0.005,
+                            format: { String(format: "%+.2f", $0) }, animRange: -1...1),
+                EffectParam(label: L("なじませ"), range: 0...0.5, defaultValue: 0, format: pc, animRange: 0...0.2),
+                EffectParam(label: L("筋を足す"), range: 0...1, defaultValue: 0.3, format: pc, animRange: 0...0.8),
+            ]
+        case .displace:
+            return [
+                EffectParam(label: L("ずれ"), range: 0...300, defaultValue: 40, perPoint: 0.3, format: px, animRange: 0...120),
+                EffectParam(label: L("角度"), range: 0...360, defaultValue: 45, perPoint: 0.5, format: deg, animRange: 0...360),
+                EffectParam(label: L("何でずらす"), range: 0...2, defaultValue: 0, choices: [L("明るさ"), L("赤と緑"), L("輪郭")]),
+                EffectParam(label: L("ぼかしてから"), range: 0...1, defaultValue: 0.3, format: pc, animRange: 0...1),
+                EffectParam(label: L("真ん中の明るさ"), range: 0...1, defaultValue: 0.5, format: pc, animRange: 0.3...0.7),
+                EffectParam(label: L("色のずれ"), range: 0...1, defaultValue: 0.2, format: pc, animRange: 0...0.6),
+                EffectParam(label: L("端"), range: 0...2, defaultValue: 1, choices: [L("のばす"), L("折り返す"), L("透明")]),
+            ]
+        case .droste:
+            return [
+                EffectParam(label: L("縮む割合"), range: 0.3...0.95, defaultValue: 0.7, format: pc, animRange: 0.5...0.85),
+                EffectParam(label: L("数"), range: 1...12, defaultValue: 6, perPoint: 0.03, step: 1, format: { String(format: "%.0f", $0) }, animRange: 2...8),
+                EffectParam(label: L("回す"), range: -45...45, defaultValue: 0, perPoint: 0.2, format: deg, animRange: -15...15),
+                EffectParam(label: L("回る速さ"), range: -90...90, defaultValue: 0, perPoint: 0.3, format: degs, animRange: -20...20),
+                EffectParam(label: L("寄っていく速さ"), range: -2...2, defaultValue: 0.25, perPoint: 0.004,
+                            format: { String(format: L("%+.2f 段/秒"), $0) }, animRange: -0.6...0.6),
+                EffectParam(label: L("中心の左右"), range: 0...1, defaultValue: 0.5, format: pc, animRange: 0.3...0.7),
+                EffectParam(label: L("中心の上下"), range: 0...1, defaultValue: 0.5, format: pc, animRange: 0.3...0.7),
+                EffectParam(label: L("枠"), range: 0...0.1, defaultValue: 0.004, perPoint: 0.0003, format: pc, animRange: 0...0.02),
+                EffectParam(label: L("形"), range: 0...1, defaultValue: 0, choices: [L("四角"), L("丸")]),
+                EffectParam(label: L("外も埋める"), range: 0...1, defaultValue: 0, isToggle: true),
             ]
         // ===== ジェネレーター =====
         case .reactionDiffusion:
@@ -571,6 +658,12 @@ extension EffectKind {
         case .ledWall: L("絵を LED の粒の壁にする。近くで見ると粒、離れると絵に見える。丸い粒・RGB の縦 3 本・四角")
         case .slices: L("絵を帯に切って、帯ごとに横（か縦）へずらす。拍で動かすと気持ちいい")
         case .shake: L("絵全体を揺らす。手持ちカメラの揺れ・地震・ズームの脈。ゆれを 0 にすると止まる。ゆれを音や拍で動かすと、キックで画面が揺れる")
+        case .film: L("古いフィルムの質感。粒子・周辺を暗く・傷・ごみ・ちらつき・コマのゆれ・色あせ。全部 0 にすると元の絵のまま")
+        case .tiltShift: L("ピントの合う帯の外をぼかして、ミニチュア写真のようにする。彩度とコントラストを少し上げると、おもちゃっぽくなる")
+        case .emboss: L("明るさの傾きから、光が当たった浮き彫りにする。灰色・元の色に重ねる・金属。光の向きを回すと、光が回り込む")
+        case .stretch: L("ある線の所の画素を、そこから端まで引き伸ばす（スキャナーで動かしたような絵）。位置を揺らすと、のこぎりのようになる")
+        case .displace: L("自分の絵の明るさ（か色・輪郭）で、絵をずらす。明るい所が飛び出して見える。ぼかしてからにすると、なめらかにゆがむ")
+        case .droste: L("絵の中に、縮めた同じ絵が入れ子に続く（合わせ鏡）。寄っていく速さで、入れ子の中へ吸い込まれ続ける")
         case .reactionDiffusion: L("2 つの薬が広がりながら反応して、珊瑚や迷路、斑点、指紋のような模様がじわじわ育つ。流れに乗って模様がずっと渦を巻いて動き、変わり続けるで場所ごとに育ち方が少しずつ変わって、ときどき消えてまた育つ。枯れるを上げると、育ってから寿命ほどたった所が暗くなって枯れ、空いた所へまたまわりから育って入ってくる（生まれては死ぬ波）。音のアタックで大きく乱れ、低音で速く育ち、音の大きさで光る（まわりは透明）")
         case .laser: L("ステージのレーザーのような光の線。扇形に振れたり回ったり。もやで光の筋が見える（まわりは透明）")
         case .synthwave: L("80 年代風。光る格子の地面とワイヤーフレームの山を飛んでいく。夕日付き。色はパレット")
@@ -601,6 +694,7 @@ extension EffectKind {
         case .edgeNeon: return c(2) == 1
         case .ascii: return c(2) == 1
         case .keyer: return c(0) == 2
+        case .droste: return e.value(7) > 0.0001
         case .reactionDiffusion: return c(4) == 0
         case .laser: return c(8) == 0
         case .synthwave: return c(8) == 1
@@ -651,6 +745,7 @@ extension EffectKind {
         case .ripples: RGB(r: 0.35, g: 0.75, b: 1.0)
         case .edgeNeon: RGB(r: 1.0, g: 0.2, b: 0.8)
         case .keyer: RGB(r: 0, g: 1, b: 0)
+        case .droste: RGB(r: 1, g: 1, b: 1)
         case .growth: RGB(r: 0.3, g: 1.0, b: 0.8)
         case .metaballs: RGB(r: 1.0, g: 0.45, b: 0.2)
         case .reactionDiffusion: RGB(r: 0.95, g: 0.95, b: 1.0)

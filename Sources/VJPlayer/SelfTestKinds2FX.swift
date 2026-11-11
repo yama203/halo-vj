@@ -4,9 +4,12 @@ import Metal
 extension SelfTest {
     /// 追加のエフェクト（第 2 弾）：名前・分類・値がそろっていて、描ける。量 0 で元の絵のまま、値や時間で絵が変わる。1920×1080 での重さ
     static func testKinds2FX(check: (Bool, String) -> Void) {
-        let kinds: [EffectKind] = [.blur, .lens, .polar, .tile, .keyer, .ledWall, .slices, .shake]
+        let kinds: [EffectKind] = [.blur, .lens, .polar, .tile, .keyer, .ledWall, .slices, .shake,
+                                   .film, .tiltShift, .emboss, .stretch, .displace, .droste]
         let cats: [EffectKind: EffectCategory] = [.blur: .light, .lens: .shape, .polar: .shape, .tile: .shape, .keyer: .color,
-                                                 .ledWall: .glitch, .slices: .glitch, .shake: .shape]
+                                                 .ledWall: .glitch, .slices: .glitch, .shake: .shape,
+                                                 .film: .retro, .tiltShift: .light, .emboss: .light, .stretch: .glitch, .displace: .shape,
+                                                 .droste: .shape]
         var bad: [String] = []
         for k in kinds {
             let back = (try? JSONEncoder().encode(Effect(kind: k))).flatMap { try? JSONDecoder().decode(Effect.self, from: $0) }
@@ -17,7 +20,7 @@ extension SelfTest {
                 bad.append(k.rawValue)
             }
         }
-        check(bad.isEmpty, "追加のエフェクト（第 2 弾）：名前・印・分類・説明・動かす範囲がそろい、一覧に出て、保存して読み込める"
+        check(bad.isEmpty, "追加のエフェクト（第 2・3 弾）：名前・印・分類・説明・動かす範囲がそろい、一覧に出て、保存して読み込める"
               + (bad.isEmpty ? "" : "（だめ：\(bad.joined(separator: "、"))）"))
 
         let ctx = MetalContext.shared
@@ -74,17 +77,20 @@ extension SelfTest {
             for i in stride(from: 0, to: q.count, by: 4) where Int(q[i]) + Int(q[i + 1]) + Int(q[i + 2]) > 30 { lit += 1 }
             if lit < W * H / 4 || diff(q, orig).mean < 0.5 { dead.append("\(k.rawValue)（\(lit) 画素・差 \(String(format: "%.2f", diff(q, orig).mean))）") }
         }
-        check(dead.isEmpty, "追加のエフェクト（第 2 弾）：はじめの値で描けて、元の絵が変わる" + (dead.isEmpty ? "" : "（だめ：\(dead.joined(separator: "、"))）"))
+        check(dead.isEmpty, "追加のエフェクト（第 2・3 弾）：はじめの値で描けて、元の絵が変わる" + (dead.isEmpty ? "" : "（だめ：\(dead.joined(separator: "、"))）"))
 
         // 量 0 で元の絵そのまま
         let zero: [(EffectKind, [Int: Double])] = [(.blur, [0: 0]), (.lens, [1: 0]), (.tile, [0: 1, 1: 1]), (.keyer, [0: 0, 1: 0]),
-                                                   (.slices, [2: 0]), (.shake, [0: 0])]
+                                                   (.slices, [2: 0]), (.shake, [0: 0]),
+                                                   (.film, [0: 0, 2: 0, 4: 0, 5: 0, 6: 0, 7: 0, 8: 0]), (.tiltShift, [0: 0, 6: 1, 7: 1]),
+                                                   (.emboss, [0: 0, 4: 1]), (.stretch, [0: 0, 1: 1]), (.displace, [0: 0]),
+                                                   (.droste, [1: 1, 4: 0])]
         var notSame: [String] = []
         for (k, v) in zero {
             let d = diff(run(k, v), orig)
             if d.max > 1 { notSame.append("\(k.rawValue)（差 \(d.max)）") }
         }
-        check(notSame.isEmpty, "追加のエフェクト（第 2 弾）：量 0 で元の絵そのまま（ぼかし・レンズ・タイル・キー抜き・スライス・ゆれ）"
+        check(notSame.isEmpty, "追加のエフェクト（第 2・3 弾）：量 0 で元の絵そのまま（ぼかし・レンズ・タイル・キー抜き・スライス・ゆれ・フィルム・ミニチュア風・浮き彫り・引き伸ばし・明るさでずらす・入れ子）"
               + (notSame.isEmpty ? "" : "（だめ：\(notSame.joined(separator: "、"))）"))
 
         // 値を変えると絵が変わる（主な選択肢も）
@@ -97,16 +103,23 @@ extension SelfTest {
             (.ledWall, [1: 0], [1: 1]), (.ledWall, [0: 10], [0: 30]),
             (.slices, [3: 0], [3: 3]), (.slices, [0: 0], [0: 1]),
             (.shake, [2: 0], [2: 1]), (.shake, [0: 10], [0: 80]),
+            (.film, [0: 0], [0: 1]), (.film, [2: 0], [2: 1]),
+            (.tiltShift, [0: 5], [0: 60]), (.tiltShift, [5: 0], [5: 1]),
+            (.emboss, [4: 0], [4: 2]), (.emboss, [1: 0], [1: 180]),
+            (.stretch, [0: 0], [0: 4]), (.stretch, [1: 0.3], [1: 0.7]),
+            (.displace, [2: 0], [2: 2]), (.displace, [0: 20], [0: 150]),
+            (.droste, [8: 0], [8: 1]), (.droste, [0: 0.5], [0: 0.85]),
         ]
         var same: [String] = []
         for (k, a, b) in changes where diff(run(k, a), run(k, b)).mean < 0.3 { same.append("\(k.rawValue) \(a)→\(b)") }
-        check(same.isEmpty, "追加のエフェクト（第 2 弾）：値・種類を変えると絵が変わる" + (same.isEmpty ? "" : "（だめ：\(same.joined(separator: "、"))）"))
+        check(same.isEmpty, "追加のエフェクト（第 2・3 弾）：値・種類を変えると絵が変わる" + (same.isEmpty ? "" : "（だめ：\(same.joined(separator: "、"))）"))
 
         // 時間で動く（スライスの組み替え・ゆれ・極座標の回転・タイルの流れ）
         var still: [String] = []
-        for (k, v) in [(EffectKind.slices, [4: 4.0]), (.shake, [:]), (.polar, [2: 60.0]), (.tile, [5: 0.5])]
+        for (k, v) in [(EffectKind.slices, [4: 4.0]), (.shake, [:]), (.polar, [2: 60.0]), (.tile, [5: 0.5]),
+                       (.film, [:]), (.emboss, [2: 90.0]), (.droste, [:]), (.stretch, [2: 0.5])]
             where diff(run(k, v, now: 3), run(k, v, now: 3.37)).mean < 0.3 { still.append(k.rawValue) }
-        check(still.isEmpty, "追加のエフェクト（第 2 弾）：時間で動く（スライス・ゆれ・極座標・タイル）" + (still.isEmpty ? "" : "（だめ：\(still.joined(separator: "、"))）"))
+        check(still.isEmpty, "追加のエフェクト（第 2・3 弾）：時間で動く（スライス・ゆれ・極座標・タイル・フィルム・浮き彫り・入れ子・引き伸ばし）" + (still.isEmpty ? "" : "（だめ：\(still.joined(separator: "、"))）"))
 
         // キー抜き：暗い所を抜くと右下の暗い所が透明に。色で抜くと緑の四角が透明に。逆にすると反対
         do {
@@ -127,6 +140,9 @@ extension SelfTest {
             ("ぼかし", .blur, [:], 2), ("ぼかし 200px", .blur, [0: 200], 2), ("ぼかし 40px", .blur, [0: 40], 2),
             ("レンズ", .lens, [:], 1), ("極座標", .polar, [:], 1), ("タイル", .tile, [:], 1), ("キー抜き", .keyer, [:], 1),
             ("LED", .ledWall, [:], 1), ("LED RGB", .ledWall, [1: 1, 4: 1], 1), ("スライス", .slices, [:], 1), ("ゆれ", .shake, [5: 1], 1),
+            ("フィルム", .film, [:], 1), ("ミニチュア風", .tiltShift, [:], 1), ("ミニチュア風 80px", .tiltShift, [0: 80], 1),
+            ("浮き彫り", .emboss, [:], 1), ("引き伸ばし", .stretch, [:], 1), ("明るさでずらす", .displace, [:], 1),
+            ("明るさでずらす ぼかし最大", .displace, [3: 1], 1), ("入れ子", .droste, [:], 1),
         ]
         for (name, k, vals, limit) in cases {
             var e = Effect(kind: k)
@@ -143,7 +159,28 @@ extension SelfTest {
             // GPU の取り合いでぶれるので、目安の 2 倍まで
             if ms > limit * 2 { slow.append(name) }
         }
-        check(slow.isEmpty, "追加のエフェクト（第 2 弾）：1920×1080 で軽い（ms：\(times.joined(separator: "・"))）"
+        // 作業用の絵：大きさの違う 2 つの絵に、量の違うぼかし・ミニチュア風・タイルを交互にかけても、作り直さない
+        do {
+            let small = makeSource(640, 360)
+            var b1 = Effect(kind: .blur); b1.values[0] = 60
+            var b2 = Effect(kind: .blur); b2.values[0] = 3
+            var b3 = Effect(kind: .blur); b3.values[0] = 30; b3.values[1] = 1
+            let ts = Effect(kind: .tiltShift), tl = Effect(kind: .tile), ds = Effect(kind: .displace)
+            let stack = EffectStack(effects: [b1, b2, b3, ts, tl, ds])
+            let fa = EffectProcessor(), fb = EffectProcessor()
+            func frame(_ f: Int) {
+                let cb = ctx.queue.makeCommandBuffer()!
+                _ = fa.apply(stack, to: big, key: "cacheA", cb: cb, now: 3 + Double(f) / 60)
+                _ = fb.apply(stack, to: small, key: "cacheB", cb: cb, now: 3 + Double(f) / 60)
+                cb.commit(); cb.waitUntilCompleted()
+            }
+            for f in 0..<3 { frame(f) }
+            let before = MoreFX2Renderer.shared.texturesMade
+            for f in 3..<13 { frame(f) }
+            let made = MoreFX2Renderer.shared.texturesMade - before
+            check(made == 0, "追加のエフェクト：大きさの違う 2 つの絵に、量の違うぼかしなどを交互にかけても、作業用の絵を作り直さない（10 コマで \(made) 枚）")
+        }
+        check(slow.isEmpty, "追加のエフェクト（第 2・3 弾）：1920×1080 で軽い（ms：\(times.joined(separator: "・"))）"
               + (slow.isEmpty ? "" : "（重い：\(slow.joined(separator: "、"))）"))
     }
 }

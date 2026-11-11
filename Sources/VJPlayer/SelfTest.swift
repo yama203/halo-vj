@@ -1704,8 +1704,9 @@ enum SelfTest {
                     let ci = ((H / 2) * W + W / 2) * 4
                     let center = (Int(crt[ci]) + Int(crt[ci + 1]) + Int(crt[ci + 2])), orig = Int(src[ci]) + Int(src[ci + 1]) + Int(src[ci + 2])
                     check(corner < 10 && center > orig / 3, "CRT モニター：角は黒く（画面のふくらみ）、真ん中は元の絵が映る（\(orig)→\(center)）")
-                    check(EffectKind.allCases.filter { $0.category == .retro }.count == 5 && !EffectKind.crt.isGenerator,
-                          "アナログ機材：5 つが「アナログ機材」の分類に並ぶ")
+                    check(EffectKind.allCases.filter { $0.category == .retro }.count == 6 && EffectKind.film.category == .retro
+                          && !EffectKind.crt.isGenerator,
+                          "アナログ機材：5 つとフィルムが「アナログ機材」の分類に並ぶ")
                 }
                 // うねり（有機的な歪み）：格子の絵をゆがませる。強さ 0 ならそのまま、時間でゆらぐ（速さ 0 なら止まる）
                 do {
