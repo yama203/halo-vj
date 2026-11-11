@@ -31,7 +31,7 @@ struct VJScene: Codable, Identifiable {
     var clipSettings: [ClipSceneSettings?]?
 
     static let fadeChoices: [Double] = [0, 0.5, 1, 2, 4, 8]
-    static func fadeLabel(_ s: Double) -> String { s <= 0 ? "すぐ" : String(format: s < 1 ? "%.1f秒" : "%.0f秒", s) }
+    static func fadeLabel(_ s: Double) -> String { s <= 0 ? L("すぐ") : String(format: s < 1 ? L("%.1f秒") : L("%.0f秒"), s) }
 }
 
 /// シーンに記録する、クリップ 1 つの設定
@@ -82,8 +82,8 @@ extension Engine {
     @discardableResult
     func addScene() -> VJScene {
         var n = scenes.count + 1
-        while scenes.contains(where: { $0.name == "シーン \(n)" }) { n += 1 }
-        let s = captureScene(name: "シーン \(n)", fade: scenes.last?.fade ?? 1)
+        while scenes.contains(where: { $0.name == L("シーン \(n)") }) { n += 1 }
+        let s = captureScene(name: L("シーン \(n)"), fade: scenes.last?.fade ?? 1)
         scenes.append(s)
         activeSceneID = s.id
         return s
@@ -93,8 +93,8 @@ extension Engine {
     @discardableResult
     func addEmptyScene() -> VJScene {
         var n = scenes.count + 1
-        while scenes.contains(where: { $0.name == "シーン \(n)" }) { n += 1 }
-        let s = VJScene(name: "シーン \(n)", fade: scenes.last?.fade ?? 1,
+        while scenes.contains(where: { $0.name == L("シーン \(n)") }) { n += 1 }
+        let s = VJScene(name: L("シーン \(n)"), fade: scenes.last?.fade ?? 1,
                         playing: layers.map { _ in nil },
                         deck: decks[shownDeck].id,
                         playingIDs: layers.map { _ in nil },
@@ -384,44 +384,44 @@ struct ScenesPanel: View {
                 Button {
                     engine.addScene()
                 } label: {
-                    Label("今の状態をシーンに保存", systemImage: "plus.square.on.square")
+                    Label(L("今の状態をシーンに保存"), systemImage: "plus.square.on.square")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(.teal)
                 .controlSize(.large)
-                .help("再生中のクリップ・レイヤーとコンポジションの設定（不透明度・重ね方・位置・エフェクトなど）を丸ごと保存")
+                .help(L("再生中のクリップ・レイヤーとコンポジションの設定（不透明度・重ね方・位置・エフェクトなど）を丸ごと保存"))
                 Button {
                     engine.addEmptyScene()
                 } label: {
-                    Label("空のシーン", systemImage: "plus")
+                    Label(L("空のシーン"), systemImage: "plus")
                 }
                 .controlSize(.large)
-                .help("何も流さない空のシーンを足して、そのまま編集を始める（出力はそのまま）。グリッドでクリップを押して組み立てる")
+                .help(L("何も流さない空のシーンを足して、そのまま編集を始める（出力はそのまま）。グリッドでクリップを押して組み立てる"))
             }
             HStack(alignment: .center, spacing: 8) {
-                Text("絵で切り替え・名前の帯で編集・右クリックでほか")
+                Text(L("絵で切り替え・名前の帯で編集・右クリックでほか"))
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
-                    .help("絵をクリックで切り替え（フェード時間はシーンごと）。下の名前の帯をクリックで、出力はそのままグリッドで編集。右クリックで上書き・名前・フェード時間・デッキ・削除")
+                    .help(L("絵をクリックで切り替え（フェード時間はシーンごと）。下の名前の帯をクリックで、出力はそのままグリッドで編集。右クリックで上書き・名前・フェード時間・デッキ・削除"))
                 Spacer(minLength: 0)
                 Picker("", selection: $sceneColumns) {
-                    Text("大").tag(2)
-                    Text("中").tag(3)
-                    Text("小").tag(4)
-                    Text("最小").tag(6)
+                    Text(L("大")).tag(2)
+                    Text(L("中")).tag(3)
+                    Text(L("小")).tag(4)
+                    Text(L("最小")).tag(6)
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
                 .controlSize(.small)
                 .fixedSize()
-                .help("シーンの大きさ（1 行に並べる数）")
+                .help(L("シーンの大きさ（1 行に並べる数）"))
             }
             if engine.scenes.isEmpty {
                 VStack(spacing: 6) {
                     Image(systemName: "square.stack.3d.up").font(.system(size: 26)).foregroundStyle(.tertiary)
-                    Text("まだシーンがありません。\n良い組み合わせができたら「今の状態をシーンに保存」").multilineTextAlignment(.center)
+                    Text(L("まだシーンがありません。\n良い組み合わせができたら「今の状態をシーンに保存」")).multilineTextAlignment(.center)
                         .font(.system(size: 12)).foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -485,7 +485,7 @@ struct SceneTile: View {
             .onTapGesture { engine.recallScene(scene.id) }
             // キューの一覧へドラッグして足せる
             .onDrag { NSItemProvider(object: ("halovj-scene:" + scene.id.uuidString) as NSString) }
-            .help("クリックで「\(scene.name)」に切り替え（\(VJScene.fadeLabel(scene.fade))）")
+            .help(L("クリックで「\(scene.name)」に切り替え（\(VJScene.fadeLabel(scene.fade))）"))
             HStack(spacing: 4) {
                 if editing && size < 2 { Image(systemName: "slider.horizontal.3").font(.system(size: 10, weight: .bold)) }
                 Text(scene.name).font(.system(size: size >= 2 ? 10 : (size == 1 ? 11 : 12), weight: .semibold)).lineLimit(1)
@@ -508,20 +508,20 @@ struct SceneTile: View {
             .onTapGesture {
                 if editing { engine.closeSceneEditor() } else { engine.editScene(scene.id) }
             }
-            .help(editing ? "クリックで編集を終える"
-                  : "クリックで「\(scene.name)」を編集（出力はそのまま。グリッドでクリップを選び、プレビューで見ながら直せる）")
+            .help(editing ? L("クリックで編集を終える")
+                  : L("クリックで「\(scene.name)」を編集（出力はそのまま。グリッドでクリップを選び、プレビューで見ながら直せる）"))
         }
         .background(RoundedRectangle(cornerRadius: 6).fill(active ? Color.teal.opacity(0.25) : Color.white.opacity(hovering ? 0.10 : 0.05)))
         .clipShape(RoundedRectangle(cornerRadius: 6))
         .overlay(RoundedRectangle(cornerRadius: 6).stroke(active ? Color.teal : Color.gray.opacity(0.3), lineWidth: active ? 2 : 1))
         .onHover { hovering = $0 }
         .contextMenu {
-            Button("編集（出力はそのまま）") { engine.editScene(scene.id) }
-            Button("キューに足す") { engine.addCue(.scene(scene.id)) }
-            Button("今の状態で上書き") { engine.overwriteScene(scene.id) }
-            Button("名前を変える…") { rename() }
+            Button(L("編集（出力はそのまま）")) { engine.editScene(scene.id) }
+            Button(L("キューに足す")) { engine.addCue(.scene(scene.id)) }
+            Button(L("今の状態で上書き")) { engine.overwriteScene(scene.id) }
+            Button(L("名前を変える…")) { rename() }
             if engine.decks.count > 1 {
-                Menu("デッキ") {
+                Menu(L("デッキ")) {
                     ForEach(engine.decks) { d in
                         Button(((engine.deckIndex(scene.deck) ?? 0) == engine.deckIndex(d.id) ? "✓ " : "") + d.name) {
                             engine.updateScene(scene.id) { $0.deck = d.id; $0.layerDecks = nil }
@@ -530,24 +530,24 @@ struct SceneTile: View {
                     }
                 }
             }
-            Menu("フェード時間") {
+            Menu(L("フェード時間")) {
                 ForEach(VJScene.fadeChoices, id: \.self) { f in
                     Button((scene.fade == f ? "✓ " : "") + VJScene.fadeLabel(f)) { engine.updateScene(scene.id) { $0.fade = f } }
                 }
             }
             Divider()
-            Button("削除", role: .destructive) { engine.deleteScene(scene.id) }
+            Button(L("削除"), role: .destructive) { engine.deleteScene(scene.id) }
         }
     }
 
     private func rename() {
         let alert = NSAlert()
-        alert.messageText = "シーンの名前"
+        alert.messageText = L("シーンの名前")
         let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 240, height: 24))
         field.stringValue = scene.name
         alert.accessoryView = field
         alert.addButton(withTitle: "OK")
-        alert.addButton(withTitle: "キャンセル")
+        alert.addButton(withTitle: L("キャンセル"))
         alert.window.initialFirstResponder = field
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         let name = field.stringValue.trimmingCharacters(in: .whitespaces)

@@ -1223,26 +1223,26 @@ struct LogoSourcePicker: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
-                Text("形").font(.system(size: 12)).foregroundStyle(.secondary)
+                Text(L("形")).font(.system(size: 12)).foregroundStyle(.secondary)
                 if isImage {
                     Label(URL(fileURLWithPath: effect.text).lastPathComponent, systemImage: "photo")
                         .font(.system(size: 12)).lineLimit(1).truncationMode(.middle)
                     Spacer()
-                    Button("文字にする") { effect.text = "HALO" }
+                    Button(L("文字にする")) { effect.text = "HALO" }
                 } else {
-                    TextField("文字（例：HALO）", text: $effect.text).frame(maxWidth: 200)
+                    TextField(L("文字（例：HALO）"), text: $effect.text).frame(maxWidth: 200)
                     Spacer()
                 }
                 Button {
                     let panel = NSOpenPanel()
                     panel.allowedContentTypes = [.png, .jpeg, .tiff, .heic, .gif, .image]
-                    panel.message = "粒にする画像（透明付きの PNG がおすすめ）"
+                    panel.message = L("粒にする画像（透明付きの PNG がおすすめ）")
                     if panel.runModal() == .OK, let u = panel.url { effect.text = u.path }
                 } label: {
-                    Label("画像を選ぶ…", systemImage: "photo.badge.plus")
+                    Label(L("画像を選ぶ…"), systemImage: "photo.badge.plus")
                 }
             }
-            Text("透明付きの画像は、見えている所が粒になる。透明の無い画像は、明るい所が粒になる")
+            Text(L("透明付きの画像は、見えている所が粒になる。透明の無い画像は、明るい所が粒になる"))
                 .font(.system(size: 10)).foregroundStyle(.secondary)
         }
     }

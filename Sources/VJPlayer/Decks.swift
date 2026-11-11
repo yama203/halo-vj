@@ -13,7 +13,7 @@ struct DeckBar: View {
             Image(systemName: "square.grid.3x3")
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
-                .help("デッキ：グリッドを何枚も持てる。シーンは保存したときのデッキを覚えていて、呼び出すとそのデッキになる")
+                .help(L("デッキ：グリッドを何枚も持てる。シーンは保存したときのデッキを覚えていて、呼び出すとそのデッキになる"))
             ScrollView(.horizontal) {
                 HStack(spacing: 4) {
                     ForEach(Array(engine.decks.enumerated()), id: \.element.id) { d, deck in
@@ -26,20 +26,20 @@ struct DeckBar: View {
                     }
                     .controlSize(.small)
                     .padding(.leading, 2)
-                    .help("空のデッキを足す（今のデッキを複製するときはタブを右クリック）")
+                    .help(L("空のデッキを足す（今のデッキを複製するときはタブを右クリック）"))
                 }
             }
             .scrollIndicators(.never)
             Picker("", selection: $gridSizeRaw) {
-                Text("大").tag(0)
-                Text("中").tag(1)
-                Text("小").tag(2)
+                Text(L("大")).tag(0)
+                Text(L("中")).tag(1)
+                Text(L("小")).tag(2)
             }
             .pickerStyle(.segmented)
             .labelsHidden()
             .controlSize(.small)
             .fixedSize()
-            .help("グリッドの表示の大きさ（小さくすると、たくさんのクリップが見える）")
+            .help(L("グリッドの表示の大きさ（小さくすると、たくさんのクリップが見える）"))
         }
     }
 }
@@ -65,24 +65,24 @@ private struct DeckTab: View {
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
         .onTapGesture { engine.showDeck(index) }
-        .help(live ? "\(deck.name)（再生中のクリップあり）" : deck.name)
+        .help(live ? L("\(deck.name)（再生中のクリップあり）") : deck.name)
         .contextMenu {
-            Button("名前を変える…") {
-                if let n = askName(title: "デッキの名前", initial: deck.name) { engine.renameDeck(index, to: n) }
+            Button(L("名前を変える…")) {
+                if let n = askName(title: L("デッキの名前"), initial: deck.name) { engine.renameDeck(index, to: n) }
             }
-            Button("複製") { engine.addDeck(duplicating: index) }
+            Button(L("複製")) { engine.addDeck(duplicating: index) }
             Divider()
-            Button("削除…", role: .destructive) { remove() }
+            Button(L("削除…"), role: .destructive) { remove() }
                 .disabled(engine.decks.count <= 1)
         }
     }
 
     private func remove() {
         let users = engine.scenes.filter { $0.deck == deck.id }.map(\.name)
-        var msg = engine.deckHasClips(index) ? "このデッキのクリップはすべて外れます（再生中なら止まります）。" : ""
-        if !users.isEmpty { msg += "このデッキを使っているシーン（\(users.joined(separator: "、"))）は 1 枚目のデッキを使うようになります。" }
+        var msg = engine.deckHasClips(index) ? L("このデッキのクリップはすべて外れます（再生中なら止まります）。") : ""
+        if !users.isEmpty { msg += L("このデッキを使っているシーン（\(users.joined(separator: "、"))）は 1 枚目のデッキを使うようになります。") }
         if !msg.isEmpty {
-            guard confirmRemove(title: "「\(deck.name)」を削除しますか？", message: msg) else { return }
+            guard confirmRemove(title: L("「\(deck.name)」を削除しますか？"), message: msg) else { return }
         }
         engine.removeDeck(index)
     }
@@ -96,7 +96,7 @@ func askName(title: String, initial: String) -> String? {
     field.stringValue = initial
     alert.accessoryView = field
     alert.addButton(withTitle: "OK")
-    alert.addButton(withTitle: "キャンセル")
+    alert.addButton(withTitle: L("キャンセル"))
     alert.window.initialFirstResponder = field
     guard alert.runModal() == .alertFirstButtonReturn else { return nil }
     let name = field.stringValue.trimmingCharacters(in: .whitespaces)

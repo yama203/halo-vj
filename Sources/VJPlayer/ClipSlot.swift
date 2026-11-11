@@ -46,8 +46,8 @@ enum SyncMode: Int, CaseIterable, Codable, Identifiable {
     var id: Int { rawValue }
     var label: String {
         switch self {
-        case .free: "手動"
-        case .bpm: "BPM 同期"
+        case .free: L("手動")
+        case .bpm: L("BPM 同期")
         }
     }
 }
@@ -59,10 +59,10 @@ enum EndAction: Int, CaseIterable, Codable, Identifiable {
     var id: Int { rawValue }
     var label: String {
         switch self {
-        case .loop: "ループ"
-        case .pingpong: "往復"
-        case .hold: "最後で停止"
-        case .blackout: "ブラックアウト"
+        case .loop: L("ループ")
+        case .pingpong: L("往復")
+        case .hold: L("最後で停止")
+        case .blackout: L("ブラックアウト")
         }
     }
     var icon: String {
@@ -541,7 +541,7 @@ final class ClipSlot: ObservableObject, Identifiable, Animatable, EffectHolder {
     /// 元の名前（ファイル名・ジェネレーターの種類・エフェクト名）
     var autoName: String {
         if isEffectClip {
-            return effects.isEmpty ? "エフェクト（空）" : effects.map(\.kind.label).joined(separator: "＋")
+            return effects.isEmpty ? L("エフェクト（空）") : effects.map(\.kind.label).joined(separator: L("＋"))
         }
         if let g = generator, g.kind == .text {
             // テキストは最初の行を名前に
@@ -550,7 +550,7 @@ final class ClipSlot: ObservableObject, Identifiable, Animatable, EffectHolder {
         }
         if let g = generator, g.kind == .clock {
             let i = min(max(Int(g.value(12).rounded()), 0), ClockText.modes.count - 1)
-            return ClockText.modes[i].components(separatedBy: "（").first ?? g.kind.label
+            return ClockText.modes[i].components(separatedBy: CharacterSet(charactersIn: "（(")).first.map { $0.trimmingCharacters(in: .whitespaces) } ?? g.kind.label
         }
         return generator?.kind.label ?? url.deletingPathExtension().lastPathComponent
     }
@@ -621,7 +621,7 @@ final class ClipSlot: ObservableObject, Identifiable, Animatable, EffectHolder {
     private func loadImage() {
         guard FileManager.default.fileExists(atPath: url.path) else {
             isMissing = true
-            errorMessage = "見つかりません：" + url.lastPathComponent
+            errorMessage = L("見つかりません：") + url.lastPathComponent
             return
         }
         let u = url
@@ -646,8 +646,8 @@ final class ClipSlot: ObservableObject, Identifiable, Animatable, EffectHolder {
                 guard let self else { return }
                 guard let img, tex != nil else {
                     let ext = u.pathExtension.lowercased()
-                    self.errorMessage = "読み込めません：" + u.lastPathComponent
-                        + (ext == "ai" ? "（Illustrator で「PDF 互換ファイルを作成」にして保存したものが読めます）" : "")
+                    self.errorMessage = L("読み込めません：") + u.lastPathComponent
+                        + (ext == "ai" ? L("（Illustrator で「PDF 互換ファイルを作成」にして保存したものが読めます）") : "")
                     return
                 }
                 let now = CACurrentMediaTime()
@@ -750,14 +750,14 @@ final class ClipSlot: ObservableObject, Identifiable, Animatable, EffectHolder {
         guard FileManager.default.fileExists(atPath: url.path) else {
             await MainActor.run {
                 self.isMissing = true
-                self.errorMessage = "見つかりません：" + self.url.lastPathComponent
+                self.errorMessage = L("見つかりません：") + self.url.lastPathComponent
             }
             return
         }
         do {
             let d = try await asset.load(.duration).seconds
             guard let vt = try await asset.loadTracks(withMediaType: .video).first else {
-                throw NSError(domain: "VJPlayer", code: 2, userInfo: [NSLocalizedDescriptionKey: "映像トラックがありません"])
+                throw NSError(domain: "VJPlayer", code: 2, userInfo: [NSLocalizedDescriptionKey: L("映像トラックがありません")])
             }
             let fps = (try? await vt.load(.nominalFrameRate)) ?? 30
             let audioFile = try await AudioCache.file(for: asset, url: url)

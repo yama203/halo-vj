@@ -54,7 +54,7 @@ final class ValueDragNSView: NSView {
 
     override init(frame: NSRect) {
         super.init(frame: frame)
-        toolTip = "左右ドラッグで調整 / Shift で微調整 / ダブルクリック・右クリックで初期値"
+        toolTip = L("左右ドラッグで調整 / Shift で微調整 / ダブルクリック・右クリックで初期値")
     }
 
     required init?(coder: NSCoder) { fatalError() }
@@ -308,7 +308,7 @@ struct ValueDrag: NSViewRepresentable {
         v.badge = badge
         v.live = live
         v.toolTip = (icon != nil ? label + "\n" : "")
-            + (live != nil ? "アニメーション中（右のボタンで設定）" : "左右ドラッグで調整 / Shift で微調整 / ダブルクリック・右クリックで初期値")
+            + (live != nil ? L("アニメーション中（右のボタンで設定）") : L("左右ドラッグで調整 / Shift で微調整 / ダブルクリック・右クリックで初期値"))
         if v.value != value { v.value = value }
         v.needsDisplay = true
     }
@@ -430,9 +430,9 @@ struct ParameterPanel: View {
     private func tabPicker(short: Bool, clip: ClipSlot?) -> some View {
         let layerName = engine.layers[min(engine.selectedLayer, engine.layers.count - 1)].displayName
         return Picker("", selection: $engine.inspectorTab) {
-            Text(short ? "コンポ" : "コンポジション").tag(Engine.InspectorTab.composition)
-            Text(short ? layerName : "レイヤー \(layerName)").tag(Engine.InspectorTab.layer)
-            Text(clip.map { short ? "クリップ" : "クリップ：\($0.name)" } ?? "クリップ").tag(Engine.InspectorTab.clip)
+            Text(short ? L("コンポ") : L("コンポジション")).tag(Engine.InspectorTab.composition)
+            Text(short ? layerName : L("レイヤー \(layerName)")).tag(Engine.InspectorTab.layer)
+            Text(clip.map { short ? L("クリップ") : L("クリップ：\($0.name)") } ?? L("クリップ")).tag(Engine.InspectorTab.clip)
         }
         .pickerStyle(.segmented)
         .labelsHidden()
@@ -513,7 +513,7 @@ struct ParameterPanel: View {
                         ClipParams(slot: clip)
                             .id(clipIndex)
                     } else {
-                        Text("サムネイル下の名前の帯をクリックしてクリップを選びます。\n出力せずに、プレビューを見ながら調整できます。")
+                        Text(L("サムネイル下の名前の帯をクリックしてクリップを選びます。\n出力せずに、プレビューを見ながら調整できます。"))
                             .font(.system(size: 12))
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -554,15 +554,15 @@ struct ParameterPanel: View {
     private func previewCaption(clip: ClipSlot?, clipIndex: Int?) -> String {
         switch engine.inspectorTab {
         case .composition:
-            return engine.editingScene.map { "シーン「\($0.name)」（出力しない・音なし）" } ?? "コンポジション"
+            return engine.editingScene.map { L("シーン「\($0.name)」（出力しない・音なし）") } ?? L("コンポジション")
         case .layer:
-            let name = "レイヤー \(engine.layers[engine.selectedLayer].displayName)"
-            return engine.editingScene.map { "シーン「\($0.name)」の\(name)（出力しない）" } ?? name
+            let name = L("レイヤー \(engine.layers[engine.selectedLayer].displayName)")
+            return engine.editingScene.map { L("シーン「\($0.name)」の\(name)（出力しない）") } ?? name
         case .clip:
-            guard let clipIndex else { return "クリップ" }
+            guard let clipIndex else { return L("クリップ") }
             let live = engine.activeByLayer[engine.layerOf(clipIndex)] == clipIndex
-            if clip?.isEffectClip == true { return live ? "出力（このエフェクトがかかっている）" : "出力（このエフェクトはまだかかっていない）" }
-            return live ? "出力中" : "プレビュー（出力しない・音なし）"
+            if clip?.isEffectClip == true { return live ? L("出力（このエフェクトがかかっている）") : L("出力（このエフェクトはまだかかっていない）") }
+            return live ? L("出力中") : L("プレビュー（出力しない・音なし）")
         }
     }
 }
@@ -637,12 +637,12 @@ struct VisibilityButton: View {
                 .background(RoundedRectangle(cornerRadius: 5).fill(muted ? Color.red : Color.white.opacity(0.06)))
         }
         .buttonStyle(.plain)
-        .help(muted ? "\(what)のミュートを解除" : "\(what)をミュート（再生は続けたまま、映像と音を出さない）")
+        .help(muted ? L("\(what)のミュートを解除") : L("\(what)をミュート（再生は続けたまま、映像と音を出さない）"))
     }
 }
 
 struct ResetButton: View {
-    var label = "リセット"
+    var label = L("リセット")
     var disabled = false
     let action: () -> Void
     var body: some View {
@@ -670,13 +670,13 @@ struct TransformFields<T: TransformEditable>: View {
     @ObservedObject var t: T
 
     var body: some View {
-        AnimField(label: "位置 X", value: $t.posX, range: -2...2, perPoint: 0.002, defaultValue: 0,
+        AnimField(label: L("位置 X"), value: $t.posX, range: -2...2, perPoint: 0.002, defaultValue: 0,
                   format: { String(format: "%+.1f%%", $0 * 100) }, style: .position(horizontal: true), key: .posX, target: t)
-        AnimField(label: "位置 Y", value: $t.posY, range: -2...2, perPoint: 0.002, defaultValue: 0,
+        AnimField(label: L("位置 Y"), value: $t.posY, range: -2...2, perPoint: 0.002, defaultValue: 0,
                   format: { String(format: "%+.1f%%", $0 * 100) }, style: .position(horizontal: false), key: .posY, target: t)
-        AnimField(label: "スケール", value: $t.scale, range: 0...5, perPoint: 0.003, defaultValue: 1,
+        AnimField(label: L("スケール"), value: $t.scale, range: 0...5, perPoint: 0.003, defaultValue: 1,
                   format: { String(format: "%.1f%%", $0 * 100) }, style: .scale, key: .scale, target: t)
-        AnimField(label: "角度", value: $t.rotation, range: -720...720, perPoint: 0.25, defaultValue: 0,
+        AnimField(label: L("角度"), value: $t.rotation, range: -720...720, perPoint: 0.25, defaultValue: 0,
                   format: { String(format: "%.1f°", $0) }, style: .angle, key: .rotation, target: t)
     }
 }
@@ -690,26 +690,26 @@ struct CompositionParams: View {
         SideBySide {
         VStack(alignment: .leading, spacing: 0) {
         ParamColumns {
-            ParamColumn(title: "トランスフォーム") {
-                MiniButton(icon: "arrow.counterclockwise", label: "リセット",
+            ParamColumn(title: L("トランスフォーム")) {
+                MiniButton(icon: "arrow.counterclockwise", label: L("リセット"),
                            disabled: engine.compTransform.isDefault && engine.masterOpacity == 1,
-                           help: "位置・スケール・角度・不透明度を初期値に戻す") { engine.compTransform.reset(); engine.masterOpacity = 1 }
+                           help: L("位置・スケール・角度・不透明度を初期値に戻す")) { engine.compTransform.reset(); engine.masterOpacity = 1 }
             } content: {
                 TransformFields(t: engine.compTransform)
                 // 「映像を出さない」は動かし方のボタンの右に（開いた設定が欄の幅いっぱいに出るように）
-                AnimField(label: "不透明度", value: $engine.masterOpacity, range: 0...1, perPoint: 0.003,
+                AnimField(label: L("不透明度"), value: $engine.masterOpacity, range: 0...1, perPoint: 0.003,
                               defaultValue: 1, showsBar: true, format: percent, key: .opacity, target: engine,
-                          trailing: AnyView(VisibilityButton(muted: $engine.compMuted, what: "コンポジション（出力全体）")))
+                          trailing: AnyView(VisibilityButton(muted: $engine.compMuted, what: L("コンポジション（出力全体）"))))
             }
-            ParamColumn(title: "マスター") {
+            ParamColumn(title: L("マスター")) {
                 Group {
                     HStack(spacing: 4) {
-                        ValueDrag(label: "音量", value: $engine.masterVolume, range: 0...1, perPoint: 0.003,
+                        ValueDrag(label: L("音量"), value: $engine.masterVolume, range: 0...1, perPoint: 0.003,
                                   defaultValue: 1, showsBar: true, format: percent)
                             .opacity(engine.masterAudioMuted ? 0.45 : 1)
-                        SoundMuteButton(muted: $engine.masterAudioMuted, what: "マスター")
+                        SoundMuteButton(muted: $engine.masterAudioMuted, what: L("マスター"))
                     }
-                    ValueDrag(label: "速度", value: $engine.masterSpeed, range: ClipSlot.speedRange, perPoint: 0.001,
+                    ValueDrag(label: L("速度"), value: $engine.masterSpeed, range: ClipSlot.speedRange, perPoint: 0.001,
                               defaultValue: 1, format: { String(format: "%.3fx", $0) })
                 }
                 .frame(height: UI.rowHeight)
@@ -728,8 +728,8 @@ struct LayerStopMini: View {
     @ObservedObject var layer: Layer
     @EnvironmentObject var engine: Engine
     var body: some View {
-        MiniButton(icon: "stop.fill", label: "停止", disabled: engine.viewPlaying(layer.index) == nil,
-                   help: engine.sceneDraft != nil ? "このシーンではこのレイヤーに何も流さない" : "このレイヤーを停止") {
+        MiniButton(icon: "stop.fill", label: L("停止"), disabled: engine.viewPlaying(layer.index) == nil,
+                   help: engine.sceneDraft != nil ? L("このシーンではこのレイヤーに何も流さない") : L("このレイヤーを停止")) {
             engine.viewStop(layer.index)
         }
     }
@@ -742,50 +742,50 @@ struct LayerParams: View {
         SideBySide {
         VStack(alignment: .leading, spacing: 0) {
         ParamColumns {
-            ParamColumn(title: "トランスフォーム") {
-                MiniButton(icon: "arrow.counterclockwise", label: "リセット", disabled: layer.transform.isDefault && layer.opacity == 1,
-                           help: "位置・スケール・角度・不透明度を初期値に戻す") { layer.transform.reset(); layer.opacity = 1 }
+            ParamColumn(title: L("トランスフォーム")) {
+                MiniButton(icon: "arrow.counterclockwise", label: L("リセット"), disabled: layer.transform.isDefault && layer.opacity == 1,
+                           help: L("位置・スケール・角度・不透明度を初期値に戻す")) { layer.transform.reset(); layer.opacity = 1 }
             } content: {
                 TransformFields(t: layer.transform)
                 // 「映像を出さない」は動かし方のボタンの右に（開いた設定が欄の幅いっぱいに出るように）
-                AnimField(label: "不透明度", value: $layer.opacity, range: 0...1, perPoint: 0.003,
+                AnimField(label: L("不透明度"), value: $layer.opacity, range: 0...1, perPoint: 0.003,
                               defaultValue: 1, showsBar: true, format: percent, key: .opacity, target: layer,
-                          trailing: AnyView(VisibilityButton(muted: $layer.muted, what: "このレイヤー")))
+                          trailing: AnyView(VisibilityButton(muted: $layer.muted, what: L("このレイヤー"))))
             }
-            ParamColumn(title: "ミックス") {
+            ParamColumn(title: L("ミックス")) {
                 LayerStopMini(layer: layer)
             } content: {
                 Toggle(isOn: $layer.isAdjustment) {
-                    Label("調整レイヤー", systemImage: "camera.filters")
+                    Label(L("調整レイヤー"), systemImage: "camera.filters")
                 }
                 .toggleStyle(.switch)
                 .frame(height: UI.rowHeight)
-                .help("オン：このレイヤーのクリップは使わず、付けたエフェクトを下のレイヤー全体にかける。不透明度がかかり具合")
+                .help(L("オン：このレイヤーのクリップは使わず、付けたエフェクトを下のレイヤー全体にかける。不透明度がかかり具合"))
                 BlendChoice(blend: $layer.blend)
                 Group {
                     HStack(spacing: 4) {
-                        ValueDrag(label: "音量", value: $layer.volume, range: 0...1, perPoint: 0.003,
+                        ValueDrag(label: L("音量"), value: $layer.volume, range: 0...1, perPoint: 0.003,
                                   defaultValue: 1, showsBar: true, format: percent)
                             .opacity(layer.audioMuted ? 0.45 : 1)
-                        SoundMuteButton(muted: $layer.audioMuted, what: "このレイヤー")
+                        SoundMuteButton(muted: $layer.audioMuted, what: L("このレイヤー"))
                     }
-                    ValueDrag(label: "切り替えフェード", value: $layer.fadeTime, range: 0...10, perPoint: 0.01,
+                    ValueDrag(label: L("切り替えフェード"), value: $layer.fadeTime, range: 0...10, perPoint: 0.01,
                               defaultValue: 0, format: fadeSeconds)
-                        .help("このレイヤーでクリップを切り替えるときのクロスフェード時間（映像・音とも）。0 でカット")
+                        .help(L("このレイヤーでクリップを切り替えるときのクロスフェード時間（映像・音とも）。0 でカット"))
                 }
                 .frame(height: UI.rowHeight)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("切り替え方").font(.system(size: 11)).foregroundStyle(.secondary)
+                    Text(L("切り替え方")).font(.system(size: 11)).foregroundStyle(.secondary)
                     ChoiceButtons(selection: $layer.transition, items: Transition.allCases.map { ($0, $0.label) })
-                        .help(Transition.allCases.map { $0.label + "：" + $0.help }.joined(separator: "\n")
-                              + "\n（切り替えフェードの時間をかけて切り替わる。重ね方が「通常」のとき）")
+                        .help(Transition.allCases.map { $0.label + L("：") + $0.help }.joined(separator: "\n")
+                              + L("\n（切り替えフェードの時間をかけて切り替わる。重ね方が「通常」のとき）"))
                 }
                 .opacity(layer.fadeTime < 0.005 ? 0.5 : 1)
             }
         }
         if layer.blend.isSpecial {
             VStack(alignment: .leading, spacing: 8) {
-                SectionTitle("重ね方：" + layer.blend.label)
+                SectionTitle(L("重ね方：") + layer.blend.label)
                 EffectCard(effect: $layer.blendFX, isFirst: true, isLast: true, move: { _ in }, remove: {
                     layer.blend = .add
                 }, isBlendSettings: true)
@@ -803,7 +803,7 @@ struct LayerParams: View {
 
 /// フェード時間の表示（0 は「カット」）
 func fadeSeconds(_ v: Double) -> String {
-    v < 0.005 ? "カット" : String(format: "%.2f 秒", v)
+    v < 0.005 ? L("カット") : String(format: L("%.2f 秒"), v)
 }
 
 struct ClipParams: View {
@@ -823,24 +823,24 @@ struct ClipParams: View {
         ClipNameField(slot: slot)
             .padding(.bottom, 8)
         ParamColumns {
-            ParamColumn(title: "トランスフォーム") {
-                MiniButton(icon: "arrow.counterclockwise", label: "リセット", disabled: !slot.hasCustomTransform,
-                           help: "位置・スケール・角度・不透明度・音量を初期値に戻す（速度はそのまま）") { slot.resetTransform() }
+            ParamColumn(title: L("トランスフォーム")) {
+                MiniButton(icon: "arrow.counterclockwise", label: L("リセット"), disabled: !slot.hasCustomTransform,
+                           help: L("位置・スケール・角度・不透明度・音量を初期値に戻す（速度はそのまま）")) { slot.resetTransform() }
             } content: {
                 TransformFields(t: slot)
                 // 「映像を出さない」は動かし方のボタンの右に（開いた設定が欄の幅いっぱいに出るように）
-                AnimField(label: "不透明度", value: $slot.opacity, range: 0...1, perPoint: 0.003, defaultValue: 1,
+                AnimField(label: L("不透明度"), value: $slot.opacity, range: 0...1, perPoint: 0.003, defaultValue: 1,
                               showsBar: true, format: percent, key: .opacity, target: slot,
-                          trailing: AnyView(VisibilityButton(muted: $slot.muted, what: "このクリップ")))
+                          trailing: AnyView(VisibilityButton(muted: $slot.muted, what: L("このクリップ"))))
             }
             // 静止画・ジェネレーターには音も再生範囲も無いので出さない
             if !slot.isStill {
-                ParamColumn(title: "音・再生") {
+                ParamColumn(title: L("音・再生")) {
                     HStack(spacing: 4) {
-                        ValueDrag(label: "音量", value: $slot.clipVolume, range: 0...1, perPoint: 0.003,
+                        ValueDrag(label: L("音量"), value: $slot.clipVolume, range: 0...1, perPoint: 0.003,
                                   defaultValue: 1, showsBar: true, format: percent)
                             .opacity(slot.audioMuted ? 0.45 : 1)
-                        SoundMuteButton(muted: $slot.audioMuted, what: "このクリップ")
+                        SoundMuteButton(muted: $slot.audioMuted, what: L("このクリップ"))
                     }
                     .frame(height: UI.rowHeight)
                     ClipSpeedFields(slot: slot)
@@ -850,7 +850,7 @@ struct ClipParams: View {
         if slot.generator != nil {
             // ジェネレーター：再生範囲・速度の代わりに、絵の設定
             VStack(alignment: .leading, spacing: 6) {
-                SectionTitle("ジェネレーター：" + (slot.generator?.kind.label ?? ""),
+                SectionTitle(L("ジェネレーター：") + (slot.generator?.kind.label ?? ""),
                              icon: slot.generator?.kind.icon ?? "sparkles", tint: UI.generatorTint)
                 EffectCard(effect: Binding(get: { slot.generator ?? Effect(kind: .solid) }, set: { slot.generator = $0 }),
                            origin: slot.animOrigin, isFirst: true, isLast: true, move: { _ in }, remove: {},
@@ -862,16 +862,16 @@ struct ClipParams: View {
             // 静止画：再生範囲は無い。動く画像（GIF など）は速度だけ
             VStack(alignment: .leading, spacing: 8) {
                 Text((slot.isAnimatedImage
-                      ? String(format: "動く画像（%@・1 周 %.2f 秒）", slot.url.pathExtension.uppercased(), slot.animationDuration)
-                      : "静止画（\(slot.url.pathExtension.uppercased())）") + (slot.errorMessage.map { "\n" + $0 } ?? ""))
+                      ? String(format: L("動く画像（%@・1 周 %.2f 秒）"), slot.url.pathExtension.uppercased(), slot.animationDuration)
+                      : L("静止画（\(slot.url.pathExtension.uppercased())）")) + (slot.errorMessage.map { "\n" + $0 } ?? ""))
                     .font(.system(size: 12))
                     .foregroundStyle(slot.errorMessage == nil ? Color.secondary : Color.red)
                     .fixedSize(horizontal: false, vertical: true)
                 if slot.isAnimatedImage {
-                    ValueDrag(label: "速度", value: $slot.speed, range: ClipSlot.speedRange, perPoint: 0.005,
+                    ValueDrag(label: L("速度"), value: $slot.speed, range: ClipSlot.speedRange, perPoint: 0.005,
                               defaultValue: 1, format: { String(format: "%.2fx", $0) })
                         .frame(height: UI.rowHeight)
-                        .help("動く画像の速さ（コンポジション速度も掛かる）。ダブルクリックで 1.00x")
+                        .help(L("動く画像の速さ（コンポジション速度も掛かる）。ダブルクリックで 1.00x"))
                 }
             }
             .paramsFrame(alignment: .leading)
@@ -894,15 +894,15 @@ struct ClipNameField: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            Text("名前").font(.system(size: 12)).foregroundStyle(.secondary)
+            Text(L("名前")).font(.system(size: 12)).foregroundStyle(.secondary)
             TextField(slot.autoName, text: $slot.title)
                 .textFieldStyle(.roundedBorder)
-                .help("クリップの枠などに出る名前。空にすると元の名前（" + slot.autoName + "）")
+                .help(L("クリップの枠などに出る名前。空にすると元の名前（\(slot.autoName)）"))
             if !slot.title.isEmpty {
                 Button { slot.title = "" } label: { Image(systemName: "xmark.circle.fill") }
                     .buttonStyle(.plain)
                     .foregroundStyle(.secondary)
-                    .help("元の名前（" + slot.autoName + "）に戻す")
+                    .help(L("元の名前（\(slot.autoName)）に戻す"))
             }
         }
         .frame(maxWidth: 360, alignment: .leading)
@@ -912,7 +912,7 @@ struct ClipNameField: View {
 /// クリップの名前を変える（右クリックメニューから）
 enum ClipRename {
     static func ask(_ slot: ClipSlot) {
-        if let t = askText(title: "クリップの名前（空にすると元の名前「\(slot.autoName)」）", initial: slot.title) {
+        if let t = askText(title: L("クリップの名前（空にすると元の名前「\(slot.autoName)」）"), initial: slot.title) {
             slot.title = t
         }
     }
@@ -925,13 +925,13 @@ struct EffectClipParams: View {
     var body: some View {
         SideBySide {
             VStack(alignment: .leading, spacing: 10) {
-                SectionTitle("エフェクトのクリップ")
+                SectionTitle(L("エフェクトのクリップ"))
                 HStack(spacing: 6) {
-                    Text("名前").font(.system(size: 12)).foregroundStyle(.secondary)
+                    Text(L("名前")).font(.system(size: 12)).foregroundStyle(.secondary)
                     TextField(slot.autoName, text: $slot.title)
                         .textFieldStyle(.roundedBorder)
                 }
-                Text("押すと、右のエフェクトがこのレイヤーより下の絵全体にかかる（レイヤーの不透明度がかかり具合）。同じ段の別の枠を押すと切り替わり、空きの枠を押すと外れる。レイヤー自体に付けたエフェクトは、いつも一緒にかかる。")
+                Text(L("押すと、右のエフェクトがこのレイヤーより下の絵全体にかかる（レイヤーの不透明度がかかり具合）。同じ段の別の枠を押すと切り替わり、空きの枠を押すと外れる。レイヤー自体に付けたエフェクトは、いつも一緒にかかる。"))
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -950,29 +950,29 @@ struct ClipSpeedFields: View {
 
     var body: some View {
         Picker("", selection: $slot.syncMode) {
-            ForEach(SyncMode.allCases) { Text("速度：" + $0.label).tag($0) }
+            ForEach(SyncMode.allCases) { Text(L("速度：") + $0.label).tag($0) }
         }
         .pickerStyle(.segmented)
         .labelsHidden()
         .controlSize(.large)
-        .help("BPM 同期：再生範囲（イン点〜アウト点）を決めた拍数でちょうど 1 周する速さで再生。BPM を変えると付いていく（クリップ速度・コンポジション速度は効かない）")
+        .help(L("BPM 同期：再生範囲（イン点〜アウト点）を決めた拍数でちょうど 1 周する速さで再生。BPM を変えると付いていく（クリップ速度・コンポジション速度は効かない）"))
         if slot.syncMode == .free {
-            ValueDrag(label: "クリップ速度", value: $slot.speed, range: ClipSlot.speedRange, perPoint: 0.001,
+            ValueDrag(label: L("クリップ速度"), value: $slot.speed, range: ClipSlot.speedRange, perPoint: 0.001,
                       defaultValue: 1, format: { String(format: "%.3fx", $0) })
                 .frame(height: UI.rowHeight)
         } else {
             HStack(spacing: 6) {
                 ChoiceButtons(selection: $slot.syncBeats, items: ClipSlot.syncBeatChoices.map { ($0, beatShort($0)) },
                               fontSize: 11)
-                    .help("再生範囲を何拍で 1 周するか")
-                Text("拍で1周").font(.system(size: 11)).foregroundStyle(.secondary).fixedSize()
+                    .help(L("再生範囲を何拍で 1 周するか"))
+                Text(L("拍で1周")).font(.system(size: 11)).foregroundStyle(.secondary).fixedSize()
                 let raw = slot.bpmRate
                 let clipped = !ClipSlot.syncRateRange.contains(raw)
-                Text(String(format: "= %.3fx", slot.effectiveSpeed) + (clipped ? "（上限）" : ""))
+                Text(String(format: "= %.3fx", slot.effectiveSpeed) + (clipped ? L("（上限）") : ""))
                     .font(.system(size: 12, weight: .semibold).monospacedDigit())
                     .foregroundStyle(clipped ? Color.red : Color.purple)
                     .fixedSize()
-                    .help(clipped ? "この拍数だと速すぎる（遅すぎる）ので、端の速さで止めています" : "今の BPM での再生速度")
+                    .help(clipped ? L("この拍数だと速すぎる（遅すぎる）ので、端の速さで止めています") : L("今の BPM での再生速度"))
             }
             .frame(height: UI.rowHeight)
         }
@@ -986,10 +986,10 @@ struct PlayRangeSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                SectionTitle("再生範囲")
+                SectionTitle(L("再生範囲"))
                 Spacer()
                 if slot.hasInOut {
-                    Button("範囲をリセット") { slot.resetInOut() }
+                    Button(L("範囲をリセット")) { slot.resetInOut() }
                         .controlSize(.regular)
                 }
             }
@@ -1014,7 +1014,7 @@ struct PlayRangeSection: View {
                 }
             }
             .font(.system(size: 12).monospacedDigit())
-            Text(String(format: "長さ %.2f 秒（%.0f コマ）", max(slot.outTime - slot.inPoint, 0),
+            Text(String(format: L("長さ %.2f 秒（%.0f コマ）"), max(slot.outTime - slot.inPoint, 0),
                         (max(slot.outTime - slot.inPoint, 0) / slot.frameLength).rounded()))
                 .font(.system(size: 11).monospacedDigit())
                 .foregroundStyle(.secondary)
@@ -1033,47 +1033,47 @@ struct PlayRangeSection: View {
                     endPicker(iconOnly: true).frame(minWidth: 0, maxWidth: .infinity)
                 }
             }
-            .help("アウト点まで来たとき：ループ＝イン点から繰り返す／最後で停止＝最後のコマで止める／ブラックアウト＝このレイヤーを消す")
+            .help(L("アウト点まで来たとき：ループ＝イン点から繰り返す／最後で停止＝最後のコマで止める／ブラックアウト＝このレイヤーを消す"))
             Group {
                 if narrow {
                     // 細いときは見出しを上に、ボタンは 2 段
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("ジャンプ（拍ごと）").font(.system(size: 12)).foregroundStyle(.secondary)
+                        Text(L("ジャンプ（拍ごと）")).font(.system(size: 12)).foregroundStyle(.secondary)
                         ChoiceButtons(selection: $slot.jumpBeats, items: jumpItems, columns: 4)
                     }
                 } else {
                     HStack(spacing: 8) {
-                        Text("ジャンプ").font(.system(size: 12)).foregroundStyle(.secondary).fixedSize()
+                        Text(L("ジャンプ")).font(.system(size: 12)).foregroundStyle(.secondary).fixedSize()
                         ChoiceButtons(selection: $slot.jumpBeats, items: jumpItems)
-                        Text("拍ごと").font(.system(size: 12)).foregroundStyle(.secondary).fixedSize()
+                        Text(L("拍ごと")).font(.system(size: 12)).foregroundStyle(.secondary).fixedSize()
                     }
                 }
             }
-            .help("BPM の拍の頭で、再生範囲の中のランダムな位置へ飛ぶ（音も一緒に飛ぶ）。テンポは「ライブ」パネルの BPM / TAP で")
+            .help(L("BPM の拍の頭で、再生範囲の中のランダムな位置へ飛ぶ（音も一緒に飛ぶ）。テンポは「ライブ」パネルの BPM / TAP で"))
         }
         .paramsFrame(alignment: .leading)
     }
 
     @Environment(\.paramsWidth) private var w
     private var narrow: Bool { w < 420 }
-    private var jumpItems: [(Double, String)] { ClipSlot.jumpChoices.map { ($0, $0 == 0 ? "しない" : beatShort($0)) } }
+    private var jumpItems: [(Double, String)] { ClipSlot.jumpChoices.map { ($0, $0 == 0 ? L("しない") : beatShort($0)) } }
 
     private var inControls: some View {
         HStack(spacing: 6) {
-            timeLabel("イン", slot.inPoint, changed: slot.inPoint > 0)
-            FrameStepButtons(help: "イン点") { slot.stepIn($0) }
+            timeLabel(L("イン"), slot.inPoint, changed: slot.inPoint > 0)
+            FrameStepButtons(help: L("イン点")) { slot.stepIn($0) }
         }
     }
 
     private var outControls: some View {
         HStack(spacing: 6) {
-            timeLabel("アウト", slot.outTime, changed: slot.outPoint != nil)
-            FrameStepButtons(help: "アウト点") { slot.stepOut($0) }
+            timeLabel(L("アウト"), slot.outTime, changed: slot.outPoint != nil)
+            FrameStepButtons(help: L("アウト点")) { slot.stepOut($0) }
         }
     }
 
     private var endLabel: some View {
-        Text("終わったら").font(.system(size: 12)).foregroundStyle(.secondary).fixedSize()
+        Text(L("終わったら")).font(.system(size: 12)).foregroundStyle(.secondary).fixedSize()
     }
 
     private func endPicker(iconOnly: Bool) -> some View {
@@ -1129,7 +1129,7 @@ struct FrameStepButtons: View {
         }
         .buttonStyle(.bordered)
         .controlSize(.small)
-        .help(help + "を 1 コマ" + (dir < 0 ? "前" : "後ろ") + "へ（⇧を押しながらで 10 コマ）")
+        .help(dir < 0 ? L("\(help)を 1 コマ前へ（⇧を押しながらで 10 コマ）") : L("\(help)を 1 コマ後ろへ（⇧を押しながらで 10 コマ）"))
     }
 }
 
@@ -1148,7 +1148,7 @@ struct EdgeFrame: View {
                 Image(decorative: image, scale: 1).resizable().aspectRatio(contentMode: .fit)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            Text(isIn ? "最初のコマ" : "最後のコマ")
+            Text(isIn ? L("最初のコマ") : L("最後のコマ"))
                 .font(.system(size: 9, weight: .bold))
                 .padding(.horizontal, 4).padding(.vertical, 1)
                 .background(Color.black.opacity(0.65), in: RoundedRectangle(cornerRadius: 3))
@@ -1165,7 +1165,7 @@ struct EdgeFrame: View {
             let img = await slot.exactFrame(at: time)
             if !Task.isCancelled { image = img }
         }
-        .help(isIn ? "イン点のコマ（ここから再生）" : "アウト点の直前のコマ（ここまで映る）")
+        .help(isIn ? L("イン点のコマ（ここから再生）") : L("アウト点の直前のコマ（ここまで映る）"))
     }
 }
 
@@ -1257,7 +1257,7 @@ struct InOutBar: View {
         .simultaneousGesture(TapGesture(count: 2).onEnded {
             if isIn { slot.setInOut(in: 0) } else { slot.setInOut(out: .some(nil)) }
         })
-        .help(isIn ? "イン点（ドラッグで移動、ダブルクリックで先頭に戻す）" : "アウト点（ドラッグで移動、ダブルクリックで最後に戻す）")
+        .help(isIn ? L("イン点（ドラッグで移動、ダブルクリックで先頭に戻す）") : L("アウト点（ドラッグで移動、ダブルクリックで最後に戻す）"))
     }
 }
 
@@ -1277,7 +1277,7 @@ struct MuteButton: View {
             }
         }
         .controlSize(compact ? .small : .regular)
-        .help(muted ? "\(what)のミュートを解除" : "\(what)をミュート（再生は続けたまま、映像と音を出さない）")
+        .help(muted ? L("\(what)のミュートを解除") : L("\(what)をミュート（再生は続けたまま、映像と音を出さない）"))
     }
 
     private var button: some View {
@@ -1289,7 +1289,7 @@ struct MuteButton: View {
                     .font(.system(size: 11, weight: .semibold))
                     .frame(width: 18, height: 16)
             } else {
-                Label(muted ? "ミュート中" : "ミュート", systemImage: muted ? "eye.slash.fill" : "eye")
+                Label(muted ? L("ミュート中") : L("ミュート"), systemImage: muted ? "eye.slash.fill" : "eye")
             }
         }
     }
@@ -1310,14 +1310,14 @@ struct AudioMuteButton: View {
             }
         }
         .controlSize(.regular)
-        .help(muted ? "音のミュートを解除" : "出力の音だけを消す（映像はそのまま）")
+        .help(muted ? L("音のミュートを解除") : L("出力の音だけを消す（映像はそのまま）"))
     }
 
     private var button: some View {
         Button {
             muted.toggle()
         } label: {
-            Label(muted ? "音ミュート中" : "音ミュート", systemImage: muted ? "speaker.slash.fill" : "speaker.wave.2.fill")
+            Label(muted ? L("音ミュート中") : L("音ミュート"), systemImage: muted ? "speaker.slash.fill" : "speaker.wave.2.fill")
         }
     }
 }
@@ -1337,7 +1337,7 @@ struct SoundMuteButton: View {
                 .background(RoundedRectangle(cornerRadius: 5).fill(muted ? Color.red : Color.white.opacity(0.06)))
         }
         .buttonStyle(.plain)
-        .help(muted ? "\(what)の音のミュートを解除" : "\(what)の音だけを消す（映像はそのまま）")
+        .help(muted ? L("\(what)の音のミュートを解除") : L("\(what)の音だけを消す（映像はそのまま）"))
     }
 }
 
@@ -1425,6 +1425,6 @@ struct PreviewResizeHandle: View {
             hovering = h
             if h { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
         }
-        .help("ドラッグでプレビューの大きさを変える。ダブルクリックでおまかせ（エフェクトが横に並ぶ大きさ）に戻す")
+        .help(L("ドラッグでプレビューの大きさを変える。ダブルクリックでおまかせ（エフェクトが横に並ぶ大きさ）に戻す"))
     }
 }

@@ -268,10 +268,10 @@ struct SceneEditBanner: View {
         if let sc = engine.editingScene {
             HStack(spacing: 8) {
                 Image(systemName: "slider.horizontal.3").font(.system(size: 12, weight: .bold))
-                Text("シーン「\(sc.name)」を編集中")
+                Text(L("シーン「\(sc.name)」を編集中"))
                     .font(.system(size: 12, weight: .bold))
                     .lineLimit(1)
-                Text("出力はそのまま。クリップを押すとこのシーンに入る")
+                Text(L("出力はそのまま。クリップを押すとこのシーンに入る"))
                     .font(.system(size: 11))
                     .opacity(0.85)
                     .lineLimit(1)
@@ -279,19 +279,19 @@ struct SceneEditBanner: View {
                 Button {
                     engine.recordSceneClipSettings(sc.id)
                 } label: {
-                    Label("クリップの設定を記録", systemImage: "square.and.arrow.down")
+                    Label(L("クリップの設定を記録"), systemImage: "square.and.arrow.down")
                 }
-                .help("このシーンで流すクリップの、今のエフェクト・位置・大きさ・回転・不透明度を、このシーンの値として記録する")
+                .help(L("このシーンで流すクリップの、今のエフェクト・位置・大きさ・回転・不透明度を、このシーンの値として記録する"))
                 Button {
                     engine.recallScene(sc.id)
                 } label: {
-                    Label("出力に切り替え", systemImage: "play.fill")
+                    Label(L("出力に切り替え"), systemImage: "play.fill")
                 }
-                .help("このシーンを出力に出す（\(VJScene.fadeLabel(sc.fade))）")
+                .help(L("このシーンを出力に出す（\(VJScene.fadeLabel(sc.fade))）"))
                 Button {
                     engine.closeSceneEditor()
                 } label: {
-                    Label("編集を終える", systemImage: "xmark")
+                    Label(L("編集を終える"), systemImage: "xmark")
                 }
             }
             .buttonStyle(BannerButtonStyle())
@@ -325,13 +325,13 @@ struct SceneCompParams: View {
     var body: some View {
         SideBySide {
             ParamColumns {
-                ParamColumn(title: "トランスフォーム") {
-                    MiniButton(icon: "arrow.counterclockwise", label: "リセット",
+                ParamColumn(title: L("トランスフォーム")) {
+                    MiniButton(icon: "arrow.counterclockwise", label: L("リセット"),
                                disabled: draft.compTransform.isDefault && draft.masterOpacity == 1,
-                               help: "位置・スケール・角度・不透明度を初期値に戻す") { draft.compTransform.reset(); draft.masterOpacity = 1 }
+                               help: L("位置・スケール・角度・不透明度を初期値に戻す")) { draft.compTransform.reset(); draft.masterOpacity = 1 }
                 } content: {
                     TransformFields(t: draft.compTransform)
-                    AnimField(label: "不透明度", value: $draft.masterOpacity, range: 0...1, perPoint: 0.003,
+                    AnimField(label: L("不透明度"), value: $draft.masterOpacity, range: 0...1, perPoint: 0.003,
                               defaultValue: 1, showsBar: true, format: { String(format: "%.0f%%", $0 * 100) },
                               key: .opacity, target: draft)
                         .frame(minHeight: UI.rowHeight)

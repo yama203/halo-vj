@@ -12,16 +12,16 @@ struct DMXFixture: Codable, Identifiable, Equatable {
         var id: Int { rawValue }
         var label: String {
             switch self {
-            case .rgb: "RGB（1 点）"
-            case .rgbw: "RGBW（1 点）"
-            case .dimmer: "明るさだけ（1 点）"
-            case .line: "LED テープ（線・RGB）"
+            case .rgb: L("RGB（1 点）")
+            case .rgbw: L("RGBW（1 点）")
+            case .dimmer: L("明るさだけ（1 点）")
+            case .line: L("LED テープ（線・RGB）")
             }
         }
         var channelsPerPixel: Int { self == .rgbw ? 4 : (self == .dimmer ? 1 : 3) }
     }
     var id = UUID()
-    var name = "灯体"
+    var name = L("灯体")
     var kind = Kind.rgb
     /// ユニバース（0 から）
     var universe = 0
@@ -157,13 +157,13 @@ final class ArtNetOutput: ObservableObject {
             var one: Int32 = 1
             setsockopt(sock, SOL_SOCKET, SO_BROADCAST, &one, socklen_t(MemoryLayout<Int32>.size))
         }
-        guard on else { status = "オフ"; return }
+        guard on else { status = L("オフ"); return }
         let t = DispatchSource.makeTimerSource(queue: queue)
         t.schedule(deadline: .now(), repeating: 1.0 / 40)
         t.setEventHandler { [weak self] in self?.tick() }
         t.resume()
         lock.withLock { timer = t }
-        status = "送っています（\(host)）"
+        status = L("送っています（\(host)）")
     }
 
     private func tick() {
@@ -242,7 +242,7 @@ final class DMXWindow: NSObject, NSWindowDelegate {
         if let w = window { w.makeKeyAndOrderFront(nil); return }
         let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1000, height: 640),
                          styleMask: [.titled, .closable, .resizable, .miniaturizable], backing: .buffered, defer: false)
-        w.title = "照明（Art-Net / DMX）"
+        w.title = L("照明（Art-Net / DMX）")
         w.isReleasedWhenClosed = false
         w.delegate = self
         w.contentView = NSHostingView(rootView: DMXEditor().environmentObject(Engine.shared).preferredColorScheme(.dark))
@@ -262,23 +262,23 @@ struct DMXEditor: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 14) {
-                Toggle("Art-Net で送る", isOn: $out.enabled).toggleStyle(.switch)
-                Text("送り先").font(.system(size: 12))
+                Toggle(L("Art-Net で送る"), isOn: $out.enabled).toggleStyle(.switch)
+                Text(L("送り先")).font(.system(size: 12))
                 TextField("255.255.255.255", text: $out.host).frame(width: 150)
                 Text(out.status).font(.system(size: 11)).foregroundStyle(.secondary)
                 Spacer()
             }
             HStack(spacing: 10) {
-                ValueDrag(label: "明るさ", value: $engine.dmxMap.brightness, range: 0...1, perPoint: 0.003, defaultValue: 1,
+                ValueDrag(label: L("明るさ"), value: $engine.dmxMap.brightness, range: 0...1, perPoint: 0.003, defaultValue: 1,
                           format: EffectParam.percent).frame(width: 200, height: 26)
-                ValueDrag(label: "ガンマ", value: $engine.dmxMap.gamma, range: 1...3, perPoint: 0.003, defaultValue: 2.2,
+                ValueDrag(label: L("ガンマ"), value: $engine.dmxMap.gamma, range: 1...3, perPoint: 0.003, defaultValue: 2.2,
                           format: { String(format: "%.2f", $0) }).frame(width: 200, height: 26)
-                    .help("LED は暗い所が明るく見えがちなので、2.2 くらいで画面の見た目に近くなる")
+                    .help(L("LED は暗い所が明るく見えがちなので、2.2 くらいで画面の見た目に近くなる"))
             }
             HStack(alignment: .top, spacing: 12) {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
-                        Text("灯体").font(.system(size: 12, weight: .semibold))
+                        Text(L("灯体")).font(.system(size: 12, weight: .semibold))
                         Spacer()
                         Menu { ForEach(DMXFixture.Kind.allCases) { k in Button(k.label) { add(k) } } } label: { Image(systemName: "plus") }
                             .fixedSize()
@@ -301,7 +301,7 @@ struct DMXEditor: View {
                 }
                 .frame(width: 300)
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("取る所：点・線の端をドラッグ").font(.system(size: 11)).foregroundStyle(.secondary)
+                    Text(L("取る所：点・線の端をドラッグ")).font(.system(size: 11)).foregroundStyle(.secondary)
                     ZStack {
                         MetalPreview(kind: .composition)
                         DMXOverlay(map: $engine.dmxMap, selected: $selected)
@@ -320,7 +320,7 @@ struct DMXEditor: View {
     private func add(_ k: DMXFixture.Kind) {
         var f = DMXFixture()
         f.kind = k
-        f.name = k == .line ? "LED テープ \(engine.dmxMap.fixtures.count + 1)" : "灯体 \(engine.dmxMap.fixtures.count + 1)"
+        f.name = k == .line ? L("LED テープ \(engine.dmxMap.fixtures.count + 1)") : L("灯体 \(engine.dmxMap.fixtures.count + 1)")
         // 次の空いているチャンネルから
         let used = engine.dmxMap.fixtures.filter { $0.universe == 0 }.map { $0.channel + $0.channelCount - 1 }.max() ?? 0
         f.channel = min(used + 1, 512)
@@ -334,18 +334,18 @@ private struct DMXFixtureDetail: View {
     @Binding var f: DMXFixture
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            TextField("名前", text: $f.name)
-            Picker("種類", selection: $f.kind) { ForEach(DMXFixture.Kind.allCases) { Text($0.label).tag($0) } }
+            TextField(L("名前"), text: $f.name)
+            Picker(L("種類"), selection: $f.kind) { ForEach(DMXFixture.Kind.allCases) { Text($0.label).tag($0) } }
             HStack {
-                Stepper("ユニバース \(f.universe)", value: $f.universe, in: 0...32767)
+                Stepper(L("ユニバース \(f.universe)"), value: $f.universe, in: 0...32767)
             }
             HStack {
-                Stepper("先頭 ch \(f.channel)", value: $f.channel, in: 1...512)
+                Stepper(L("先頭 ch \(f.channel)"), value: $f.channel, in: 1...512)
             }
             if f.kind == .line {
-                Stepper("点の数 \(f.pixels)", value: $f.pixels, in: 1...680)
+                Stepper(L("点の数 \(f.pixels)"), value: $f.pixels, in: 1...680)
             }
-            Text("使うチャンネル：\(f.channelCount)（\(f.kind.channelsPerPixel) ch × \(f.kind == .line ? f.pixels : 1)）。512 を超えた分は次のユニバースへ")
+            Text(L("使うチャンネル：\(f.channelCount)（\(f.kind.channelsPerPixel) ch × \(f.kind == .line ? f.pixels : 1)）。512 を超えた分は次のユニバースへ"))
                 .font(.system(size: 10)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
         .font(.system(size: 12))

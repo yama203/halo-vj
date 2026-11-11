@@ -84,15 +84,15 @@ struct PolyMaskOverlay<H: ObservableObject & EffectHolder>: View {
                     .gesture(DragGesture(minimumDistance: 0, coordinateSpace: .named("polymask"))
                         .onChanged { v in update(i) { if $0.indices.contains(k) { $0[k] = fromView(v.location, size) } } })
                     .contextMenu {
-                        Button("この点を消す") { update(i) { if $0.count > 3 { $0.remove(at: k) } } }
+                        Button(L("この点を消す")) { update(i) { if $0.count > 3 { $0.remove(at: k) } } }
                             .disabled(pts.count <= 3)
                     }
-                    .help("ドラッグで移動・右クリックで消す")
+                    .help(L("ドラッグで移動・右クリックで消す"))
             }
             HStack(spacing: 6) {
-                Text("クリックで点を追加・点をドラッグ・中をドラッグで全体を移動・点を右クリックで削除")
+                Text(L("クリックで点を追加・点をドラッグ・中をドラッグで全体を移動・点を右クリックで削除"))
                     .font(.system(size: 10, weight: .semibold))
-                Button("完了") { ui.editingPoly = nil }
+                Button(L("完了")) { ui.editingPoly = nil }
                     .controlSize(.small)
             }
             .padding(.horizontal, 6).padding(.vertical, 3)
@@ -147,16 +147,16 @@ struct PolyMaskControls: View {
             Button {
                 ui.editingPoly = editing ? nil : effect.id
             } label: {
-                Label(editing ? "編集中（プレビューの上で）" : "形を編集", systemImage: "skew")
+                Label(editing ? L("編集中（プレビューの上で）") : L("形を編集"), systemImage: "skew")
                     .frame(minWidth: 150)
             }
             .buttonStyle(.borderedProminent)
             .tint(editing ? .cyan : Color(white: 0.35))
             .controlSize(.large)
-            .help("プレビューの上に点が出ます。クリックで点を追加、ドラッグで移動、右クリックで削除")
-            Text("点 \(effect.points.count) 個").font(.system(size: 12)).foregroundStyle(.secondary)
+            .help(L("プレビューの上に点が出ます。クリックで点を追加、ドラッグで移動、右クリックで削除"))
+            Text(L("点 \(effect.points.count) 個")).font(.system(size: 12)).foregroundStyle(.secondary)
             Spacer(minLength: 0)
-            Button("四角に戻す") { var e = effect; e.points = MaskPoint.defaultShape; effect = e }
+            Button(L("四角に戻す")) { var e = effect; e.points = MaskPoint.defaultShape; effect = e }
                 .controlSize(.regular)
         }
     }

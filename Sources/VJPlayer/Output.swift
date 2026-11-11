@@ -66,7 +66,7 @@ final class OutputController: NSObject, ObservableObject, NSWindowDelegate {
         case .window:
             let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 360),
                              styleMask: [.titled, .resizable, .closable, .miniaturizable], backing: .buffered, defer: false)
-            w.title = "出力 \(out + 1)"
+            w.title = L("出力 \(out + 1)")
             w.isReleasedWhenClosed = false
             w.contentView = MetalLayerView(frame: w.contentLayoutRect, kind: .output, output: out)
             w.center()
@@ -104,7 +104,7 @@ final class OutputController: NSObject, ObservableObject, NSWindowDelegate {
 
     static func label(of screen: NSScreen) -> String {
         let s = screen.frame.size
-        let main = screen == NSScreen.screens.first ? "（メイン）" : ""
+        let main = screen == NSScreen.screens.first ? L("（メイン）") : ""
         return "\(screen.localizedName) \(Int(s.width))×\(Int(s.height))\(main)"
     }
 
@@ -136,7 +136,7 @@ final class OutputController: NSObject, ObservableObject, NSWindowDelegate {
             let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 960, height: 540),
                              styleMask: [.titled, .resizable, .closable, .miniaturizable],
                              backing: .buffered, defer: false)
-            w.title = "出力"
+            w.title = L("出力")
             // 解像度を決めていればその縦横比、無ければ 16:9
             let a = engine.outputFormat.aspect ?? 16.0 / 9.0
             w.setContentSize(NSSize(width: 960, height: (960 / a).rounded()))

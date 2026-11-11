@@ -16,16 +16,16 @@ struct AutoRule: Codable, Identifiable, Equatable {
         var id: Int { rawValue }
         var label: String {
             switch self {
-            case .bars: "小節"
-            case .seconds: "秒"
-            case .minutes: "分"
+            case .bars: L("小節")
+            case .seconds: L("秒")
+            case .minutes: L("分")
             }
         }
     }
     enum Pick: Int, Codable, CaseIterable, Identifiable {
         case random, sequence
         var id: Int { rawValue }
-        var label: String { self == .random ? "ばらばら" : "順に" }
+        var label: String { self == .random ? L("ばらばら") : L("順に") }
     }
 
     var id = UUID()
@@ -46,14 +46,14 @@ struct AutoRule: Codable, Identifiable, Equatable {
 
     var title: String {
         switch target {
-        case .scenes: "シーン"
-        case .layer(let r): "L\(r + 1) のクリップ"
+        case .scenes: L("シーン")
+        case .layer(let r): L("L\(r + 1) のクリップ")
         }
     }
 
     var intervalText: String {
         let v = every == every.rounded() ? String(format: "%.0f", every) : String(format: "%.1f", every)
-        return v + " " + unit.label + "ごと"
+        return L("\(v) \(unit.label)ごと")
     }
 }
 
@@ -191,7 +191,7 @@ final class AutopilotRunner: ObservableObject {
                 s.left = s.pausedUntil - now
                 s.total = max(engine.autopilot.pauseAfterManual, 0.001)
                 states[rule.id] = s
-                if soonest == nil || s.left < soonest!.1 { soonest = (rule.id, s.left, rule.title + "（操作したので休み中）") }
+                if soonest == nil || s.left < soonest!.1 { soonest = (rule.id, s.left, rule.title + L("（操作したので休み中）")) }
                 continue
             }
             s.paused = false

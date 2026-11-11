@@ -8,22 +8,22 @@ enum Transition: Int, CaseIterable, Codable, Identifiable {
     var id: Int { rawValue }
     var label: String {
         switch self {
-        case .crossfade: "クロス"
-        case .wipe: "ワイプ"
-        case .circle: "円"
-        case .noise: "ノイズ"
-        case .luma: "明るさ"
-        case .glitch: "グリッチ"
+        case .crossfade: L("クロス")
+        case .wipe: L("ワイプ")
+        case .circle: L("円")
+        case .noise: L("ノイズ")
+        case .luma: L("明るさ")
+        case .glitch: L("グリッチ")
         }
     }
     var help: String {
         switch self {
-        case .crossfade: "だんだん重ねて入れ替わる"
-        case .wipe: "左から右へ、ふちをぼかして拭き取るように"
-        case .circle: "真ん中から円が広がって"
-        case .noise: "ノイズの模様で、ところどころから溶けるように"
-        case .luma: "新しいクリップの明るい所から順に現れる"
-        case .glitch: "ブロックが乱れながら、ばらばらに入れ替わる"
+        case .crossfade: L("だんだん重ねて入れ替わる")
+        case .wipe: L("左から右へ、ふちをぼかして拭き取るように")
+        case .circle: L("真ん中から円が広がって")
+        case .noise: L("ノイズの模様で、ところどころから溶けるように")
+        case .luma: L("新しいクリップの明るい所から順に現れる")
+        case .glitch: L("ブロックが乱れながら、ばらばらに入れ替わる")
         }
     }
 }
@@ -43,37 +43,37 @@ enum BlendMode: Int, CaseIterable, Codable, Identifiable {
 
     var label: String {
         switch self {
-        case .normal: "通常"
-        case .add: "加算"
-        case .screen: "スクリーン"
-        case .multiply: "乗算"
-        case .overdrive: "オーバードライブ加算"
-        case .maskLuma: "マスク（白で見せる）"
-        case .maskInvert: "マスク（白で隠す）"
-        case .difference: "差分"
-        case .overlay: "オーバーレイ"
-        case .softLight: "ソフトライト"
-        case .colorDodge: "覆い焼き"
-        case .hueOnly: "色相だけ"
-        case .lumOnly: "明るさだけ"
-        case .refract: "屈折"
-        case .light: "光で照らす"
-        case .flowInto: "流し込む"
-        case .interfere: "干渉"
-        case .borrowColor: "色を借りる"
-        case .dissolve: "溶け込む"
+        case .normal: L("通常")
+        case .add: L("加算")
+        case .screen: L("スクリーン")
+        case .multiply: L("乗算")
+        case .overdrive: L("オーバードライブ加算")
+        case .maskLuma: L("マスク（白で見せる）")
+        case .maskInvert: L("マスク（白で隠す）")
+        case .difference: L("差分")
+        case .overlay: L("オーバーレイ")
+        case .softLight: L("ソフトライト")
+        case .colorDodge: L("覆い焼き")
+        case .hueOnly: L("色相だけ")
+        case .lumOnly: L("明るさだけ")
+        case .refract: L("屈折")
+        case .light: L("光で照らす")
+        case .flowInto: L("流し込む")
+        case .interfere: L("干渉")
+        case .borrowColor: L("色を借りる")
+        case .dissolve: L("溶け込む")
         }
     }
 
     /// レイヤー欄のボタン用の短い名前
     var shortLabel: String {
         switch self {
-        case .overdrive: "OD加算"
-        case .maskLuma: "マスク"
-        case .maskInvert: "反転マスク"
-        case .softLight: "ソフト"
-        case .colorDodge: "覆い焼き"
-        case .light: "照らす"
+        case .overdrive: L("OD加算")
+        case .maskLuma: L("マスク")
+        case .maskInvert: L("反転マスク")
+        case .softLight: L("ソフト")
+        case .colorDodge: L("覆い焼き")
+        case .light: L("照らす")
         default: label
         }
     }

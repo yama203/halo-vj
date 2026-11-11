@@ -14,7 +14,7 @@ struct EffectBrowser: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                TextField(generators ? "ジェネレーターを探す" : "エフェクトを探す", text: $query)
+                TextField(generators ? L("ジェネレーターを探す") : L("エフェクトを探す"), text: $query)
                     .textFieldStyle(.plain)
                     .font(.system(size: 13))
                 if !query.isEmpty {
@@ -28,8 +28,8 @@ struct EffectBrowser: View {
             .background(RoundedRectangle(cornerRadius: 6).fill(Color.white.opacity(0.06)))
 
             Text(generators
-                 ? "動画の代わりに置く絵。クリップの枠へドラッグ、ダブルクリックで選択中のレイヤー（\(engine.layers[engine.selectedLayer].displayName)）の空いている所へ。空きの枠の右クリックからも置ける"
-                 : "付けたい所へドラッグ（クリップ・レイヤー欄・出力モニター・エフェクト欄）。ダブルクリックで今のタブ（\(targetName)）へ")
+                 ? L("動画の代わりに置く絵。クリップの枠へドラッグ、ダブルクリックで選択中のレイヤー（\(engine.layers[engine.selectedLayer].displayName)）の空いている所へ。空きの枠の右クリックからも置ける")
+                 : L("付けたい所へドラッグ（クリップ・レイヤー欄・出力モニター・エフェクト欄）。ダブルクリックで今のタブ（\(targetName)）へ"))
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

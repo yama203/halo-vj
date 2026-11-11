@@ -176,6 +176,17 @@ tools/convert_to_prores.sh clip1.mov clip2.mov          # ProRes 422
 PROFILE=1 tools/convert_to_prores.sh clip1.mov          # ProRes 422 LT（軽量）
 ```
 
+## 英語の表示
+
+英語の Mac では、画面の文言が英語で出る（訳のある所だけ。無い所は日本語のまま）。
+
+- 画面に出す文言は日本語のまま `L("…")` で包む（`Sources/VJPlayer/Localize.swift`）。`L("選んだ \(n) 個")` のように値を入れてもよい。
+- 訳は `Resources/en.lproj/Localizable.strings`（日本語 = 英語）。値の入る所は `%@`、順番を変えるときは `%1$@` `%2$@`。
+- 同じ日本語でも場所によって訳を変えたいときは `L("出す", note: "動詞")`。訳の見出しは `出す#動詞`（無ければふつうの `出す` の訳）。
+- `python3 tools/i18n_check.py` で、訳の抜け・使われていない訳・書式の食い違いが出る。`--stub` で抜けを訳の形で出す。
+- 英語で確かめる：`"build/Halo VJ.app/Contents/MacOS/HaloVJ" -AppleLanguages "(en)"`
+- フォルダ名・ファイルの中に書く文字（「素材」フォルダ、録画のフォルダ、MIDI のポート名など）は訳さない（包まない）。
+
 ## 構成
 
 - `ClipSlot.swift` … 1クリップの再生。自前の再生時計（速度を変えても位置が連続）で映像と音声を同じ時刻から動かす

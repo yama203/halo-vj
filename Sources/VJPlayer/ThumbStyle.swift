@@ -95,11 +95,11 @@ struct ThumbBadge: View {
         HStack(spacing: 3) {
             if style.hasAlpha {
                 Image(systemName: "checkerboard.rectangle")
-                    .help("透明な所がある素材（マウスを乗せると、市松模様の上で透明の範囲を見せる）")
+                    .help(L("透明な所がある素材（マウスを乗せると、市松模様の上で透明の範囲を見せる）"))
             }
             if style.zoomed != nil {
                 Image(systemName: "plus.magnifyingglass")
-                    .help("描かれた範囲が小さいので、そこに寄せて表示している（マウスを乗せると全体）")
+                    .help(L("描かれた範囲が小さいので、そこに寄せて表示している（マウスを乗せると全体）"))
             }
         }
         .font(.system(size: 9, weight: .bold))

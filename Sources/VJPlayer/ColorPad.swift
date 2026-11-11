@@ -47,7 +47,7 @@ struct ColorWell: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help("クリックで色を選ぶ（" + color.hex + "）")
+        .help(L("クリックで色を選ぶ（\(color.hex)）"))
         .popover(isPresented: $open, arrowEdge: .bottom) {
             ColorPad(color: $color)
                 .padding(12)
@@ -133,7 +133,7 @@ struct ColorPad: View {
             if bri < 0.05 { bri = 1 }
             push()
         })
-        .help("横で色相、縦で鮮やかさ（下ほど白に近い）")
+        .help(L("横で色相、縦で鮮やかさ（下ほど白に近い）"))
     }
 
     /// 明るさのバー（左が黒、右がいっぱい）
@@ -156,7 +156,7 @@ struct ColorPad: View {
             })
         }
         .frame(height: 22)
-        .help("明るさ（左ほど黒）")
+        .help(L("明るさ（左ほど黒）"))
     }
 
     private var current: RGB { .hsb(hue, sat, bri) }

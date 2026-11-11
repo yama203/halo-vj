@@ -10,17 +10,17 @@ enum DockPanel: String, Codable, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .grid: "グリッド"
-        case .monitor: "出力モニター"
-        case .pads: "FX パッド"
-        case .preview: "プレビュー"
-        case .params: "パラメーター"
-        case .live: "ライブ"
-        case .scenes: "シーン"
-        case .cues: "キュー"
-        case .effects: "エフェクト"
-        case .generators: "ジェネレーター"
-        case .sources: "ソース"
+        case .grid: L("グリッド")
+        case .monitor: L("出力モニター")
+        case .pads: L("FX パッド")
+        case .preview: L("プレビュー")
+        case .params: L("パラメーター")
+        case .live: L("ライブ")
+        case .scenes: L("シーン")
+        case .cues: L("キュー")
+        case .effects: L("エフェクト")
+        case .generators: L("ジェネレーター")
+        case .sources: L("ソース")
         }
     }
 
@@ -326,7 +326,7 @@ struct DockRootView: View {
                     // ドラッグ中は、画面の四辺にも置き場所（辺いっぱいに置く）
                     .overlay { if let p = drag.panel { DockEdgeOverlay(panel: p) } }
             } else {
-                Text("パネルはすべて別ウィンドウに出しています")
+                Text(L("パネルはすべて別ウィンドウに出しています"))
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
@@ -458,14 +458,14 @@ private struct DockTab: View {
         .contentShape(Rectangle())
         .onTapGesture(perform: select)
         .contextMenu {
-            Button("「\(panel.title)」を閉じる") { LayoutManager.shared.close(panel) }
+            Button(L("「\(panel.title)」を閉じる")) { LayoutManager.shared.close(panel) }
                 .disabled(!LayoutManager.shared.canClose(panel))
         }
         .onDrag {
             DockDragState.shared.begin(panel)
             return NSItemProvider(object: ("halovj-dock:" + panel.rawValue) as NSString)
         }
-        .help("「\(panel.title)」：タブをドラッグして、ほかの区画の真ん中（タブにする）か端（分けて置く）へ")
+        .help(L("「\(panel.title)」：タブをドラッグして、ほかの区画の真ん中（タブにする）か端（分けて置く）へ"))
     }
 }
 
@@ -487,7 +487,7 @@ private struct DockDropOverlay: View {
                         .frame(width: r.width, height: r.height)
                         .offset(x: r.minX, y: r.minY)
                         .overlay(alignment: .topLeading) {
-                            Text(zone == .center ? "タブにする" : "ここに分けて置く")
+                            Text(zone == .center ? L("タブにする") : L("ここに分けて置く"))
                                 .font(.system(size: 11, weight: .bold))
                                 .padding(.horizontal, 6).padding(.vertical, 2)
                                 .background(Color.accentColor, in: Capsule())
@@ -555,7 +555,7 @@ private struct DockBorderStrip: View {
             .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.orange.opacity(targeted ? 1 : 0.55),
                                                               style: StrokeStyle(lineWidth: 1.5, dash: targeted ? [] : [5, 3])))
             .overlay {
-                Text("ここに差し込む")
+                Text(L("ここに差し込む"))
                     .font(.system(size: 10, weight: .bold))
                     .foregroundStyle(.white)
                     .fixedSize()
@@ -617,10 +617,10 @@ private struct DockEdgeOverlay: View {
 
         var label: String {
             switch zone {
-            case .left: "左端いっぱい"
-            case .right: "右端いっぱい"
-            case .top: "上いっぱい"
-            case .bottom: "下いっぱい"
+            case .left: L("左端いっぱい")
+            case .right: L("右端いっぱい")
+            case .top: L("上いっぱい")
+            case .bottom: L("下いっぱい")
             case .center: ""
             }
         }

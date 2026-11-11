@@ -10,7 +10,7 @@ import Metal
 enum TextLook {
     static let defaultText = "HALO VJ"
 
-    static let motions = ["止める", "横に流れる", "縦に流れる", "敷き詰め", "1 文字ずつ", "拍で弾む"]
+    static let motions = [L("止める"), L("横に流れる"), L("縦に流れる"), L("敷き詰め"), L("1 文字ずつ"), L("拍で弾む")]
     /// 行の切り替えの間隔（拍。0 = 全部の行を一度に出す）
     static let switchBeats: [Double] = [0, 1, 2, 4, 8]
 
@@ -30,16 +30,16 @@ enum TextLook {
 
     /// フォント（日本語の無い書体でも、日本語はシステムが自動で別の書体に回す）
     static let fonts: [Font] = [
-        Font(label: "ゴシック 極太", make: named("HiraginoSans-W8", fallback: .black)),
-        Font(label: "ゴシック 細", make: named("HiraginoSans-W2", fallback: .light)),
-        Font(label: "明朝", make: named("HiraMinProN-W6")),
-        Font(label: "丸ゴシック", make: named("HiraMaruProN-W4")),
-        Font(label: "SF 極太", make: { NSFont.systemFont(ofSize: $0, weight: .black) as CTFont }),
-        Font(label: "コンデンス", make: named("HelveticaNeue-CondensedBlack", fallback: .heavy)),
+        Font(label: L("ゴシック 極太"), make: named("HiraginoSans-W8", fallback: .black)),
+        Font(label: L("ゴシック 細"), make: named("HiraginoSans-W2", fallback: .light)),
+        Font(label: L("明朝"), make: named("HiraMinProN-W6")),
+        Font(label: L("丸ゴシック"), make: named("HiraMaruProN-W4")),
+        Font(label: L("SF 極太"), make: { NSFont.systemFont(ofSize: $0, weight: .black) as CTFont }),
+        Font(label: L("コンデンス"), make: named("HelveticaNeue-CondensedBlack", fallback: .heavy)),
         Font(label: "Futura", make: named("Futura-Bold")),
         Font(label: "Didot", make: named("Didot-Bold")),
-        Font(label: "等幅", make: { NSFont.monospacedSystemFont(ofSize: $0, weight: .bold) as CTFont }),
-        Font(label: "筆記体", make: named("SnellRoundhand-Black")),
+        Font(label: L("等幅"), make: { NSFont.monospacedSystemFont(ofSize: $0, weight: .bold) as CTFont }),
+        Font(label: L("筆記体"), make: named("SnellRoundhand-Black")),
     ]
 
     static func font(_ i: Int, size: CGFloat) -> CTFont {
@@ -257,8 +257,8 @@ final class TextRasterCache {
 
 /// 時計の文字（今の時刻・カウントダウン・タイマー・ストップウォッチ）
 enum ClockText {
-    static let modes = ["今の時刻", "カウントダウン（時刻まで）", "タイマー", "ストップウォッチ"]
-    static let formats = ["自動", "時:分:秒", "時:分", "分:秒", "秒"]
+    static let modes = [L("今の時刻"), L("カウントダウン（時刻まで）"), L("タイマー"), L("ストップウォッチ")]
+    static let formats = [L("自動"), L("時:分:秒"), L("時:分"), L("分:秒"), L("秒")]
     static let defaultFinish = "HAPPY NEW YEAR"
 
     /// 文字と、弾み（最後の 10 秒で 1 秒ごとに大きく）

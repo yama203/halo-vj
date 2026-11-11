@@ -72,7 +72,7 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
         var id = UUID()
         var name: String
     }
-    @Published private(set) var decks: [Deck] = [Deck(name: "デッキ 1")]
+    @Published private(set) var decks: [Deck] = [Deck(name: L("デッキ 1"))]
     /// 上のグリッドに出しているデッキ
     @Published var currentDeck = 0 {
         didSet {
@@ -649,8 +649,8 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
     @discardableResult
     func addDeck(duplicating src: Int? = nil) -> Int {
         var n = decks.count + 1
-        while decks.contains(where: { $0.name == "デッキ \(n)" }) { n += 1 }
-        let name = src.flatMap { decks.indices.contains($0) ? decks[$0].name + " のコピー" : nil } ?? "デッキ \(n)"
+        while decks.contains(where: { $0.name == L("デッキ \(n)") }) { n += 1 }
+        let name = src.flatMap { decks.indices.contains($0) ? L("\(decks[$0].name) のコピー") : nil } ?? L("デッキ \(n)")
         restructure(layers: layers, columns: columns, layerMap: { $0 }, decks: decks + [Deck(name: name)])
         let d = decks.count - 1
         if let src, decks.indices.contains(src) {
@@ -935,9 +935,9 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
     /// 今開いているタブの名前（エフェクトを足す先の表示用）
     var currentTabName: String {
         switch inspectorTab {
-        case .composition: (sceneDraft != nil ? "シーンの" : "") + "コンポジション"
-        case .layer: (sceneDraft != nil ? "シーンの" : "") + "レイヤー " + layers[selectedLayer].displayName
-        case .clip: inspectedIndex.flatMap { slots[$0]?.name }.map { "クリップ " + $0 } ?? "クリップ（未選択）"
+        case .composition: sceneDraft != nil ? L("シーンのコンポジション") : L("コンポジション")
+        case .layer: sceneDraft != nil ? L("シーンのレイヤー \(layers[selectedLayer].displayName)") : L("レイヤー \(layers[selectedLayer].displayName)")
+        case .clip: inspectedIndex.flatMap { slots[$0]?.name }.map { L("クリップ \($0)") } ?? L("クリップ（未選択）")
         }
     }
 
@@ -1060,7 +1060,7 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.movie, .quickTimeMovie, .mpeg4Movie] + StillImage.openTypes
         panel.allowsMultipleSelection = true
-        panel.message = "クリップを選択（複数選ぶと右隣のスロットに順番に入ります。この段の右端まで）"
+        panel.message = L("クリップを選択（複数選ぶと右隣のスロットに順番に入ります。この段の右端まで）")
         if panel.runModal() == .OK {
             load(urls: panel.urls, startingAt: index)
         }
@@ -1886,7 +1886,7 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
             return Layer(index: r)
         }
         newLayers.forEach(wire)
-        let savedDecks = (state.decks?.isEmpty == false ? state.decks! : [SavedDeck(id: UUID(), name: "デッキ 1")])
+        let savedDecks = (state.decks?.isEmpty == false ? state.decks! : [SavedDeck(id: UUID(), name: L("デッキ 1"))])
             .map { Deck(id: $0.id, name: $0.name) }
         restructure(layers: newLayers, columns: savedColumns, layerMap: { _ in nil },
                     decks: savedDecks, deckMap: { _ in nil })

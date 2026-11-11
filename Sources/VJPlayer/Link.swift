@@ -231,17 +231,17 @@ struct SyphonSourcePicker: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Text("映像").font(.system(size: 12)).foregroundStyle(.secondary)
+            Text(L("映像")).font(.system(size: 12)).foregroundStyle(.secondary)
             Picker("", selection: $effect.text) {
-                Text("（選ぶ）").tag("")
+                Text(L("（選ぶ）")).tag("")
                 ForEach(sources) { s in Text(s.label).tag(s.id) }
                 if !effect.text.isEmpty && !sources.contains(where: { $0.id == effect.text }) {
-                    Text(effect.text.replacingOccurrences(of: "\n", with: " – ") + "（今は見つからない）").tag(effect.text)
+                    Text(effect.text.replacingOccurrences(of: "\n", with: " – ") + L("（今は見つからない）")).tag(effect.text)
                 }
             }
             .labelsHidden()
             Button { sources = SyphonSource.list() } label: { Image(systemName: "arrow.clockwise") }
-                .help("Syphon で公開されている映像の一覧を更新")
+                .help(L("Syphon で公開されている映像の一覧を更新"))
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name.SyphonServerAnnounce)) { _ in
             sources = SyphonSource.list()

@@ -58,7 +58,7 @@ final class AppUpdater: NSObject, ObservableObject, SPUStandardUserDriverDelegat
 struct UpdateMenuItems: View {
     @ObservedObject var updater = AppUpdater.shared
     var body: some View {
-        Button("アップデートを確認…") { updater.check() }
+        Button(L("アップデートを確認…")) { updater.check() }
             .disabled(!updater.canCheck)
     }
 }
@@ -69,10 +69,10 @@ struct UpdateBadge: View {
     var body: some View {
         if let v = updater.pendingVersion {
             Button { updater.check() } label: {
-                Label("新しい版 \(v)", systemImage: "arrow.down.circle.fill").font(.system(size: 11))
+                Label(L("新しい版 \(v)"), systemImage: "arrow.down.circle.fill").font(.system(size: 11))
             }
             .buttonStyle(.borderless).foregroundStyle(.green)
-            .help("Halo VJ の新しい版があります。押すと中身を見て、入れるか決められます（本番中は後で）")
+            .help(L("Halo VJ の新しい版があります。押すと中身を見て、入れるか決められます（本番中は後で）"))
         }
     }
 }
@@ -82,14 +82,14 @@ struct UpdateSettingsSection: View {
     @ObservedObject var updater = AppUpdater.shared
     var body: some View {
         let info = Bundle.main.infoDictionary
-        let ver = (info?["CFBundleShortVersionString"] as? String ?? "?") + "（\(info?["CFBundleVersion"] as? String ?? "?")）"
+        let ver = (info?["CFBundleShortVersionString"] as? String ?? "?") + L("（\(info?["CFBundleVersion"] as? String ?? "?")）")
         VStack(alignment: .leading, spacing: 6) {
-            Text("今の版：\(ver)").font(.system(size: 12))
+            Text(L("今の版：\(ver)")).font(.system(size: 12))
             if updater.isAvailable {
-                Toggle("新しい版を自動で確かめる（1 日 1 回）", isOn: $updater.automaticallyChecks)
-                Button("今すぐ確かめる") { updater.check() }.disabled(!updater.canCheck)
+                Toggle(L("新しい版を自動で確かめる（1 日 1 回）"), isOn: $updater.automaticallyChecks)
+                Button(L("今すぐ確かめる")) { updater.check() }.disabled(!updater.canCheck)
             } else {
-                Text("アップデートは .app から起動したときに使えます").font(.system(size: 11)).foregroundStyle(.secondary)
+                Text(L("アップデートは .app から起動したときに使えます")).font(.system(size: 11)).foregroundStyle(.secondary)
             }
         }
     }

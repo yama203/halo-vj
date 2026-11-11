@@ -80,7 +80,7 @@ final class SpeedControlNSView: NSView {
 
         let pct = (value - defaultValue) * 100
         let text = String(format: "%.3fx", value)
-        let sub = deviated ? String(format: "%+.2f%%", pct) : "通常速度"
+        let sub = deviated ? String(format: "%+.2f%%", pct) : L("通常速度")
         let main: [NSAttributedString.Key: Any] = [
             .font: NSFont.monospacedDigitSystemFont(ofSize: 22, weight: .semibold),
             .foregroundColor: deviated ? NSColor.systemOrange : NSColor.white,

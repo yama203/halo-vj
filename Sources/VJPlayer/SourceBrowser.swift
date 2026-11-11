@@ -55,7 +55,7 @@ final class SourceBrowser: ObservableObject {
         p.canChooseDirectories = true
         p.canChooseFiles = false
         p.allowsMultipleSelection = true
-        p.message = "素材の入っているフォルダを選ぶ（中のフォルダもたどれます）"
+        p.message = L("素材の入っているフォルダを選ぶ（中のフォルダもたどれます）")
         guard p.runModal() == .OK else { return }
         for u in p.urls where !roots.contains(where: { $0.path == u.path }) { roots.append(u) }
         saveRoots()
@@ -194,12 +194,12 @@ struct SourcePanel: View {
                         Button(r.lastPathComponent) { src.open(r) }
                     }
                     if !src.roots.isEmpty { Divider() }
-                    Button("フォルダを追加…") { src.addFolderWithPanel() }
+                    Button(L("フォルダを追加…")) { src.addFolderWithPanel() }
                     if let r = src.currentRoot {
-                        Button("「\(r.lastPathComponent)」を一覧から外す") { src.removeRoot(r) }
+                        Button(L("「\(r.lastPathComponent)」を一覧から外す")) { src.removeRoot(r) }
                     }
                 } label: {
-                    Label(src.currentRoot?.lastPathComponent ?? "フォルダを選ぶ", systemImage: "folder")
+                    Label(src.currentRoot?.lastPathComponent ?? L("フォルダを選ぶ"), systemImage: "folder")
                         .lineLimit(1)
                 }
                 .menuStyle(.borderlessButton)
@@ -212,26 +212,26 @@ struct SourcePanel: View {
                 }
                 .controlSize(.small)
                 .disabled(src.current == nil)
-                .help("読み直す")
+                .help(L("読み直す"))
                 Picker("", selection: $sourceColumns) {
-                    Text("大").tag(2)
-                    Text("中").tag(3)
-                    Text("小").tag(4)
+                    Text(L("大")).tag(2)
+                    Text(L("中")).tag(3)
+                    Text(L("小")).tag(4)
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
                 .controlSize(.small)
                 .fixedSize()
-                .help("サムネイルの大きさ")
+                .help(L("サムネイルの大きさ"))
             }
 
             if src.current == nil {
                 VStack(spacing: 8) {
                     Image(systemName: "folder.badge.plus").font(.system(size: 28)).foregroundStyle(.tertiary)
-                    Text("素材のフォルダを登録すると、中の動画・画像がここに並びます。\nグリッドへドラッグして置けます")
+                    Text(L("素材のフォルダを登録すると、中の動画・画像がここに並びます。\nグリッドへドラッグして置けます"))
                         .multilineTextAlignment(.center)
                         .font(.system(size: 12)).foregroundStyle(.secondary)
-                    Button("フォルダを追加…") { src.addFolderWithPanel() }
+                    Button(L("フォルダを追加…")) { src.addFolderWithPanel() }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
@@ -252,7 +252,7 @@ struct SourcePanel: View {
 
                 HStack(spacing: 6) {
                     Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                    TextField("名前で探す", text: $query)
+                    TextField(L("名前で探す"), text: $query)
                         .textFieldStyle(.plain)
                         .font(.system(size: 12))
                     if !query.isEmpty {
@@ -293,7 +293,7 @@ struct SourcePanel: View {
                             }
                         }
                         if movies.isEmpty && dirs.isEmpty && !src.loading {
-                            Text(query.isEmpty ? "このフォルダには動画・画像がありません" : "見つかりません")
+                            Text(query.isEmpty ? L("このフォルダには動画・画像がありません") : L("見つかりません"))
                                 .font(.system(size: 12)).foregroundStyle(.secondary)
                                 .frame(maxWidth: .infinity)
                                 .padding(.top, 20)
@@ -377,13 +377,13 @@ private struct SourceTile: View {
         }
         .onTapGesture(count: 2) { showPreview = true }
         .onDrag { NSItemProvider(object: url as NSURL) }
-        .help("\(url.lastPathComponent)\nグリッドの枠へドラッグして置く。左右になぞると中身を早送りで見られる。ダブルクリックでプレビュー（音なし）")
+        .help(L("\(url.lastPathComponent)\nグリッドの枠へドラッグして置く。左右になぞると中身を早送りで見られる。ダブルクリックでプレビュー（音なし）"))
         .popover(isPresented: $showPreview, arrowEdge: .leading) {
             SourcePreview(url: url)
         }
         .contextMenu {
-            Button("プレビュー（音なし）") { showPreview = true }
-            Button("Finder で表示") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
+            Button(L("プレビュー（音なし）")) { showPreview = true }
+            Button(L("Finder で表示")) { NSWorkspace.shared.activateFileViewerSelecting([url]) }
         }
     }
 
@@ -421,7 +421,7 @@ private struct SourcePreview: View {
             }
             .frame(width: 480, height: 270)
             .background(Color.black)
-            Text(url.lastPathComponent + (isImage ? "" : "（音なし）"))
+            Text(url.lastPathComponent + (isImage ? "" : L("（音なし）")))
                 .font(.system(size: 11)).foregroundStyle(.secondary)
                 .lineLimit(1)
         }

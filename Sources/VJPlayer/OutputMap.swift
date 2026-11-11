@@ -124,7 +124,7 @@ extension SliceMesh {
 
 struct OutputSlice: Codable, Identifiable, Equatable {
     var id = UUID()
-    var name = "スライス"
+    var name = L("スライス")
     var enabled = true
     /// 出す出力（0 = 出力 1）
     var output = 0
@@ -227,7 +227,7 @@ extension OutputSlice {
 /// マスク：出力の画面の上の多角形を黒く塗る（スライスを全部描いたあと）
 struct OutputMask: Codable, Identifiable, Equatable {
     var id = UUID()
-    var name = "マスク"
+    var name = L("マスク")
     var enabled = true
     /// 塗る出力（0 = 出力 1）
     var output = 0
@@ -278,7 +278,7 @@ struct OutputMap: Codable, Equatable {
         let w = 1 / (Double(n) - overlap * Double(n - 1))
         return (0..<n).map { i in
             var s = OutputSlice()
-            s.name = vertical ? "上から \(i + 1)" : "左から \(i + 1)"
+            s.name = vertical ? L("上から \(i + 1)") : L("左から \(i + 1)")
             let start = Double(i) * w * (1 - overlap)
             s.input = vertical ? [0, start, 1, w] : [start, 0, w, 1]
             // 映す所：別々の出力なら画面いっぱい、同じ出力なら並べて置く

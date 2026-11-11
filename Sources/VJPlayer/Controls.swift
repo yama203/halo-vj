@@ -22,9 +22,9 @@ struct ControlTrigger: Codable, Hashable {
 
     var label: String {
         switch kind {
-        case .note: "ノート \(number)（ch\(channel)）"
-        case .cc: "CC \(number)（ch\(channel)）"
-        case .key: "キー " + (keyLabel ?? "#\(number)")
+        case .note: L("ノート \(number)（ch\(channel)）")
+        case .cc: L("CC \(number)（ch\(channel)）")
+        case .key: L("キー ") + (keyLabel ?? "#\(number)")
         }
     }
     var short: String {
@@ -132,7 +132,7 @@ final class ControlHub: ObservableObject {
     func key(_ event: NSEvent, down: Bool) -> Bool {
         let code = Int(event.keyCode)
         let label = event.charactersIgnoringModifiers?.uppercased() ?? ""
-        let t = ControlTrigger(kind: .key, channel: 0, number: code, device: nil, keyLabel: label == " " ? "スペース" : label)
+        let t = ControlTrigger(kind: .key, channel: 0, number: code, device: nil, keyLabel: label == " " ? L("スペース") : label)
         if learning != nil {
             guard down else { return true }
             if code == 53 { cancelLearn(); return true }   // Esc でやめる
@@ -220,7 +220,7 @@ final class ControlHub: ObservableObject {
             OSCHub.shared.handle(OSCMessage(address: a, args: [.float(Float(v))]), runCommands: false)
         }
         DispatchQueue.main.async {
-            self.lastMIDI = "\(device)：" + t.label + String(format: " = %.0f", v * 127)
+            self.lastMIDI = L("\(device)：") + t.label + String(format: " = %.0f", v * 127)
             self.fire(t, value: v)
         }
     }
@@ -276,9 +276,9 @@ struct ControlLearnBanner: View {
         if let l = hub.learning {
             HStack(spacing: 10) {
                 Image(systemName: "pianokeys").font(.system(size: 14, weight: .semibold))
-                Text("「\(l.title)」に割り当て：コントローラーのボタンかキーを押す（Esc でやめる）")
+                Text(L("「\(l.title)」に割り当て：コントローラーのボタンかキーを押す（Esc でやめる）"))
                     .font(.system(size: 13, weight: .semibold))
-                Button("やめる") { hub.cancelLearn() }
+                Button(L("やめる")) { hub.cancelLearn() }
             }
             .foregroundStyle(.white)
             .padding(.horizontal, 14).padding(.vertical, 8)
@@ -297,9 +297,9 @@ struct ControlMenuItems: View {
     @ObservedObject private var hub = ControlHub.shared
     var body: some View {
         let bs = hub.bindings(for: address)
-        Button("MIDI・キーで\(verb)（覚える）…") { hub.learn(address, title: title) }
+        Button(L("MIDI・キーで\(verb)（覚える）…")) { hub.learn(address, title: title) }
         if !bs.isEmpty {
-            Button("割り当てを外す（" + bs.map(\.trigger.short).joined(separator: "・") + "）") { hub.removeAll(address: address) }
+            Button(L("割り当てを外す（\(bs.map(\.trigger.short).joined(separator: L("・")))）")) { hub.removeAll(address: address) }
         }
     }
 }
@@ -316,7 +316,7 @@ struct ControlBadge: View {
                 .foregroundStyle(.white)
                 .padding(.horizontal, 3).padding(.vertical, 1)
                 .background(Color.orange.opacity(0.85), in: RoundedRectangle(cornerRadius: 3))
-                .help("割り当て：" + bs.map(\.trigger.label).joined(separator: "・"))
+                .help(L("割り当て：") + bs.map(\.trigger.label).joined(separator: L("・")))
         }
     }
 }
@@ -325,21 +325,21 @@ struct ControlBadge: View {
 struct ControlSettings: View {
     @ObservedObject private var hub = ControlHub.shared
     private static let actions: [(String, String)] = [
-        ("/halo/cue/next", "キューを次へ"), ("/halo/cue/back", "キューを戻す"), ("/halo/blackout", "ブラックアウト"),
-        ("/halo/tap", "タップテンポ"), ("/halo/resync", "今を 1 拍目に"), ("/halo/stop", "全部止める"), ("/halo/record", "録画"),
+        ("/halo/cue/next", L("キューを次へ")), ("/halo/cue/back", L("キューを戻す")), ("/halo/blackout", L("ブラックアウト")),
+        ("/halo/tap", L("タップテンポ")), ("/halo/resync", L("今を 1 拍目に")), ("/halo/stop", L("全部止める")), ("/halo/record", L("録画")),
     ]
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(hub.devices.isEmpty ? "MIDI の機器：つながっていません" : "MIDI の機器：" + hub.devices.joined(separator: "・"))
+            Text(hub.devices.isEmpty ? L("MIDI の機器：つながっていません") : L("MIDI の機器：") + hub.devices.joined(separator: L("・")))
                 .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             if !hub.lastMIDI.isEmpty {
-                Text("届いた：" + hub.lastMIDI).font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary)
+                Text(L("届いた：") + hub.lastMIDI).font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary)
             }
-            Text("クリップ・パッドは右クリックの「MIDI・キーで…（覚える）」で割り当てる。つまみ・フェーダーは、値の波形ボタンで動かし方を「OSC・MIDI」にして「覚える」")
+            Text(L("クリップ・パッドは右クリックの「MIDI・キーで…（覚える）」で割り当てる。つまみ・フェーダーは、値の波形ボタンで動かし方を「OSC・MIDI」にして「覚える」"))
                 .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             HStack(spacing: 4) {
-                Text("割り当てる：").font(.system(size: 11))
-                Menu("操作を選ぶ") {
+                Text(L("割り当てる：")).font(.system(size: 11))
+                Menu(L("操作を選ぶ")) {
                     ForEach(Self.actions, id: \.0) { a, t in Button(t) { hub.learn(a, title: t) } }
                 }
                 .fixedSize()

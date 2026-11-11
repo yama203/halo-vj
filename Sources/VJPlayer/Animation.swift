@@ -26,11 +26,11 @@ enum AnimMode: Int, Codable, CaseIterable, Identifiable {
     var id: Int { rawValue }
     var label: String {
         switch self {
-        case .off: "固定"
-        case .time: "秒"
+        case .off: L("固定")
+        case .time: L("秒")
         case .beat: "BPM"
-        case .audio: "音"
-        case .osc: "OSC・MIDI"
+        case .audio: L("音")
+        case .osc: L("OSC・MIDI")
         }
     }
 }
@@ -41,10 +41,10 @@ enum AnimMotion: Int, Codable, CaseIterable, Identifiable {
     var id: Int { rawValue }
     var label: String {
         switch self {
-        case .forward: "→ 順"
-        case .backward: "← 逆"
-        case .pingpong: "↔ 往復"
-        case .random: "ランダム"
+        case .forward: L("→ 順")
+        case .backward: L("← 逆")
+        case .pingpong: L("↔ 往復")
+        case .random: L("ランダム")
         }
     }
 }
@@ -141,18 +141,18 @@ struct ParamAnim: Codable, Equatable {
     var summary: String {
         switch mode {
         case .off: return ""
-        case .time: return String(format: "%@ %.1f秒", motion.label, seconds)
+        case .time: return String(format: L("%@ %.1f秒"), motion.label, seconds)
         case .beat: return "\(motion.label) \(Self.beatsLabel(beats))"
-        case .audio: return "音：" + (audio ?? AudioLink()).band.label
+        case .audio: return L("音：") + (audio ?? AudioLink()).band.label
         case .osc: return "OSC " + (osc?.address ?? "")
         }
     }
 
     static func beatsLabel(_ b: Double) -> String {
         switch b {
-        case 0.25: "1/4拍"
-        case 0.5: "1/2拍"
-        default: b == b.rounded() ? "\(Int(b))拍" : String(format: "%.2f拍", b)
+        case 0.25: L("1/4拍")
+        case 0.5: L("1/2拍")
+        default: b == b.rounded() ? L("\(Int(b))拍") : String(format: L("%.2f拍"), b)
         }
     }
 }

@@ -116,26 +116,26 @@ struct CameraSourcePicker: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
-                Text("カメラ").font(.system(size: 12)).foregroundStyle(.secondary)
+                Text(L("カメラ")).font(.system(size: 12)).foregroundStyle(.secondary)
                 Picker("", selection: $effect.text) {
-                    Text("（選ぶ）").tag("")
+                    Text(L("（選ぶ）")).tag("")
                     ForEach(devices) { d in Text(d.name).tag(d.id) }
                     if !effect.text.isEmpty && !devices.contains(where: { $0.id == effect.text }) {
-                        Text("（今はつながっていない）").tag(effect.text)
+                        Text(L("（今はつながっていない）")).tag(effect.text)
                     }
                 }
                 .labelsHidden()
                 Button { devices = CameraDevice.list() } label: { Image(systemName: "arrow.clockwise") }
-                    .help("カメラ・キャプチャの一覧を更新")
+                    .help(L("カメラ・キャプチャの一覧を更新"))
             }
             switch cams.permission {
             case .notDetermined:
-                Button("カメラの使用を許可する…") { cams.requestAccess() }
+                Button(L("カメラの使用を許可する…")) { cams.requestAccess() }
             case .denied, .restricted:
                 HStack {
-                    Label("カメラの使用が許可されていません", systemImage: "exclamationmark.triangle.fill")
+                    Label(L("カメラの使用が許可されていません"), systemImage: "exclamationmark.triangle.fill")
                         .font(.system(size: 11)).foregroundStyle(.orange)
-                    Button("システム設定を開く") {
+                    Button(L("システム設定を開く")) {
                         if let u = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Camera") {
                             NSWorkspace.shared.open(u)
                         }

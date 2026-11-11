@@ -17,10 +17,10 @@ struct RecordSettings: Equatable {
         var id: String { rawValue }
         var label: String {
             switch self {
-            case .h264: "H.264（どこでも再生できる）"
-            case .hevc: "HEVC / H.265（ファイルが小さい）"
-            case .prores422: "ProRes 422（編集向け・大きい）"
-            case .prores422HQ: "ProRes 422 HQ（いちばんきれい・とても大きい）"
+            case .h264: L("H.264（どこでも再生できる）")
+            case .hevc: L("HEVC / H.265（ファイルが小さい）")
+            case .prores422: L("ProRes 422（編集向け・大きい）")
+            case .prores422HQ: L("ProRes 422 HQ（いちばんきれい・とても大きい）")
             }
         }
         var short: String {
@@ -49,11 +49,11 @@ struct RecordSettings: Equatable {
         var id: String { rawValue }
         var label: String {
             switch self {
-            case .output: "出力と同じ"
-            case .p720: "720p（高さ 720）"
-            case .p1080: "1080p（高さ 1080）"
-            case .p1440: "1440p（高さ 1440）"
-            case .p2160: "4K（高さ 2160）"
+            case .output: L("出力と同じ")
+            case .p720: L("720p（高さ 720）")
+            case .p1080: L("1080p（高さ 1080）")
+            case .p1440: L("1440p（高さ 1440）")
+            case .p2160: L("4K（高さ 2160）")
             }
         }
         var height: Int? {
@@ -187,7 +187,7 @@ final class Recorder: ObservableObject {
             url = fileURL
         } else {
             do { try FileManager.default.createDirectory(at: s.folderURL, withIntermediateDirectories: true) } catch {
-                lastError = "保存先のフォルダを作れません：\(s.folderURL.path)"
+                lastError = L("保存先のフォルダを作れません：\(s.folderURL.path)")
                 return false
             }
             let df = DateFormatter()
@@ -248,7 +248,7 @@ final class Recorder: ObservableObject {
             CVMetalTextureCacheCreate(nil, nil, ctx.device, nil, &sess.textureCache)
             lock.withLock { session = sess }
         } catch {
-            lastError = "録画を始められません：\(error.localizedDescription)"
+            lastError = L("録画を始められません：\(error.localizedDescription)")
             return false
         }
         if s.audio { installTap() }
@@ -288,7 +288,7 @@ final class Recorder: ObservableObject {
                     if ok {
                         self.lastFile = sess.url
                     } else {
-                        self.lastError = "録画を保存できませんでした" + (sess.writer.error.map { "：\($0.localizedDescription)" } ?? "")
+                        self.lastError = L("録画を保存できませんでした") + (sess.writer.error.map { L("：\($0.localizedDescription)") } ?? "")
                         if sess.frames == 0 { try? FileManager.default.removeItem(at: sess.url) }
                     }
                     done?(ok ? sess.url : nil)
@@ -399,14 +399,14 @@ struct RecordButton: View {
                     Image(systemName: rec.isRecording ? "stop.circle.fill" : "record.circle")
                         .foregroundStyle(rec.isRecording ? Color.red : Color.primary)
                         .opacity(rec.isRecording && blink ? 0.45 : 1)
-                    Text(rec.isRecording ? Self.timeText(rec.elapsed) : "録画")
+                    Text(rec.isRecording ? Self.timeText(rec.elapsed) : L("録画"))
                         .monospacedDigit()
                         .foregroundStyle(rec.isRecording ? Color.red : Color.primary)
                 }
             }
-            .help(rec.isRecording ? "録画を止めて保存する（⌘R）" : "コンポジションを録画する（⌘R）")
+            .help(rec.isRecording ? L("録画を止めて保存する（⌘R）") : L("コンポジションを録画する（⌘R）"))
             Button { open.toggle() } label: { Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold)) }
-                .help("録画の設定")
+                .help(L("録画の設定"))
                 .popover(isPresented: $open, arrowEdge: .bottom) {
                     RecordSettingsView().padding(16).frame(width: 400)
                 }
@@ -433,32 +433,32 @@ struct RecordSettingsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("コンポジションの録画").font(.headline)
-            Text("合成した絵（四隅の調整の前・パッドのエフェクト込み）と、クリップの音を録ります。録画中は設定を変えられません。")
+            Text(L("コンポジションの録画")).font(.headline)
+            Text(L("合成した絵（四隅の調整の前・パッドのエフェクト込み）と、クリップの音を録ります。録画中は設定を変えられません。"))
                 .font(.system(size: 11)).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             Form {
-                Picker("形式", selection: $rec.settings.codec) {
+                Picker(L("形式"), selection: $rec.settings.codec) {
                     ForEach(RecordSettings.Codec.allCases) { Text($0.label).tag($0) }
                 }
-                Picker("大きさ", selection: $rec.settings.size) {
+                Picker(L("大きさ"), selection: $rec.settings.size) {
                     ForEach(RecordSettings.Size.allCases) { Text($0.label).tag($0) }
                 }
-                Picker("フレームレート", selection: $rec.settings.fps) {
+                Picker(L("フレームレート"), selection: $rec.settings.fps) {
                     ForEach([24, 25, 30, 50, 60], id: \.self) { Text("\($0) fps").tag($0) }
                 }
-                Toggle("音も録る", isOn: $rec.settings.audio)
+                Toggle(L("音も録る"), isOn: $rec.settings.audio)
             }
             .disabled(rec.isRecording)
             let (w, h) = rec.settings.pixelSize(outputSize: engine.outputFormat.size, aspect: engine.outputAspect)
-            Text("録画の大きさ：\(w) × \(h)、\(rec.settings.fps) fps").font(.system(size: 11)).foregroundStyle(.secondary)
+            Text(L("録画の大きさ：\(w) × \(h)、\(rec.settings.fps) fps")).font(.system(size: 11)).foregroundStyle(.secondary)
             HStack {
-                Text("保存先").font(.system(size: 12))
+                Text(L("保存先")).font(.system(size: 12))
                 Text(rec.settings.folderURL.path.replacingOccurrences(of: NSHomeDirectory(), with: "~"))
                     .font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
                 Spacer()
-                Button("変える…") { chooseFolder() }.disabled(rec.isRecording)
-                Button("開く") {
+                Button(L("変える…")) { chooseFolder() }.disabled(rec.isRecording)
+                Button(L("開く")) {
                     try? FileManager.default.createDirectory(at: rec.settings.folderURL, withIntermediateDirectories: true)
                     NSWorkspace.shared.open(rec.settings.folderURL)
                 }
@@ -466,9 +466,9 @@ struct RecordSettingsView: View {
             if let f = rec.lastFile {
                 HStack {
                     Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
-                    Text("保存しました：\(f.lastPathComponent)").font(.system(size: 11)).lineLimit(1).truncationMode(.middle)
+                    Text(L("保存しました：\(f.lastPathComponent)")).font(.system(size: 11)).lineLimit(1).truncationMode(.middle)
                     Spacer()
-                    Button("Finder で表示") { NSWorkspace.shared.activateFileViewerSelecting([f]) }
+                    Button(L("Finder で表示")) { NSWorkspace.shared.activateFileViewerSelecting([f]) }
                 }
             }
             if let e = rec.lastError {
@@ -484,7 +484,7 @@ struct RecordSettingsView: View {
         p.canChooseDirectories = true
         p.canChooseFiles = false
         p.canCreateDirectories = true
-        p.prompt = "ここに保存"
+        p.prompt = L("ここに保存")
         p.directoryURL = rec.settings.folderURL
         if p.runModal() == .OK, let u = p.url { rec.settings.folder = u }
     }

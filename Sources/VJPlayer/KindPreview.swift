@@ -235,7 +235,7 @@ struct KindPreviewCard: View {
                 if KindPreview.isLive(kind) {
                     VStack(spacing: 6) {
                         Image(systemName: kind.icon).font(.system(size: 28)).foregroundStyle(.teal)
-                        Text("ほかのアプリ・機器の映像を取り込みます").font(.system(size: 11)).foregroundStyle(.secondary)
+                        Text(L("ほかのアプリ・機器の映像を取り込みます")).font(.system(size: 11)).foregroundStyle(.secondary)
                     }
                 } else if let img = model.kind == kind ? model.image : nil {
                     Image(decorative: img, scale: 1).resizable().interpolation(.high)
@@ -253,10 +253,10 @@ struct KindPreviewCard: View {
             Text(kind.help).font(.system(size: 11)).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             if kind == .audioScope {
-                Text("音が鳴っていると動きます").font(.system(size: 10)).foregroundStyle(.tertiary)
+                Text(L("音が鳴っていると動きます")).font(.system(size: 10)).foregroundStyle(.tertiary)
             }
             if !kind.isGenerator && !KindPreview.isLive(kind) {
-                Text("見本の絵にかけたところ（初めの値）").font(.system(size: 10)).foregroundStyle(.tertiary)
+                Text(L("見本の絵にかけたところ（初めの値）")).font(.system(size: 10)).foregroundStyle(.tertiary)
             }
         }
         .frame(width: width, alignment: .leading)

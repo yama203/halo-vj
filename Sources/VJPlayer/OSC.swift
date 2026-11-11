@@ -205,7 +205,7 @@ final class OSCHub: ObservableObject {
         guard receiveOn else { updateStatus(); return }
         guard let port = NWEndpoint.Port(rawValue: UInt16(clamping: receivePort)),
               let l = try? NWListener(using: .udp, on: port) else {
-            status = "ポート \(receivePort) で受け取れません"
+            status = L("ポート \(receivePort) で受け取れません")
             return
         }
         l.newConnectionHandler = { [weak self] c in
@@ -217,7 +217,7 @@ final class OSCHub: ObservableObject {
         l.stateUpdateHandler = { [weak self] st in
             DispatchQueue.main.async {
                 guard let self else { return }
-                if case .failed(let e) = st { self.status = "受信できません：\(e.localizedDescription)" } else { self.updateStatus() }
+                if case .failed(let e) = st { self.status = L("受信できません：\(e.localizedDescription)") } else { self.updateStatus() }
             }
         }
         l.start(queue: queue)
@@ -289,9 +289,9 @@ final class OSCHub: ObservableObject {
 
     private func updateStatus() {
         var s: [String] = []
-        if receiveOn { s.append("受信：ポート \(receivePort)") }
-        if sendOn { s.append("送信：\(sendHost):\(sendPort)") }
-        status = s.isEmpty ? "オフ" : s.joined(separator: "・")
+        if receiveOn { s.append(L("受信：ポート \(receivePort)")) }
+        if sendOn { s.append(L("送信：\(sendHost):\(sendPort)")) }
+        status = s.isEmpty ? L("オフ") : s.joined(separator: L("・"))
     }
 
     /// この Mac の IP アドレス（iPad の送り先に入れる）
@@ -317,23 +317,23 @@ final class OSCHub: ObservableObject {
 /// 決まったアドレス（/halo/...）で操作する。番号は 1 から（画面の表示と同じ）
 enum OSCCommands {
     static let help: [(String, String)] = [
-        ("/halo/layer/L/clip/C", "L 段目の C 列目のクリップを出す（値 0 は無視）"),
-        ("/halo/column/C", "C 列目を全部の段で出す"),
-        ("/halo/layer/L/stop", "L 段目を止める"),
-        ("/halo/layer/L/opacity 0〜1", "L 段目の不透明度"),
-        ("/halo/stop", "全部止める"),
-        ("/halo/master/opacity 0〜1", "マスター不透明度"),
-        ("/halo/master/volume 0〜1", "マスター音量"),
-        ("/halo/blackout [0/1]", "ブラックアウト（値なしで切り替え）"),
-        ("/halo/bpm 数", "BPM を決める"),
-        ("/halo/tap", "タップテンポ"),
-        ("/halo/resync", "今を 1 拍目に"),
-        ("/halo/pad/N 1/0", "N 番目のパッドを押す・離す"),
-        ("/halo/cue/next ・/halo/cue/back ・/halo/cue/N", "キューを次へ・戻る・N 番目へ"),
-        ("/halo/scene/N", "N 番目のシーンを呼ぶ"),
-        ("/halo/deck/N", "N 番目のデッキにする"),
-        ("/halo/record [0/1]", "録画を始める・止める"),
-        ("/halo/auto [0/1]", "自動操縦をオン・オフ（値なしで切り替え）"),
+        ("/halo/layer/L/clip/C", L("L 段目の C 列目のクリップを出す（値 0 は無視）")),
+        ("/halo/column/C", L("C 列目を全部の段で出す")),
+        ("/halo/layer/L/stop", L("L 段目を止める")),
+        ("/halo/layer/L/opacity 0〜1", L("L 段目の不透明度")),
+        ("/halo/stop", L("全部止める")),
+        ("/halo/master/opacity 0〜1", L("マスター不透明度")),
+        ("/halo/master/volume 0〜1", L("マスター音量")),
+        ("/halo/blackout [0/1]", L("ブラックアウト（値なしで切り替え）")),
+        (L("/halo/bpm 数"), L("BPM を決める")),
+        ("/halo/tap", L("タップテンポ")),
+        ("/halo/resync", L("今を 1 拍目に")),
+        ("/halo/pad/N 1/0", L("N 番目のパッドを押す・離す")),
+        (L("/halo/cue/next ・/halo/cue/back ・/halo/cue/N"), L("キューを次へ・戻る・N 番目へ")),
+        ("/halo/scene/N", L("N 番目のシーンを呼ぶ")),
+        ("/halo/deck/N", L("N 番目のデッキにする")),
+        ("/halo/record [0/1]", L("録画を始める・止める")),
+        ("/halo/auto [0/1]", L("自動操縦をオン・オフ（値なしで切り替え）")),
     ]
 
     /// メインスレッドで実行する
@@ -414,10 +414,10 @@ struct LinkButton: View {
             HStack(spacing: 6) {
                 Image(systemName: "point.3.connected.trianglepath.dotted")
                     .foregroundStyle(syphon.enabled || osc.receiveOn || osc.sendOn ? Color.green : Color.secondary)
-                Text("連携")
+                Text(L("連携"))
             }
         }
-        .help("TouchDesigner などとのやりとり：Syphon で映像を出す・OSC で操作する・拍や音の値を送る")
+        .help(L("TouchDesigner などとのやりとり：Syphon で映像を出す・OSC で操作する・拍や音の値を送る"))
         .popover(isPresented: $open, arrowEdge: .bottom) {
             LinkSettings().padding(16).frame(width: 460)
         }
@@ -431,38 +431,38 @@ struct LinkSettings: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("ほかのアプリとのやりとり").font(.headline)
-            GroupBox("映像（Syphon）") {
+            Text(L("ほかのアプリとのやりとり")).font(.headline)
+            GroupBox(L("映像（Syphon）")) {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
-                        Toggle("コンポジションを Syphon で出す", isOn: $syphon.enabled)
+                        Toggle(L("コンポジションを Syphon で出す"), isOn: $syphon.enabled)
                         Spacer()
                         if syphon.enabled {
-                            Label(syphon.hasClients ? "受け取られています" : "待っています",
+                            Label(syphon.hasClients ? L("受け取られています") : L("待っています"),
                                   systemImage: syphon.hasClients ? "dot.radiowaves.left.and.right" : "circle.dotted")
                                 .font(.system(size: 11)).foregroundStyle(syphon.hasClients ? .green : .secondary)
                         }
                     }
                     HStack {
-                        Text("名前").font(.system(size: 12))
+                        Text(L("名前")).font(.system(size: 12))
                         TextField("Halo VJ", text: $syphon.name).frame(width: 180)
                     }
-                    Text("TouchDesigner では Syphon Spout In TOP で受け取る。ほかのアプリの Syphon を受け取るには、ジェネレーター「Syphon から」を枠に置く")
+                    Text(L("TouchDesigner では Syphon Spout In TOP で受け取る。ほかのアプリの Syphon を受け取るには、ジェネレーター「Syphon から」を枠に置く"))
                         .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 }
                 .padding(4)
             }
             NDISettingsSection()
-            GroupBox("操作を受け取る（OSC 受信）") {
+            GroupBox(L("操作を受け取る（OSC 受信）")) {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
-                        Toggle("受け取る", isOn: $osc.receiveOn)
-                        Text("ポート").font(.system(size: 12))
+                        Toggle(L("受け取る"), isOn: $osc.receiveOn)
+                        Text(L("ポート")).font(.system(size: 12))
                         TextField("9000", value: $osc.receivePort, format: .number.grouping(.never)).frame(width: 70)
                     }
-                    Text("iPad（TouchOSC など）の送り先：" + (OSCHub.localAddresses().first ?? "この Mac の IP アドレス") + "、ポート \(osc.receivePort)")
+                    Text(L("iPad（TouchOSC など）の送り先：\(OSCHub.localAddresses().first ?? L("この Mac の IP アドレス"))、ポート \(osc.receivePort)"))
                         .font(.system(size: 11)).foregroundStyle(.secondary).textSelection(.enabled)
-                    Text("どの値も、波形ボタンで動かし方を「OSC」にして「覚える」を押し、iPad のフェーダーを動かすと、そのフェーダーで動く")
+                    Text(L("どの値も、波形ボタンで動かし方を「OSC」にして「覚える」を押し、iPad のフェーダーを動かすと、そのフェーダーで動く"))
                         .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                     if !osc.recent.isEmpty {
                         VStack(alignment: .leading, spacing: 1) {
@@ -473,7 +473,7 @@ struct LinkSettings: View {
                         .padding(4).frame(maxWidth: .infinity, alignment: .leading)
                         .background(Color.black.opacity(0.25), in: RoundedRectangle(cornerRadius: 4))
                     }
-                    DisclosureGroup("決まったアドレス", isExpanded: $showHelp) {
+                    DisclosureGroup(L("決まったアドレス"), isExpanded: $showHelp) {
                         VStack(alignment: .leading, spacing: 2) {
                             ForEach(OSCCommands.help, id: \.0) { a, h in
                                 HStack(alignment: .top) {
@@ -487,18 +487,18 @@ struct LinkSettings: View {
                 }
                 .padding(4)
             }
-            GroupBox("MIDI コントローラー・キー") {
+            GroupBox(L("MIDI コントローラー・キー")) {
                 ControlSettings().padding(4)
             }
-            GroupBox("拍・音の値を送る（OSC 送信）") {
+            GroupBox(L("拍・音の値を送る（OSC 送信）")) {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
-                        Toggle("送る", isOn: $osc.sendOn)
-                        Text("送り先").font(.system(size: 12))
+                        Toggle(L("送る"), isOn: $osc.sendOn)
+                        Text(L("送り先")).font(.system(size: 12))
                         TextField("127.0.0.1", text: $osc.sendHost).frame(width: 120)
                         TextField("7000", value: $osc.sendPort, format: .number.grouping(.never)).frame(width: 64)
                     }
-                    Text("1 秒に 30 回：/halo/bpm・/halo/beat（拍の数）・/halo/beat/phase・/halo/bar/phase（0〜1）・/halo/audio/level・low・mid・high・attack。クリップを出したとき：/halo/layer/L/clip（名前）。TouchDesigner では OSC In CHOP（ポートを合わせる）")
+                    Text(L("1 秒に 30 回：/halo/bpm・/halo/beat（拍の数）・/halo/beat/phase・/halo/bar/phase（0〜1）・/halo/audio/level・low・mid・high・attack。クリップを出したとき：/halo/layer/L/clip（名前）。TouchDesigner では OSC In CHOP（ポートを合わせる）"))
                         .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 }
                 .padding(4)
@@ -524,8 +524,8 @@ struct OSCAnimControls: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
-                TextField("/1/fader1・/midi/1/cc/7", text: address).font(.system(size: 12, design: .monospaced))
-                Button(waiting ? "待っています…" : "覚える") {
+                TextField(L("/1/fader1・/midi/1/cc/7"), text: address).font(.system(size: 12, design: .monospaced))
+                Button(waiting ? L("待っています…") : L("覚える")) {
                     if waiting {
                         osc.cancelLearn(); waiting = false
                     } else {
@@ -533,8 +533,8 @@ struct OSCAnimControls: View {
                         osc.learn { a in anim.osc = OSCLink(address: a); waiting = false }
                     }
                 }
-                .help("押してから iPad や MIDI コントローラーのフェーダー・つまみを動かすと、それを覚える")
-                Toggle("逆", isOn: reverse).toggleStyle(.button).controlSize(.small)
+                .help(L("押してから iPad や MIDI コントローラーのフェーダー・つまみを動かすと、それを覚える"))
+                Toggle(L("逆"), isOn: reverse).toggleStyle(.button).controlSize(.small)
             }
             TimelineView(.periodic(from: .now, by: 0.1)) { _ in
                 let v = osc.value(anim.osc?.address ?? "")
@@ -552,10 +552,10 @@ struct OSCAnimControls: View {
                 }
             }
             if !osc.receiveOn {
-                Text("OSC で動かすときは、上のバーの「連携」で OSC の「受け取る」をオンに（MIDI はそのまま使える）")
+                Text(L("OSC で動かすときは、上のバーの「連携」で OSC の「受け取る」をオンに（MIDI はそのまま使える）"))
                     .font(.system(size: 11)).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
             }
-            Text("値 0〜1 で「から」〜「まで」を動く（1 より大きい値は 1）").font(.system(size: 10)).foregroundStyle(.secondary)
+            Text(L("値 0〜1 で「から」〜「まで」を動く（1 より大きい値は 1）")).font(.system(size: 10)).foregroundStyle(.secondary)
         }
     }
 }

@@ -85,11 +85,11 @@ enum Main {
             }
             let pct: (Double) -> String = { String(format: "%+.1f%%", $0 * 100) }
             let v = VStack(spacing: 8) {
-                row("位置 X", 0, -2...2, .position(horizontal: true), pct)
-                row("位置 Y", 0.25, -2...2, .position(horizontal: false), pct)
-                row("スケール", 1, 0...4, .scale, { String(format: "%.1f%%", $0 * 100) })
-                row("角度", 30, -360...360, .angle, { String(format: "%.1f°", $0) })
-                row("不透明度", 1, 0...1, .plain, { String(format: "%.0f%%", $0 * 100) }, bar: true)
+                row(L("位置 X"), 0, -2...2, .position(horizontal: true), pct)
+                row(L("位置 Y"), 0.25, -2...2, .position(horizontal: false), pct)
+                row(L("スケール"), 1, 0...4, .scale, { String(format: "%.1f%%", $0 * 100) })
+                row(L("角度"), 30, -360...360, .angle, { String(format: "%.1f°", $0) })
+                row(L("不透明度"), 1, 0...1, .plain, { String(format: "%.0f%%", $0 * 100) }, bar: true)
             }.padding(12).frame(width: 300)
             CardPreview.writeView(AnyView(v), path: args[i + 1])
             exit(0)
@@ -154,52 +154,52 @@ struct VJPlayerApp: App {
                 UpdateMenuItems()
             }
             CommandGroup(replacing: .newItem) {
-                Button("新規プロジェクト") { ProjectMenu.new() }
+                Button(L("新規プロジェクト")) { ProjectMenu.new() }
                     .keyboardShortcut("n", modifiers: .command)
-                Button("プロジェクトを開く…") { ProjectMenu.open() }
+                Button(L("プロジェクトを開く…")) { ProjectMenu.open() }
                     .keyboardShortcut("o", modifiers: .command)
                 RecentProjectsMenu(engine: engine)
                 Divider()
-                Button("見つからない動画を探す…") { ProjectMenu.findMissing() }
+                Button(L("見つからない動画を探す…")) { ProjectMenu.findMissing() }
             }
             CommandGroup(replacing: .undoRedo) {
                 UndoMenuItems(history: Engine.shared.undoHistory)
             }
             CommandGroup(replacing: .saveItem) {
-                Button("保存") { ProjectMenu.save() }
+                Button(L("保存")) { ProjectMenu.save() }
                     .keyboardShortcut("s", modifiers: .command)
-                Button("別名で保存…") { ProjectMenu.saveAs() }
+                Button(L("別名で保存…")) { ProjectMenu.saveAs() }
                     .keyboardShortcut("s", modifiers: [.command, .shift])
-                Button("素材をまとめて保存…") { CollectMenu.run() }
+                Button(L("素材をまとめて保存…")) { CollectMenu.run() }
             }
             // 使わない標準の項目（英語の「Toggle Sidebar」・空の「表示」の中身）は出さない
             CommandGroup(replacing: .sidebar) {}
             CommandGroup(replacing: .toolbar) {
-                Button("全画面表示にする／戻す") { NSApp.keyWindow?.toggleFullScreen(nil) }
+                Button(L("全画面表示にする／戻す")) { NSApp.keyWindow?.toggleFullScreen(nil) }
                     .keyboardShortcut("f", modifiers: [.command, .control])
             }
             // 中身の無い「Halo VJヘルプ」は出さない（ヘルプのメニューは検索だけ）
             CommandGroup(replacing: .help) {}
-            CommandMenu("レイアウト") {
+            CommandMenu(L("レイアウト")) {
                 LayoutMenu(layout: LayoutManager.shared)
             }
-            CommandMenu("エフェクト") {
-                Button("エフェクト・ジェネレーターを探して追加…") { EffectSearchPanel.shared.toggle() }
+            CommandMenu(L("エフェクト")) {
+                Button(L("エフェクト・ジェネレーターを探して追加…")) { EffectSearchPanel.shared.toggle() }
                     .keyboardShortcut("e", modifiers: .command)
             }
-            CommandMenu("出力") {
-                Button("出力を閉じる／元に戻す") { OutputController.shared.toggle() }
+            CommandMenu(L("出力")) {
+                Button(L("出力を閉じる／元に戻す")) { OutputController.shared.toggle() }
                     .keyboardShortcut("f", modifiers: [.command, .shift])
-                Button("ブラックアウト／解除") { Engine.shared.toggleBlackout() }
+                Button(L("ブラックアウト／解除")) { Engine.shared.toggleBlackout() }
                     .keyboardShortcut(.escape, modifiers: [])
-                Button("全レイヤーを停止") { Engine.shared.stopAll() }
+                Button(L("全レイヤーを停止")) { Engine.shared.stopAll() }
                     .keyboardShortcut(.escape, modifiers: [.shift])
                 Divider()
-                Button("出力のマッピング…") { OutputMapWindow.shared.show() }
+                Button(L("出力のマッピング…")) { OutputMapWindow.shared.show() }
                     .keyboardShortcut("m", modifiers: [.command, .shift])
-                Button("照明（Art-Net / DMX）…") { DMXWindow.shared.show() }
+                Button(L("照明（Art-Net / DMX）…")) { DMXWindow.shared.show() }
                 Divider()
-                Button("録画を始める／止める") { Recorder.shared.toggle() }
+                Button(L("録画を始める／止める")) { Recorder.shared.toggle() }
                     .keyboardShortcut("r", modifiers: .command)
             }
         }
@@ -237,7 +237,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // 本番中にスリープ・App Nap で止まらないようにする
         activity = ProcessInfo.processInfo.beginActivity(
             options: [.userInitiated, .idleDisplaySleepDisabled, .latencyCritical],
-            reason: "VJ 出力中")
+            reason: L("VJ 出力中"))
 
         // 画面確認用：VJ_AUTOPILOT_ON で起動時に自動操縦をオンにする
         if ProcessInfo.processInfo.environment["VJ_AUTOPILOT_ON"] != nil {
@@ -367,13 +367,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         // プロジェクトを開いていて未保存の変更があれば聞く（今の状態は自動保存にも残る）
         if Engine.shared.projectURL != nil && Engine.shared.isDirty {
-            return ProjectMenu.confirmDiscard("終了する") ? .terminateNow : .terminateCancel
+            return ProjectMenu.confirmDiscard(L("終了する")) ? .terminateNow : .terminateCancel
         }
         return .terminateNow
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         Engine.shared.saveNow()
+        if AppRelaunch.requested { AppRelaunch.openAfterExit() }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }

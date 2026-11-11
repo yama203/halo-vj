@@ -8,14 +8,14 @@ enum PanelID: String, Codable, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .live: "ライブ"
-        case .scenes: "シーン"
-        case .cues: "キュー"
-        case .effects: "エフェクト"
-        case .generators: "ジェネレーター"
-        case .sources: "ソース"
-        case .pads: "FX パッド"
-        case .monitor: "出力モニター"
+        case .live: L("ライブ")
+        case .scenes: L("シーン")
+        case .cues: L("キュー")
+        case .effects: L("エフェクト")
+        case .generators: L("ジェネレーター")
+        case .sources: L("ソース")
+        case .pads: L("FX パッド")
+        case .monitor: L("出力モニター")
         }
     }
 
@@ -349,9 +349,9 @@ final class LayoutManager: NSObject, ObservableObject, NSWindowDelegate {
         } else if !isBuiltinUnchanged(state) {
             // まだワークスペースを選んでいなかった今の並べ方は、なくさないよう「前の並べ方」として残す
             var s = snapshot()
-            s.workspace = "前の並べ方"
-            presets["前の並べ方"] = s
-            if !presetNames.contains("前の並べ方") { presetNames.append("前の並べ方") }
+            s.workspace = L("前の並べ方")
+            presets[L("前の並べ方")] = s
+            if !presetNames.contains(L("前の並べ方")) { presetNames.append(L("前の並べ方")) }
         }
         guard var next = presets[name] ?? defaultState(name) else { savePresets(); return }
         next.workspace = name
@@ -438,18 +438,18 @@ struct PanelWindowContent: View {
                 Text(panel.title).font(.system(size: 13, weight: .bold))
                 Spacer(minLength: 0)
                 Toggle(isOn: Binding(get: { layout.isFloating(panel) }, set: { layout.setFloating(panel, $0) })) {
-                    Label("常に手前", systemImage: "pin.fill")
+                    Label(L("常に手前"), systemImage: "pin.fill")
                 }
                 .toggleStyle(.button)
                 .controlSize(.small)
-                .help("ほかのウィンドウより常に手前に出す")
+                .help(L("ほかのウィンドウより常に手前に出す"))
                 Button {
                     layout.attach(panel)
                 } label: {
-                    Label("戻す", systemImage: "rectangle.inset.filled.and.person.filled")
+                    Label(L("戻す"), systemImage: "rectangle.inset.filled.and.person.filled")
                 }
                 .controlSize(.small)
-                .help("メインのウィンドウに戻す（閉じるボタンでも戻る）")
+                .help(L("メインのウィンドウに戻す（閉じるボタンでも戻る）"))
             }
             Group {
                 switch panel {
@@ -504,7 +504,7 @@ struct SplitHandle: View {
                 onEnd()
             })
         .onTapGesture(count: 2) { onDoubleClick() }
-        .help("ドラッグで大きさを変える（ダブルクリックでおまかせに戻す）")
+        .help(L("ドラッグで大きさを変える（ダブルクリックでおまかせに戻す）"))
     }
 }
 
@@ -516,36 +516,36 @@ struct WorkspaceBar: View {
         let cur = layout.state.workspace
         Menu {
             ForEach(layout.workspaceNames, id: \.self) { n in
-                Button((cur == n ? "✓ " : "") + n + (Self.notes[n].map { "（" + $0 + "）" } ?? "")) { layout.switchWorkspace(n) }
+                Button((cur == n ? "✓ " : "") + n + (Self.notes[n].map { L("（\($0)）") } ?? "")) { layout.switchWorkspace(n) }
             }
             Divider()
-            Button("今の並べ方を新しいワークスペースにする…") {
-                if let n = askName(title: "ワークスペースの名前", initial: "ワークスペース \(layout.presetNames.count + 1)") {
+            Button(L("今の並べ方を新しいワークスペースにする…")) {
+                if let n = askName(title: L("ワークスペースの名前"), initial: L("ワークスペース \(layout.presetNames.count + 1)")) {
                     layout.savePreset(n)
                 }
             }
             if let cur {
                 Divider()
-                Button("今の形を「\(cur)」の初期状態にする") { layout.setCurrentAsDefault() }
-                Button("「\(cur)」を初期状態に戻す") { layout.resetWorkspace(cur) }
+                Button(L("今の形を「\(cur)」の初期状態にする")) { layout.setCurrentAsDefault() }
+                Button(L("「\(cur)」を初期状態に戻す")) { layout.resetWorkspace(cur) }
                 if LayoutManager.builtinWorkspaces.contains(cur) {
-                    Button("「\(cur)」をアプリの最初の状態に戻す") { layout.factoryReset(cur) }
+                    Button(L("「\(cur)」をアプリの最初の状態に戻す")) { layout.factoryReset(cur) }
                         .disabled(!layout.hasUserDefault(cur))
                 } else {
-                    Button("「\(cur)」を削除", role: .destructive) { layout.deletePreset(cur) }
+                    Button(L("「\(cur)」を削除"), role: .destructive) { layout.deletePreset(cur) }
                 }
             }
         } label: {
-            Label(cur ?? "ワークスペース", systemImage: "rectangle.3.group")
+            Label(cur ?? L("ワークスペース"), systemImage: "rectangle.3.group")
                 .frame(minWidth: 110, alignment: .leading)
         }
         .fixedSize()
-        .help("ワークスペース：画面の並べ方。切り替えると、いじった形は覚えておく")
+        .help(L("ワークスペース：画面の並べ方。切り替えると、いじった形は覚えておく"))
         PanelMenuButton()
     }
 
     /// はじめからのワークスペースの説明
-    static let notes = ["Standard": "いつもの並べ方", "Show": "ポン出し", "VJ": "FX パッドを大きく"]
+    static let notes = ["Standard": L("いつもの並べ方"), "Show": L("ポン出し"), "VJ": L("FX パッドを大きく")]
 }
 
 /// パネルを出す・閉じる（✓ が出ているもの）。メニューバーの「レイアウト」と、上のバーの「パネル」
@@ -558,7 +558,7 @@ struct PanelVisibilityItems: View {
         }
         if !layout.state.closed.isEmpty {
             Divider()
-            Button("閉じたパネルを全部出す") { for d in layout.state.closed { layout.open(d) } }
+            Button(L("閉じたパネルを全部出す")) { for d in layout.state.closed { layout.open(d) } }
         }
     }
 }
@@ -568,7 +568,7 @@ struct PanelMenuButton: View {
     @ObservedObject var layout = LayoutManager.shared
     var body: some View {
         Menu {
-            Text("✓ が出ているパネル（押すと閉じる・出す）")
+            Text(L("✓ が出ているパネル（押すと閉じる・出す）"))
             PanelVisibilityItems(layout: layout)
         } label: {
             // 幅を取らないよう絵だけ（閉じているものがあれば数を出す）
@@ -579,7 +579,7 @@ struct PanelMenuButton: View {
             }
         }
         .fixedSize()
-        .help("使わないパネルを閉じる・閉じたパネルを出す")
+        .help(L("使わないパネルを閉じる・閉じたパネルを出す"))
     }
 }
 
@@ -593,7 +593,7 @@ struct PanelCloseButton: View {
                 Image(systemName: "xmark").font(.system(size: 10, weight: .semibold))
             }
             .controlSize(.small)
-            .help("「\(panel.title)」を閉じる（上のバーの「パネル」か、メニューの「レイアウト」でまた出せる）")
+            .help(L("「\(panel.title)」を閉じる（上のバーの「パネル」か、メニューの「レイアウト」でまた出せる）"))
         }
     }
 }
@@ -606,36 +606,36 @@ struct LayoutMenu: View {
         PanelVisibilityItems(layout: layout)
         Divider()
         ForEach(PanelID.allCases) { p in
-            Button((layout.isDetached(p) ? "✓ " : "") + p.title + "を別ウィンドウに") { layout.toggleDetached(p) }
+            Button((layout.isDetached(p) ? "✓ " : "") + L("\(p.title)を別ウィンドウに")) { layout.toggleDetached(p) }
                 .disabled(layout.isClosed(p))
         }
         Divider()
-        Button((layout.state.dockMode ? "✓ " : "") + "自由レイアウト（試験中）") { layout.setDockMode(!layout.state.dockMode) }
+        Button((layout.state.dockMode ? "✓ " : "") + L("自由レイアウト（試験中）")) { layout.setDockMode(!layout.state.dockMode) }
         if layout.state.dockMode {
-            Button("自由レイアウトを最初の並べ方に戻す") { layout.state.dock = DockNode.standard }
+            Button(L("自由レイアウトを最初の並べ方に戻す")) { layout.state.dock = DockNode.standard }
         }
-        Menu("おすすめのレイアウト") {
-            Button("Show（ポン出し：グリッド・キュー・モニター・ライブ、下に FX パッド）") { layout.switchWorkspace("Show") }
-            Button("VJ（FX パッドを下いっぱい・ライブとシーンをモニターの下）") { layout.switchWorkspace("VJ") }
-            Button("Standard（いつもの並べ方）") { layout.switchWorkspace("Standard") }
+        Menu(L("おすすめのレイアウト")) {
+            Button(L("Show（ポン出し：グリッド・キュー・モニター・ライブ、下に FX パッド）")) { layout.switchWorkspace("Show") }
+            Button(L("VJ（FX パッドを下いっぱい・ライブとシーンをモニターの下）")) { layout.switchWorkspace("VJ") }
+            Button(L("Standard（いつもの並べ方）")) { layout.switchWorkspace("Standard") }
         }
         Divider()
-        Button("今のレイアウトを保存…") {
-            if let n = askName(title: "レイアウトの名前（同じ名前なら上書き）", initial: "レイアウト \(layout.presetNames.count + 1)") {
+        Button(L("今のレイアウトを保存…")) {
+            if let n = askName(title: L("レイアウトの名前（同じ名前なら上書き）"), initial: L("レイアウト \(layout.presetNames.count + 1)")) {
                 layout.savePreset(n)
             }
         }
         if !layout.presetNames.isEmpty {
             ForEach(layout.presetNames, id: \.self) { n in
-                Button("「\(n)」にする") { layout.applyPreset(n) }
+                Button(L("「\(n)」にする")) { layout.applyPreset(n) }
             }
-            Menu("保存したレイアウトを削除") {
+            Menu(L("保存したレイアウトを削除")) {
                 ForEach(layout.presetNames, id: \.self) { n in
                     Button(n) { layout.deletePreset(n) }
                 }
             }
         }
         Divider()
-        Button("最初のレイアウトに戻す") { layout.reset() }
+        Button(L("最初のレイアウトに戻す")) { layout.reset() }
     }
 }

@@ -19,9 +19,9 @@ enum NDIRuntime {
     /// どの NDI を使っているか（画面の表示用）
     static var sourceLabel: String {
         guard available else { return "" }
-        if isBundled { return "アプリに同梱した NDI" }
+        if isBundled { return L("アプリに同梱した NDI") }
         let p = libraryPath
-        if p.contains("Resolume") { return "Resolume に入っている NDI" }
+        if p.contains("Resolume") { return L("Resolume に入っている NDI") }
         if p.contains("NDI SDK") { return "NDI SDK" }
         return p
     }
@@ -278,22 +278,22 @@ struct NDISourcePicker: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 8) {
-                Text("映像").font(.system(size: 12)).foregroundStyle(.secondary)
+                Text(L("映像")).font(.system(size: 12)).foregroundStyle(.secondary)
                 Picker("", selection: $effect.text) {
-                    Text("（選ぶ）").tag("")
+                    Text(L("（選ぶ）")).tag("")
                     ForEach(sources, id: \.self) { s in Text(s).tag(s) }
                     if !effect.text.isEmpty && !sources.contains(effect.text) {
-                        Text(effect.text + "（今は見つからない）").tag(effect.text)
+                        Text(effect.text + L("（今は見つからない）")).tag(effect.text)
                     }
                 }
                 .labelsHidden()
                 Button { refresh() } label: { Image(systemName: "arrow.clockwise") }
-                    .help("NDI で出している映像の一覧を更新")
+                    .help(L("NDI で出している映像の一覧を更新"))
             }
             if !available {
                 NDIMissingNote()
             } else if sources.isEmpty {
-                Text("探しています…（同じネットワークで NDI を出しているものが出てきます）")
+                Text(L("探しています…（同じネットワークで NDI を出しているものが出てきます）"))
                     .font(.system(size: 11)).foregroundStyle(.secondary)
             }
             NDITrademarkNote()
@@ -322,9 +322,9 @@ struct NDITrademarkNote: View {
 struct NDIMissingNote: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text("NDI ランタイムが見つかりません。NDI Tools（ndi.video）を入れると使えます")
+            Text(L("NDI ランタイムが見つかりません。NDI Tools（ndi.video）を入れると使えます"))
                 .font(.system(size: 11)).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
-            Link("ndi.video を開く", destination: URL(string: "https://ndi.video/tools/")!).font(.system(size: 11))
+            Link(L("ndi.video を開く"), destination: URL(string: "https://ndi.video/tools/")!).font(.system(size: 11))
         }
     }
 }
@@ -334,26 +334,26 @@ struct NDISettingsSection: View {
     @ObservedObject private var ndi = NDIOutput.shared
 
     var body: some View {
-        GroupBox("映像（NDI）") {
+        GroupBox(L("映像（NDI）")) {
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
-                    Toggle("コンポジションを NDI で出す", isOn: $ndi.enabled)
+                    Toggle(L("コンポジションを NDI で出す"), isOn: $ndi.enabled)
                     Spacer()
                     if ndi.enabled && !ndi.missingRuntime {
-                        Label(ndi.connections > 0 ? "\(ndi.connections) か所で受け取られています" : "待っています",
+                        Label(ndi.connections > 0 ? L("\(ndi.connections) か所で受け取られています") : L("待っています"),
                               systemImage: ndi.connections > 0 ? "dot.radiowaves.left.and.right" : "circle.dotted")
                             .font(.system(size: 11)).foregroundStyle(ndi.connections > 0 ? .green : .secondary)
                     }
                 }
                 HStack {
-                    Text("名前").font(.system(size: 12))
+                    Text(L("名前")).font(.system(size: 12))
                     TextField("Halo VJ", text: $ndi.name).frame(width: 180)
                 }
                 if ndi.missingRuntime { NDIMissingNote() }
-                Text("同じネットワークの別の Mac・PC（TouchDesigner の NDI In TOP・Resolume・OBS など）で受け取れる。ほかの NDI を受け取るには、ジェネレーター「NDI から」を枠に置く")
+                Text(L("同じネットワークの別の Mac・PC（TouchDesigner の NDI In TOP・Resolume・OBS など）で受け取れる。ほかの NDI を受け取るには、ジェネレーター「NDI から」を枠に置く"))
                     .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 if NDIRuntime.available {
-                    Text("使っている NDI：\(NDIRuntime.sourceLabel)（\(NDIRuntime.version.components(separatedBy: " ").last ?? "")）")
+                    Text(L("使っている NDI：\(NDIRuntime.sourceLabel)（\(NDIRuntime.version.components(separatedBy: " ").last ?? "")）"))
                         .font(.system(size: 10)).foregroundStyle(.tertiary).lineLimit(1).truncationMode(.middle)
                 }
                 NDITrademarkNote()

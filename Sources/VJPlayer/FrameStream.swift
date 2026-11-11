@@ -84,7 +84,7 @@ final class FrameStream {
         self.hap = hap
         reader.add(output)
         guard reader.startReading() else {
-            throw reader.error ?? NSError(domain: "VJPlayer", code: 1, userInfo: [NSLocalizedDescriptionKey: "映像を読み込めません"])
+            throw reader.error ?? NSError(domain: "VJPlayer", code: 1, userInfo: [NSLocalizedDescriptionKey: L("映像を読み込めません")])
         }
         let t = Thread { [self] in self.run() }
         t.qualityOfService = .userInteractive

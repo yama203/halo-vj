@@ -28,11 +28,11 @@ struct Cue: Codable, Identifiable, Equatable {
 
     static let fadeChoices: [Double?] = [nil, 0, 0.5, 1, 2, 3, 5, 8]
     static func fadeLabel(_ f: Double?) -> String {
-        guard let f else { return "元の設定" }
+        guard let f else { return L("元の設定") }
         return seconds(f)
     }
     static func seconds(_ f: Double) -> String {
-        f <= 0 ? "カット" : String(format: f < 1 ? "%.1f秒" : "%.0f秒", f)
+        f <= 0 ? L("カット") : String(format: f < 1 ? L("%.1f秒") : L("%.0f秒"), f)
     }
 }
 
@@ -101,20 +101,20 @@ extension Engine {
         if let f = c.fade { return Cue.seconds(f) }
         switch c.kind {
         case .scene(let id):
-            return "シーンの設定（" + Cue.seconds(scenes.first { $0.id == id }?.fade ?? 0) + "）"
+            return L("シーンの設定（\(Cue.seconds(scenes.first { $0.id == id }?.fade ?? 0))）")
         case .clip(_, let layer, _):
-            return "レイヤーの設定（" + Cue.seconds(layers.indices.contains(layer) ? layers[layer].fadeTime : 0) + "）"
+            return L("レイヤーの設定（\(Cue.seconds(layers.indices.contains(layer) ? layers[layer].fadeTime : 0))）")
         case .stopAll:
-            return "カット"
+            return L("カット")
         }
     }
 
     /// フェードの選択肢の「元の設定」の名前
     func cueDefaultFadeName(_ c: Cue) -> String {
         switch c.kind {
-        case .scene: "シーンに付けたフェード時間"
-        case .clip: "レイヤーの切り替えフェード時間"
-        case .stopAll: "カット（すぐ暗転）"
+        case .scene: L("シーンに付けたフェード時間")
+        case .clip: L("レイヤーの切り替えフェード時間")
+        case .stopAll: L("カット（すぐ暗転）")
         }
     }
 
@@ -228,12 +228,12 @@ extension Engine {
     func cueTitle(_ c: Cue) -> String {
         switch c.kind {
         case .scene(let id):
-            return scenes.first { $0.id == id }.map { "シーン：" + $0.name } ?? "（見つからないシーン）"
+            return scenes.first { $0.id == id }.map { L("シーン：") + $0.name } ?? L("（見つからないシーン）")
         case .clip:
-            guard let i = cueClipIndex(c), let s = slots[i] else { return "（見つからないクリップ）" }
+            guard let i = cueClipIndex(c), let s = slots[i] else { return L("（見つからないクリップ）") }
             return s.name
         case .stopAll:
-            return "全停止（暗転）"
+            return L("全停止（暗転）")
         }
     }
 
@@ -338,22 +338,22 @@ struct CuePanel: View {
         VStack(alignment: .leading, spacing: 8) {
             // 今・次
             HStack(spacing: 8) {
-                nowNext("今", engine.currentCue, tint: .green)
-                nowNext("次", engine.nextCue, tint: .orange)
+                nowNext(L("今"), engine.currentCue, tint: .green)
+                nowNext(L("次"), engine.nextCue, tint: .orange)
             }
             HStack(spacing: 8) {
                 Button {
                     engine.backCue()
                 } label: {
-                    Label("戻る", systemImage: "backward.end.fill").frame(maxWidth: 80)
+                    Label(L("戻る"), systemImage: "backward.end.fill").frame(maxWidth: 80)
                 }
                 .controlSize(.large)
                 .disabled((engine.currentCue ?? 0) <= 0)
-                .help("1 つ前のキューを出し直す（⇧スペース）")
+                .help(L("1 つ前のキューを出し直す（⇧スペース）"))
                 Button {
                     engine.goCue()
                 } label: {
-                    Label("次へ", systemImage: "play.fill")
+                    Label(L("次へ"), systemImage: "play.fill")
                         .font(.system(size: 16, weight: .heavy))
                         .frame(maxWidth: .infinity)
                 }
@@ -361,26 +361,26 @@ struct CuePanel: View {
                 .tint(.green)
                 .controlSize(.large)
                 .disabled(engine.nextCue == nil)
-                .help("次のキューを出す（スペース）。押し間違いの連打は \(String(format: "%.1f", Engine.goGuard)) 秒受け付けない")
+                .help(L("次のキューを出す（スペース）。押し間違いの連打は \(String(format: "%.1f", Engine.goGuard)) 秒受け付けない"))
             }
             HStack(spacing: 6) {
                 Menu {
                     if engine.scenes.isEmpty {
-                        Text("シーンがありません")
+                        Text(L("シーンがありません"))
                     }
                     ForEach(engine.scenes) { s in
-                        Button("シーン：" + s.name) { engine.addCue(.scene(s.id)) }
+                        Button(L("シーン：") + s.name) { engine.addCue(.scene(s.id)) }
                     }
                     Divider()
-                    Button("選んでいるクリップ（それだけを出す）") { if let i = engine.inspectedIndex { engine.addClipCue(i) } }
+                    Button(L("選んでいるクリップ（それだけを出す）")) { if let i = engine.inspectedIndex { engine.addClipCue(i) } }
                         .disabled(engine.inspectedIndex.flatMap { engine.slots[$0] } == nil)
-                    Button("全停止（暗転）") { engine.addCue(.stopAll) }
+                    Button(L("全停止（暗転）")) { engine.addCue(.stopAll) }
                 } label: {
-                    Label("キューを足す", systemImage: "plus")
+                    Label(L("キューを足す"), systemImage: "plus")
                 }
                 .fixedSize()
                 Spacer(minLength: 0)
-                Text("スペースで次へ・⇧スペースで戻る・ダブルクリックで飛ぶ")
+                Text(L("スペースで次へ・⇧スペースで戻る・ダブルクリックで飛ぶ"))
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -388,7 +388,7 @@ struct CuePanel: View {
             if engine.cues.isEmpty {
                 VStack(spacing: 6) {
                     Image(systemName: "list.number").font(.system(size: 26)).foregroundStyle(.tertiary)
-                    Text("出すものを順に並べておくと、「次へ」（スペース）で次々に出せます。\nシーンや、グリッドのクリップの名前の帯をここへドラッグ。「キューを足す」や右クリックからも足せます")
+                    Text(L("出すものを順に並べておくと、「次へ」（スペース）で次々に出せます。\nシーンや、グリッドのクリップの名前の帯をここへドラッグ。「キューを足す」や右クリックからも足せます"))
                         .multilineTextAlignment(.center)
                         .font(.system(size: 12)).foregroundStyle(.secondary)
                 }
@@ -419,7 +419,7 @@ struct CuePanel: View {
                 Text(c.note.isEmpty ? " " : c.note)
                     .font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
             } else {
-                Text(label == "次" ? "（終わり）" : "—").font(.system(size: 14, weight: .bold)).foregroundStyle(.secondary)
+                Text(label == L("次") ? L("（終わり）") : "—").font(.system(size: 14, weight: .bold)).foregroundStyle(.secondary)
                 Text(" ").font(.system(size: 10))
             }
         }
@@ -481,32 +481,32 @@ private struct CueRow: View {
         .onDrag { NSItemProvider(object: ("halovj-cue:" + cue.id.uuidString) as NSString) }
         .onDrop(of: [.plainText], isTargeted: $dropTargeted) { CueDrop.handle($0, engine: engine, at: index) }
         .contextMenu {
-            Button("このキューを出す") { engine.fireCue(index) }
-            Menu("フェード（\(engine.cueFadeText(cue))）") {
+            Button(L("このキューを出す")) { engine.fireCue(index) }
+            Menu(L("フェード（\(engine.cueFadeText(cue))）")) {
                 ForEach(Cue.fadeChoices, id: \.self) { f in
-                    let name = f == nil ? engine.cueDefaultFadeName(cue) + "に合わせる" : Cue.fadeLabel(f)
+                    let name = f == nil ? L("\(engine.cueDefaultFadeName(cue))に合わせる") : Cue.fadeLabel(f)
                     Button((cue.fade == f ? "✓ " : "") + name) { engine.updateCue(cue.id) { $0.fade = f } }
                 }
             }
-            Button("上へ") { engine.moveCue(cue.id, before: index - 1) }
+            Button(L("上へ")) { engine.moveCue(cue.id, before: index - 1) }
                 .disabled(index == 0)
-            Button("下へ") { engine.moveCue(cue.id, before: index + 2) }
+            Button(L("下へ")) { engine.moveCue(cue.id, before: index + 2) }
                 .disabled(index >= engine.cues.count - 1)
             if case .clip = cue.kind {
-                Toggle("ほかのレイヤーはそのまま（このレイヤーだけ差し替え）", isOn: Binding(
+                Toggle(L("ほかのレイヤーはそのまま（このレイヤーだけ差し替え）"), isOn: Binding(
                     get: { cue.keepOthers ?? false },
                     set: { v in engine.updateCue(cue.id) { $0.keepOthers = v ? true : nil } }))
-                Menu("終わったら（" + (cue.endAction?.label ?? "クリップの設定") + "）") { CueEndActionMenu(cue: cue) }
+                Menu(L("終わったら（\(cue.endAction?.label ?? L("クリップの設定"))）")) { CueEndActionMenu(cue: cue) }
             }
-            Button("メモを書く…") {
-                if let n = askText(title: "キュー \(index + 1) のメモ（きっかけなど）", initial: cue.note) {
+            Button(L("メモを書く…")) {
+                if let n = askText(title: L("キュー \(index + 1) のメモ（きっかけなど）"), initial: cue.note) {
                     engine.updateCue(cue.id) { $0.note = n }
                 }
             }
             Divider()
-            Button("削除", role: .destructive) { engine.removeCue(cue.id) }
+            Button(L("削除"), role: .destructive) { engine.removeCue(cue.id) }
         }
-        .help("ダブルクリックでこのキューを出す。ドラッグで並べ替え。右クリックでフェード・メモ・削除")
+        .help(L("ダブルクリックでこのキューを出す。ドラッグで並べ替え。右クリックでフェード・メモ・削除"))
     }
 }
 
@@ -587,14 +587,14 @@ private struct CueModeIcons: View {
                     Image(systemName: "square.fill")
                         .font(.system(size: 9))
                         .foregroundStyle(.green)
-                        .help("このクリップだけを出す（ほかのレイヤーはフェードして止まる）")
+                        .help(L("このクリップだけを出す（ほかのレイヤーはフェードして止まる）"))
                 } else {
                     HStack(spacing: 1) {
                         Image(systemName: "square.3.layers.3d").font(.system(size: 10))
                         Text("L\(layer + 1)").font(.system(size: 9, weight: .bold))
                     }
                     .foregroundStyle(.orange)
-                    .help("L\(layer + 1) だけ差し替える（ほかのレイヤーはそのまま）")
+                    .help(L("L\(layer + 1) だけ差し替える（ほかのレイヤーはそのまま）"))
                 }
             }
         }
@@ -608,7 +608,7 @@ private struct CueFadeButton: View {
     var body: some View {
         Menu {
             ForEach(Cue.fadeChoices, id: \.self) { f in
-                let name = f == nil ? engine.cueDefaultFadeName(cue) + "に合わせる" : Cue.fadeLabel(f)
+                let name = f == nil ? L("\(engine.cueDefaultFadeName(cue))に合わせる") : Cue.fadeLabel(f)
                 Button((cue.fade == f ? "✓ " : "") + name) { engine.updateCue(cue.id) { $0.fade = f } }
             }
         } label: {
@@ -626,7 +626,7 @@ private struct CueFadeButton: View {
         .frame(height: 20)
         .background(RoundedRectangle(cornerRadius: 4).fill(Color.white.opacity(0.08)))
         .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.white.opacity(0.12)))
-        .help("フェード：押して選ぶ" + (cue.fade == nil ? "（今は" + engine.cueDefaultFadeName(cue) + "）" : ""))
+        .help(cue.fade == nil ? L("フェード：押して選ぶ（今は\(engine.cueDefaultFadeName(cue))）") : L("フェード：押して選ぶ"))
     }
 }
 
@@ -649,7 +649,7 @@ private struct CueEndActionButton: View {
         .frame(height: 20)
         .background(RoundedRectangle(cornerRadius: 4).fill(Color.white.opacity(0.08)))
         .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.white.opacity(0.12)))
-        .help("終わったら：" + (cue.endAction.map { $0.label + "（このキューで上書き）" } ?? "クリップの設定（" + (clipEnd?.label ?? "") + "）") + "。押して選ぶ")
+        .help(L("終わったら：\(cue.endAction.map { L("\($0.label)（このキューで上書き）") } ?? L("クリップの設定（\(clipEnd?.label ?? "")）"))。押して選ぶ"))
     }
     private var clipEnd: EndAction? {
         guard case .clip = cue.kind, let i = engine.cueClipIndex(cue) else { return nil }
@@ -664,7 +664,7 @@ private struct CueEndActionMenu: View {
 
     var body: some View {
         let own = clipEndAction
-        Button((cue.endAction == nil ? "✓ " : "") + "クリップの設定のまま" + (own.map { "（" + $0.label + "）" } ?? "")) {
+        Button((cue.endAction == nil ? "✓ " : "") + L("クリップの設定のまま") + (own.map { L("（\($0.label)）") } ?? "")) {
             engine.updateCue(cue.id) { $0.endAction = nil }
         }
         Divider()
@@ -721,7 +721,7 @@ func askText(title: String, initial: String) -> String? {
     field.stringValue = initial
     alert.accessoryView = field
     alert.addButton(withTitle: "OK")
-    alert.addButton(withTitle: "キャンセル")
+    alert.addButton(withTitle: L("キャンセル"))
     alert.window.initialFirstResponder = field
     guard alert.runModal() == .alertFirstButtonReturn else { return nil }
     return field.stringValue.trimmingCharacters(in: .whitespaces)

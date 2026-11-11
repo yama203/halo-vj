@@ -76,7 +76,7 @@ final class SystemMonitor: ObservableObject {
         guard let path = Self.logPath, s.fps > 0 else { return }
         if logStart == 0 {
             logStart = wall; lastLog = wall
-            try? "経過秒,描画fps平均,描画fps最低,最長の止まりms,アプリCPU%,GPU%,メモリMB,開いているファイル,スレッド,自動の切り替え回数\n"
+            try? ("経過秒,描画fps平均,描画fps最低,最長の止まりms,アプリCPU%,GPU%,メモリMB,開いているファイル,スレッド,自動の切り替え回数\n")
                 .write(toFile: path, atomically: true, encoding: .utf8)
         }
         worstGap = max(worstGap, s.maxGapMs)
@@ -165,16 +165,16 @@ struct StatusBar: View {
         HStack(spacing: 14) {
             Spacer(minLength: 0)
             item("CPU", String(format: "%.0f%%", s.appCPU), level(s.appCPU, 50, 80))
-                .help(String(format: "このアプリの CPU（マシン全体を 100%% として）。マシン全体では %.0f%%", s.totalCPU))
-            item("全体", String(format: "%.0f%%", s.totalCPU), level(s.totalCPU, 60, 85))
-                .help("マシン全体の CPU（ほかのアプリも含む）")
+                .help(String(format: L("このアプリの CPU（マシン全体を 100%% として）。マシン全体では %.0f%%"), s.totalCPU))
+            item(L("全体"), String(format: "%.0f%%", s.totalCPU), level(s.totalCPU, 60, 85))
+                .help(L("マシン全体の CPU（ほかのアプリも含む）"))
             item("GPU", s.gpu.map { String(format: "%.0f%%", $0) } ?? "—", level(s.gpu ?? 0, 60, 85))
-                .help("GPU の使用率（ほかのアプリも含む）")
-            item("メモリ", s.memoryMB >= 1024 ? String(format: "%.1f GB", s.memoryMB / 1024) : String(format: "%.0f MB", s.memoryMB),
+                .help(L("GPU の使用率（ほかのアプリも含む）"))
+            item(L("メモリ"), s.memoryMB >= 1024 ? String(format: "%.1f GB", s.memoryMB / 1024) : String(format: "%.0f MB", s.memoryMB),
                  .secondary)
-                .help("このアプリが使っているメモリ")
-            item("描画", String(format: "%.0f fps", s.fps), s.maxGapMs > 50 ? .orange : .secondary)
-                .help(String(format: "1 秒に何回描いているか（画面のリフレッシュレートに合わせて描く）。直近 1 秒でいちばん長くあいたのは %.0f ms", s.maxGapMs))
+                .help(L("このアプリが使っているメモリ"))
+            item(L("描画"), String(format: "%.0f fps", s.fps), s.maxGapMs > 50 ? .orange : .secondary)
+                .help(String(format: L("1 秒に何回描いているか（画面のリフレッシュレートに合わせて描く）。直近 1 秒でいちばん長くあいたのは %.0f ms"), s.maxGapMs))
         }
         .font(.system(size: 10.5).monospacedDigit())
         .padding(.horizontal, 12)

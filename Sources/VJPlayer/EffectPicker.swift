@@ -19,7 +19,7 @@ struct EffectPicker: View {
     static func sections(includeGenerators: Bool) -> [(String, [EffectKind])] {
         var out = AddEffectMenuItems.groups.map { ($0.0.label, $0.1) }
         if includeGenerators {
-            out += GeneratorCategory.allCases.map { ("ジェネレーター：" + $0.label, $0.kinds) }.filter { !$0.1.isEmpty }
+            out += GeneratorCategory.allCases.map { (L("ジェネレーター：") + $0.label, $0.kinds) }.filter { !$0.1.isEmpty }
         }
         return out
     }
@@ -80,7 +80,7 @@ struct EffectPicker: View {
             }
             HStack(spacing: 6) {
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                TextField(includeGenerators ? "エフェクト・ジェネレーターを探す" : "エフェクトを探す（名前・英語・ひらがな）",
+                TextField(includeGenerators ? L("エフェクト・ジェネレーターを探す") : L("エフェクトを探す（名前・英語・ひらがな）"),
                           text: $query)
                     .textFieldStyle(.plain)
                     .font(.system(size: 14))
@@ -98,7 +98,7 @@ struct EffectPicker: View {
                 ScrollView(.vertical) {
                     VStack(alignment: .leading, spacing: 2) {
                         if list.isEmpty {
-                            Text("見つかりません").font(.system(size: 12)).foregroundStyle(.secondary).padding(8)
+                            Text(L("見つかりません")).font(.system(size: 12)).foregroundStyle(.secondary).padding(8)
                         } else if query.trimmingCharacters(in: .whitespaces).isEmpty {
                             // 何も打っていないときは分類ごとに
                             ForEach(Self.sections(includeGenerators: includeGenerators), id: \.0) { title, kinds in
@@ -115,7 +115,7 @@ struct EffectPicker: View {
                     if list.indices.contains(h) { withAnimation(.easeOut(duration: 0.1)) { proxy.scrollTo(list[h]) } }
                 }
             }
-            Text("↑↓ で選んで Enter・クリックで足す・Esc で閉じる")
+            Text(L("↑↓ で選んで Enter・クリックで足す・Esc で閉じる"))
                 .font(.system(size: 10)).foregroundStyle(.secondary)
         }
         .frame(width: 316)
@@ -157,14 +157,14 @@ struct EffectPickerPreview: View {
     let query: String
     let generators: Bool
     var body: some View {
-        EffectPicker(includeGenerators: generators, targetLabel: generators ? "今のタブ：クリップ（例）" : nil,
+        EffectPicker(includeGenerators: generators, targetLabel: generators ? L("今のタブ：クリップ（例）") : nil,
                      pick: { _ in }, query: query)
     }
 }
 
 /// 押すと探す窓が開くボタン
 struct AddEffectMenu: View {
-    var title = "エフェクトを追加"
+    var title = L("エフェクトを追加")
     let action: (EffectKind) -> Void
     @State private var open = false
 
@@ -175,7 +175,7 @@ struct AddEffectMenu: View {
         }
         .buttonStyle(.borderless)
         .fixedSize()
-        .help("エフェクトを名前で探して足す（「エフェクト」パネルからドラッグしても足せる。⌘E で今のタブに足す窓）")
+        .help(L("エフェクトを名前で探して足す（「エフェクト」パネルからドラッグしても足せる。⌘E で今のタブに足す窓）"))
         .popover(isPresented: $open, arrowEdge: .bottom) {
             EffectPicker(pick: action, close: { open = false })
         }
@@ -205,7 +205,7 @@ final class EffectSearchPanel: NSObject, NSWindowDelegate {
 
     func show() {
         let engine = Engine.shared
-        let target = "今のタブ：" + engine.currentTabName + "（ジェネレーターは " + engine.layers[engine.selectedLayer].displayName + " の空き枠へ）"
+        let target = L("今のタブ：\(engine.currentTabName)（ジェネレーターは \(engine.layers[engine.selectedLayer].displayName) の空き枠へ）")
         let view = EffectPicker(includeGenerators: true, targetLabel: target, pick: { k in
             if k.isGenerator {
                 if !engine.placeGeneratorInSelectedLayer(k) { NSSound.beep() }

@@ -40,7 +40,7 @@ final class FXPad: ObservableObject, Identifiable, EffectHolder {
     /// 離してから消え切るまでの秒数（0 = すぐ消える）
     @Published var release: Double = 0 { didSet { onChanged?() } }
     static let timeChoices: [Double] = [0, 0.25, 0.5, 1, 2, 4]
-    static func timeLabel(_ s: Double) -> String { s <= 0 ? "すぐ" : (s < 1 ? String(format: "%.2g秒", s) : String(format: "%.0f秒", s)) }
+    static func timeLabel(_ s: Double) -> String { s <= 0 ? L("すぐ") : (s < 1 ? String(format: L("%.2g秒"), s) : String(format: L("%.0f秒"), s)) }
     var onChanged: (() -> Void)?
 
     init(id: UUID = UUID(), name: String = "", effects: [Effect] = [], key: String? = nil) {
@@ -52,7 +52,7 @@ final class FXPad: ObservableObject, Identifiable, EffectHolder {
 
     var displayName: String {
         if !name.isEmpty { return name }
-        return effects.isEmpty ? "空き" : effects.map(\.kind.label).joined(separator: "＋")
+        return effects.isEmpty ? L("空き") : effects.map(\.kind.label).joined(separator: L("＋"))
     }
 }
 
@@ -249,10 +249,10 @@ struct FXPadBar: View {
                 .foregroundStyle(.purple)
                 .frame(width: 26)
                 .contextMenu {
-                    Button("FX パッドを閉じる") { LayoutManager.shared.close(.pads) }
-                    Button("別ウィンドウに出す") { LayoutManager.shared.detach(.pads) }
+                    Button(L("FX パッドを閉じる")) { LayoutManager.shared.close(.pads) }
+                    Button(L("別ウィンドウに出す")) { LayoutManager.shared.detach(.pads) }
                 }
-                .help("FX パッド：押している間だけ、出力のいちばん最後にエフェクトがかかる（シーン・コンポジションとは別）。「エフェクト」パネルからパッドへドラッグして登録。⌘ドラッグで並び替え。右クリックで設定・名前・キー・空にする・削除")
+                .help(L("FX パッド：押している間だけ、出力のいちばん最後にエフェクトがかかる（シーン・コンポジションとは別）。「エフェクト」パネルからパッドへドラッグして登録。⌘ドラッグで並び替え。右クリックで設定・名前・キー・空にする・削除"))
             }
             ScrollView(.horizontal) {
                 HStack(spacing: 6) {
@@ -266,7 +266,7 @@ struct FXPadBar: View {
                             Image(systemName: "plus").font(.system(size: 11, weight: .semibold))
                         }
                         .controlSize(.small)
-                        .help("パッドを足す")
+                        .help(L("パッドを足す"))
                     }
                 }
                 .padding(.vertical, 2)
@@ -372,14 +372,14 @@ struct FXPadButton: View {
         .onDrop(of: EffectDrop.types, isTargeted: $dropTargeted) { providers in
             EffectDrop.handle(providers) { k in pad.addEffect(k) }
         }
-        .help((empty ? "クリックでエフェクトを選んで登録（「エフェクト」パネルからドラッグ・右クリックの「エフェクトを追加」でも）"
-               : "押している間だけ「\(pad.displayName)」（右クリックで設定）")
-              + (pad.key.map { "\nキー \($0.uppercased()) を押している間も効く" } ?? ""))
+        .help((empty ? L("クリックでエフェクトを選んで登録（「エフェクト」パネルからドラッグ・右クリックの「エフェクトを追加」でも）")
+               : L("押している間だけ「\(pad.displayName)」（右クリックで設定）"))
+              + (pad.key.map { L("\nキー \($0.uppercased()) を押している間も効く") } ?? ""))
         .popover(isPresented: $showSettings, arrowEdge: .top) {
             FXPadSettings(pad: pad)
                 .environmentObject(engine)
         }
-        .effectPickerPopover($showPicker, targetLabel: "パッド \(pad.displayName) に足す") { k in pad.addEffectOpened(k) }
+        .effectPickerPopover($showPicker, targetLabel: L("パッド \(pad.displayName) に足す")) { k in pad.addEffectOpened(k) }
         .contextMenu { PadContextMenu(pad: pad, showSettings: $showSettings, showPicker: $showPicker) }
     }
 }
@@ -401,14 +401,14 @@ private struct FXPadSettings: View {
         ScrollView(.vertical) {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 8) {
-                    SectionTitle("効き方")
+                    SectionTitle(L("効き方"))
                     PadEnvelopeIcon(attack: pad.attack, release: pad.release)
                         .frame(width: 36, height: 12)
                         .foregroundStyle(.purple)
                     Spacer(minLength: 0)
                 }
-                timeRow("効き始め", $pad.attack, help: "押してから全開になるまで。すぐ = いきなり全開")
-                timeRow("離したとき", $pad.release, help: "離してから消え切るまで。すぐ = すぐ消える")
+                timeRow(L("効き始め"), $pad.attack, help: L("押してから全開になるまで。すぐ = いきなり全開"))
+                timeRow(L("離したとき"), $pad.release, help: L("離してから消え切るまで。すぐ = すぐ消える"))
                 EffectsSection(holder: pad)
             }
             .padding(12)
@@ -452,14 +452,14 @@ private struct PadTimeMenus: View {
     @ObservedObject var pad: FXPad
 
     var body: some View {
-        Menu("効き始め（" + FXPad.timeLabel(pad.attack) + "）") {
+        Menu(L("効き始め（\(FXPad.timeLabel(pad.attack))）")) {
             ForEach(FXPad.timeChoices, id: \.self) { t in
-                Button(label(t, current: pad.attack, zero: "すぐ（いきなり全開）", suffix: "かけて")) { pad.attack = t }
+                Button(label(t, current: pad.attack, zero: L("すぐ（いきなり全開）"), suffix: L("かけて"))) { pad.attack = t }
             }
         }
-        Menu("離したとき（" + FXPad.timeLabel(pad.release) + "）") {
+        Menu(L("離したとき（\(FXPad.timeLabel(pad.release))）")) {
             ForEach(FXPad.timeChoices, id: \.self) { t in
-                Button(label(t, current: pad.release, zero: "すぐ消える", suffix: "かけて消える")) { pad.release = t }
+                Button(label(t, current: pad.release, zero: L("すぐ消える"), suffix: L("かけて消える"))) { pad.release = t }
             }
         }
     }
@@ -481,37 +481,37 @@ private struct PadContextMenu: View {
     private var index: Int? { engine.pads.firstIndex { $0.id == pad.id } }
 
     var body: some View {
-            Button("設定…") { showSettings = true }
-            Button("名前を変える…") {
-                if let n = askName(title: "パッドの名前（空にするとエフェクト名）", initial: pad.name) { pad.name = n }
+            Button(L("設定…")) { showSettings = true }
+            Button(L("名前を変える…")) {
+                if let n = askName(title: L("パッドの名前（空にするとエフェクト名）"), initial: pad.name) { pad.name = n }
             }
-            if !pad.name.isEmpty { Button("名前を戻す") { pad.name = "" } }
-            Menu("キー" + (pad.key.map { "（\($0.uppercased())）" } ?? "（なし）")) {
-                Button((pad.key == nil ? "✓ " : "") + "なし") { engine.setPadKey(pad.id, nil) }
+            if !pad.name.isEmpty { Button(L("名前を戻す")) { pad.name = "" } }
+            Menu(L("キー") + (pad.key.map { L("（\($0.uppercased())）") } ?? L("（なし）"))) {
+                Button((pad.key == nil ? "✓ " : "") + L("なし")) { engine.setPadKey(pad.id, nil) }
                 Divider()
                 ForEach(Engine.padKeyCodes.map(\.0), id: \.self) { k in
                     let owner = engine.pads.first { $0.key == k && $0.id != pad.id }
-                    Button((pad.key == k ? "✓ " : "") + k.uppercased() + (owner.map { "（\($0.displayName) から移す）" } ?? "")) {
+                    Button((pad.key == k ? "✓ " : "") + k.uppercased() + (owner.map { L("（\($0.displayName) から移す）") } ?? "")) {
                         engine.setPadKey(pad.id, k)
                     }
                 }
             }
-            Button("エフェクトを探して追加…") { showPicker = true }
-            Menu("エフェクトを追加") { AddEffectMenuItems { k in pad.addEffectOpened(k) } }
+            Button(L("エフェクトを探して追加…")) { showPicker = true }
+            Menu(L("エフェクトを追加")) { AddEffectMenuItems { k in pad.addEffectOpened(k) } }
             if let index {
                 Divider()
-                ControlMenuItems(address: "/halo/pad/\(index + 1)", verb: "押す", title: "パッド \(pad.displayName) を押す")
+                ControlMenuItems(address: "/halo/pad/\(index + 1)", verb: L("押す"), title: L("パッド \(pad.displayName) を押す"))
             }
             PadTimeMenus(pad: pad)
-            Button("空にする") { pad.effects = [] }
+            Button(L("空にする")) { pad.effects = [] }
                 .disabled(empty)
             Divider()
-            Button("左へ移動") { if let i = index { engine.movePad(pad.id, to: i - 1) } }
+            Button(L("左へ移動")) { if let i = index { engine.movePad(pad.id, to: i - 1) } }
                 .disabled(index == 0)
-            Button("右へ移動") { if let i = index { engine.movePad(pad.id, to: i + 1) } }
+            Button(L("右へ移動")) { if let i = index { engine.movePad(pad.id, to: i + 1) } }
                 .disabled(index == engine.pads.count - 1)
             Divider()
-            Button("このパッドを削除", role: .destructive) { engine.removePad(pad.id) }
+            Button(L("このパッドを削除"), role: .destructive) { engine.removePad(pad.id) }
                 .disabled(engine.pads.count <= 1)
             }
 }

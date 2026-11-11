@@ -37,7 +37,7 @@ struct AnimValueField: View {
                             .fill(expanded ? Color.white.opacity(0.12) : Color.white.opacity(0.04)))
                 }
                 .buttonStyle(.plain)
-                .help("動かし方（固定／秒／BPM）")
+                .help(L("動かし方（固定／秒／BPM）"))
                 ValueDrag(label: label, value: $value, range: range, perPoint: perPoint, defaultValue: defaultValue,
                           showsBar: showsBar, format: format, live: anim.isOn ? liveValue() : nil,
                           badge: anim.summary, style: style)
@@ -141,7 +141,7 @@ struct EffectIcons: View {
             .foregroundStyle(.white)
             .padding(.horizontal, 4).padding(.vertical, 2)
             .background(Color.purple.opacity(0.8), in: RoundedRectangle(cornerRadius: 4))
-            .help(list.map { $0.enabled ? $0.kind.label : "（オフ）" + $0.kind.label }.joined(separator: " → "))
+            .help(list.map { $0.enabled ? $0.kind.label : L("（オフ）") + $0.kind.label }.joined(separator: " → "))
         }
     }
 }
@@ -152,21 +152,21 @@ struct BlendChoice: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
-            Text("重ね方").font(.system(size: 11)).foregroundStyle(.secondary)
+            Text(L("重ね方")).font(.system(size: 11)).foregroundStyle(.secondary)
             ChoiceButtons(selection: $blend, items: [BlendMode.normal, .add, .screen, .multiply].map { ($0, $0.label) })
             ChoiceButtons(selection: $blend, items: BlendMode.simpleBelow.prefix(3).map { ($0, $0.label) })
-                .help("差分：重なった所が反転したような色に（同じ色は黒）。オーバーレイ・ソフトライト：明るい所はより明るく、暗い所はより暗く")
+                .help(L("差分：重なった所が反転したような色に（同じ色は黒）。オーバーレイ・ソフトライト：明るい所はより明るく、暗い所はより暗く"))
             ChoiceButtons(selection: $blend, items: BlendMode.simpleBelow.suffix(3).map { ($0, $0.label) })
-                .help("覆い焼き：明るい所が焼けたように光る。色相だけ：下の絵の明るさのまま、このレイヤーの色に。明るさだけ：下の絵の色のまま、このレイヤーの明るさに")
+                .help(L("覆い焼き：明るい所が焼けたように光る。色相だけ：下の絵の明るさのまま、このレイヤーの色に。明るさだけ：下の絵の色のまま、このレイヤーの明るさに"))
             ChoiceButtons(selection: $blend, items: BlendMode.allCases.filter(\.isMask).map { ($0, $0.label) })
-                .help("このレイヤーを見せずに、明るさを使って下のレイヤー全部を切り抜く（白黒の動画や、マスクのエフェクトを付けた白い絵など）。不透明度でかかり具合")
-            Text("絡み合う重ね方（下の絵そのものを変える）").font(.system(size: 11)).foregroundStyle(.secondary).padding(.top, 2)
+                .help(L("このレイヤーを見せずに、明るさを使って下のレイヤー全部を切り抜く（白黒の動画や、マスクのエフェクトを付けた白い絵など）。不透明度でかかり具合"))
+            Text(L("絡み合う重ね方（下の絵そのものを変える）")).font(.system(size: 11)).foregroundStyle(.secondary).padding(.top, 2)
             ChoiceButtons(selection: $blend, items: BlendMode.entangle.prefix(3).map { ($0, $0.label) })
-                .help("屈折：このレイヤーを透明なガラスにして、下の絵を曲げる。光で照らす：このレイヤーの光で下の絵を照らす（ほかは暗く）。流し込む：このレイヤーの動きで下の絵をかき混ぜる")
+                .help(L("屈折：このレイヤーを透明なガラスにして、下の絵を曲げる。光で照らす：このレイヤーの光で下の絵を照らす（ほかは暗く）。流し込む：このレイヤーの動きで下の絵をかき混ぜる"))
             ChoiceButtons(selection: $blend, items: BlendMode.entangle.suffix(3).map { ($0, $0.label) })
-                .help("干渉：2 つの明るさを波にして縞（モアレ）を出す。色を借りる：下の絵の形に、このレイヤーの色を塗る。溶け込む：下の暗い所から順にこのレイヤーへ溶ける")
+                .help(L("干渉：2 つの明るさを波にして縞（モアレ）を出す。色を借りる：下の絵の形に、このレイヤーの色を塗る。溶け込む：下の暗い所から順にこのレイヤーへ溶ける"))
             ChoiceButtons(selection: $blend, items: [(BlendMode.overdrive, BlendMode.overdrive.label)])
-                .help("特殊合成：下のレイヤーの明るさを読んで、100% を超えた分をにじみ・色相ずれ・波紋に変える")
+                .help(L("特殊合成：下のレイヤーの明るさを読んで、100% を超えた分をにじみ・色相ずれ・波紋に変える"))
         }
     }
 }
@@ -204,23 +204,23 @@ struct AnimEditor: View {
             } else if anim.isOn {
                 ChoiceButtons(selection: $anim.motion, items: AnimMotion.allCases.map { ($0, $0.label) })
                 if anim.mode == .time {
-                    ValueDrag(label: "周期", value: $anim.seconds, range: 0.1...120, perPoint: 0.02, defaultValue: 4,
-                              format: { String(format: "%.1f秒", $0) })
+                    ValueDrag(label: L("周期"), value: $anim.seconds, range: 0.1...120, perPoint: 0.02, defaultValue: 4,
+                              format: { String(format: L("%.1f秒"), $0) })
                         .frame(height: UI.rowHeight)
                 } else {
                     HStack(spacing: 4) {
                         ChoiceButtons(selection: $anim.beats, items: ParamAnim.beatChoices.map { ($0, beatShort($0)) },
                                       columns: 5, fontSize: 11)
-                        Text("拍").font(.system(size: 11)).foregroundStyle(.secondary)
+                        Text(L("拍")).font(.system(size: 11)).foregroundStyle(.secondary)
                     }
-                    .help("何拍で 1 周するか")
+                    .help(L("何拍で 1 周するか"))
                 }
             }
             if anim.isOn {
                 HStack(spacing: 6) {
-                    ValueDrag(label: "から", value: $anim.lo, range: range, perPoint: perPoint,
+                    ValueDrag(label: L("から"), value: $anim.lo, range: range, perPoint: perPoint,
                               defaultValue: defaultRange.lowerBound, format: format)
-                    ValueDrag(label: "まで", value: $anim.hi, range: range, perPoint: perPoint,
+                    ValueDrag(label: L("まで"), value: $anim.hi, range: range, perPoint: perPoint,
                               defaultValue: defaultRange.upperBound, format: format)
                 }
                 .frame(height: UI.rowHeight)
@@ -253,14 +253,14 @@ struct AudioAnimControls: View {
             ChoiceButtons(selection: band, items: AudioBand.allCases.map { ($0, $0.label) })
                 .help(link.band.help)
             HStack(spacing: 8) {
-                ValueDrag(label: "感度", value: gain, range: 0...6, perPoint: 0.005, defaultValue: 1, format: EffectParam.percent)
+                ValueDrag(label: L("感度"), value: gain, range: 0...6, perPoint: 0.005, defaultValue: 1, format: EffectParam.percent)
                     .frame(height: UI.rowHeight)
-                Toggle("逆", isOn: reverse).toggleStyle(.button).controlSize(.small)
-                    .help("音が大きいほど「から」の方へ")
+                Toggle(L("逆"), isOn: reverse).toggleStyle(.button).controlSize(.small)
+                    .help(L("音が大きいほど「から」の方へ"))
             }
             AudioMeter(band: link.band, gain: link.gain)
             if ar.source == .off {
-                Text("音の入力がオフ（上のバーの「音の入力」で、アプリの音かマイク・ライン入力を選ぶ）")
+                Text(L("音の入力がオフ（上のバーの「音の入力」で、アプリの音かマイク・ライン入力を選ぶ）"))
                     .font(.system(size: 11)).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -276,21 +276,21 @@ struct BPMControl: View {
             ValueDrag(label: "BPM", value: Binding(get: { engine.bpm }, set: { engine.bpm = $0 }),
                       range: 20...300, perPoint: 0.05, defaultValue: 120, format: { String(format: "%.1f", $0) })
                 .frame(width: 150, height: 40)
-                .help("左右ドラッグで BPM / Shift で微調整 / ダブルクリックで 120")
+                .help(L("左右ドラッグで BPM / Shift で微調整 / ダブルクリックで 120"))
             Button {
                 engine.tapTempo()
             } label: {
                 Text("TAP").font(.system(size: 14, weight: .bold)).frame(width: 64, height: 26)
             }
             .controlSize(.large)
-            .help("拍に合わせて何回か押すと BPM が決まる（押した瞬間が拍の頭になる）")
+            .help(L("拍に合わせて何回か押すと BPM が決まる（押した瞬間が拍の頭になる）"))
             Button {
                 engine.resyncBeat()
             } label: {
-                Text("頭").font(.system(size: 13, weight: .semibold)).frame(width: 34, height: 26)
+                Text(L("頭")).font(.system(size: 13, weight: .semibold)).frame(width: 34, height: 26)
             }
             .controlSize(.large)
-            .help("今を 1 拍目（小節の頭）にする")
+            .help(L("今を 1 拍目（小節の頭）にする"))
             BPMAutoButton()
             BeatLights()
                 .frame(height: 40)
@@ -383,14 +383,14 @@ struct EffectsSection<H: ObservableObject & EffectHolder>: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            SectionTitle("エフェクト", icon: "camera.filters", tint: UI.effectTint)
+            SectionTitle(L("エフェクト"), icon: "camera.filters", tint: UI.effectTint)
             // ＋ボタンのメニューから選ぶか、右下の「エフェクト」一覧からここへドラッグ
             HStack(spacing: 8) {
                 AddEffectMenu { k in holder.addEffectOpened(k) }
                     .tint(.purple)
                 Text(holder.effects.isEmpty
-                     ? "またはパネルからドラッグ（上から順にかかる）"
-                     : "またはパネルからドラッグ")
+                     ? L("またはパネルからドラッグ（上から順にかかる）")
+                     : L("またはパネルからドラッグ"))
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -413,7 +413,7 @@ struct EffectsSection<H: ObservableObject & EffectHolder>: View {
                     .modifier(EffectReorderDrop(index: i, id: e.id, holder: holder))
             }
             if holder.effects.count > 1 {
-                Text("名前の行をドラッグして並べ替え（上から順にかかる）。▸ で開く／閉じる")
+                Text(L("名前の行をドラッグして並べ替え（上から順にかかる）。▸ で開く／閉じる"))
                     .font(.system(size: 11)).foregroundStyle(.secondary)
             }
         }
@@ -454,13 +454,13 @@ struct EffectCard: View {
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(.secondary)
                         .frame(width: 16)
-                        .help("ドラッグして並べ替え")
+                        .help(L("ドラッグして並べ替え"))
                 }
                 Toggle("", isOn: $effect.enabled)
                     .toggleStyle(.switch)
                     .labelsHidden()
                     .controlSize(.small)
-                    .help("オン／オフ")
+                    .help(L("オン／オフ"))
                 HStack(spacing: narrow ? 4 : 8) {
                     Image(systemName: open ? "chevron.down" : "chevron.right")
                         .font(.system(size: 11, weight: .bold))
@@ -477,26 +477,26 @@ struct EffectCard: View {
                         .minimumScaleFactor(0.75)
                     if effect.hasMix && (effect.mix < 0.995 || effect.mixAnim.isOn) {
                         // 不透明度を下げている（動かしている）ことが閉じていても分かるように
-                        Text(effect.mixAnim.isOn ? "不透明度〜" : String(format: "%.0f%%", effect.mix * 100))
+                        Text(effect.mixAnim.isOn ? L("不透明度〜") : String(format: "%.0f%%", effect.mix * 100))
                             .font(.system(size: 10, weight: .semibold).monospacedDigit())
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                             .fixedSize()
-                            .help("このエフェクトの不透明度")
+                            .help(L("このエフェクトの不透明度"))
                     }
                     if effect.anims.values.contains(where: \.isOn) {
                         Image(systemName: "waveform.path").font(.system(size: 11, weight: .semibold))
                             .foregroundStyle(.purple)
-                            .help("動かしている値がある")
+                            .help(L("動かしている値がある"))
                     }
                     Spacer(minLength: 0)
                 }
                 .contentShape(Rectangle())
                 .onTapGesture { toggleOpen() }
-                .help(effect.kind.help + "（クリックで開く／閉じる）")
+                .help(effect.kind.help + L("（クリックで開く／閉じる）"))
                 resetButton
                 Button(role: .destructive) { remove() } label: { Image(systemName: "trash").frame(width: 18) }
-                    .help("このエフェクトを外す")
+                    .help(L("このエフェクトを外す"))
             }
             .controlSize(.regular)
             .frame(height: 26)
@@ -515,12 +515,12 @@ struct EffectCard: View {
             if open || isBlendSettings {
             if effect.hasMix && !isBlendSettings {
                 // エフェクトの不透明度（かかり具合）：元の絵とエフェクトをかけた絵を混ぜる
-                AnimValueField(label: "不透明度", value: mixBinding, range: 0...1, perPoint: 0.003, defaultValue: 1,
+                AnimValueField(label: L("不透明度"), value: mixBinding, range: 0...1, perPoint: 0.003, defaultValue: 1,
                                showsBar: true, format: EffectParam.percent,
                                anim: Binding(get: { effect.mixAnim }, set: { var e = effect; e.setMixAnim($0); effect = e }),
                                origin: origin, animDefault: 0...1)
                     .frame(maxWidth: narrow ? .infinity : UI.paramColumnWidth, alignment: .leading)
-                    .help("このエフェクトの不透明度（かかり具合）。0% で元の絵のまま、100% でいっぱいにかかる")
+                    .help(L("このエフェクトの不透明度（かかり具合）。0% で元の絵のまま、100% でいっぱいにかかる"))
             }
             if effect.kind == .strobe { strobeSwitches }
             if effect.kind.isText { textControls }
@@ -537,7 +537,7 @@ struct EffectCard: View {
                             .padding(.leading, UI.paramLabelInset)
                             .frame(maxWidth: .infinity, minHeight: UI.rowHeight, maxHeight: UI.rowHeight, alignment: .leading)
                             .help(effect.kind == .colorize
-                                  ? "オン：元の明るさのまま色だけ変える／オフ：黒は黒、白はその色そのものになる" : "")
+                                  ? L("オン：元の明るさのまま色だけ変える／オフ：黒は黒、白はその色そのものになる") : "")
                     } else if let choices = p.choices {
                         HStack(spacing: 8) {
                             Text(p.label).font(.system(size: 12)).foregroundStyle(.secondary)
@@ -560,9 +560,9 @@ struct EffectCard: View {
             if effect.kind == .colorize {
                 if effect.value(0) < 0.5 {
                     HStack(spacing: 10) {
-                        Text("色").font(.system(size: 12)).foregroundStyle(.secondary)
+                        Text(L("色")).font(.system(size: 12)).foregroundStyle(.secondary)
                         ColorWell(color: $effect.color)
-                        Text("（クリックで色を選ぶ）")
+                        Text(L("（クリックで色を選ぶ）"))
                             .font(.system(size: 11)).foregroundStyle(.secondary)
                     }
                 } else {
@@ -571,14 +571,14 @@ struct EffectCard: View {
             }
             if effect.hasQuality {
                 HStack(spacing: 8) {
-                    Text("画質").font(.system(size: 12)).foregroundStyle(.secondary).fixedSize()
+                    Text(L("画質")).font(.system(size: 12)).foregroundStyle(.secondary).fixedSize()
                     ChoiceButtons(selection: $effect.quality,
                                   items: Effect.qualityLabels.indices.map { ($0, Effect.qualityLabels[$0]) })
                         .frame(maxWidth: 320)
                 }
                 .padding(.leading, UI.paramLabelInset)
                 .frame(height: UI.rowHeight)
-                .help("小さく描いて引き伸ばす。GPU の負担が減る（半分なら約 1/4）。線や細かい模様は少しぼやける")
+                .help(L("小さく描いて引き伸ばす。GPU の負担が減る（半分なら約 1/4）。線や細かい模様は少しぼやける"))
             }
             if effect.kind == .polyMask { PolyMaskControls(effect: $effect) }
             if effect.kind == .syphonIn { SyphonSourcePicker(effect: $effect) }
@@ -592,7 +592,7 @@ struct EffectCard: View {
                 && !(effect.kind == .rasterScan && abs(effect.value(4) - 1) > 0.5)
                 && !(effect.kind == .audioScope && effect.value(4) > 0.5) {
                 HStack(spacing: 10) {
-                    Text("色").font(.system(size: 12)).foregroundStyle(.secondary)
+                    Text(L("色")).font(.system(size: 12)).foregroundStyle(.secondary)
                     ColorWell(color: $effect.color)
                     ForEach([RGB.white, RGB.black, .hsb(0, 0.85, 1), .hsb(0.33, 0.85, 1), .hsb(0.6, 0.85, 1),
                              .hsb(0.83, 0.85, 1), .hsb(0.13, 0.85, 1)], id: \.self) { c in
@@ -615,7 +615,7 @@ struct EffectCard: View {
             }
             if effect.kind == .strobe && effect.value(0) < 0.5 {
                 HStack(spacing: 10) {
-                    Text("光る色").font(.system(size: 12)).foregroundStyle(.secondary)
+                    Text(L("光る色")).font(.system(size: 12)).foregroundStyle(.secondary)
                     ColorWell(color: $effect.color)
                 }
             }
@@ -645,7 +645,7 @@ struct EffectCard: View {
     /// ドット・群れ：よく使う見た目に一度でそろえる（そろえたあと、ふつうに値を直せる）
     private var looksRow: some View {
         HStack(spacing: 6) {
-            Text("見た目").font(.system(size: 12)).foregroundStyle(.secondary)
+            Text(L("見た目")).font(.system(size: 12)).foregroundStyle(.secondary)
             ForEach(effect.kind.looks, id: \.name) { look in
                 Button(look.name) {
                     var e = effect
@@ -710,9 +710,9 @@ struct EffectCard: View {
         }
         .disabled(effect.isDefault)
         .help(effect.kind.isGenerator
-              ? "設定を最初の状態に戻す（値・動き・色。文字はそのまま）"
-              : effect.kind == .polyMask ? "設定を最初の状態に戻す（値・動き・不透明度。描いた形はそのまま）"
-              : "設定を最初の状態に戻す（値・動き・不透明度・色）")
+              ? L("設定を最初の状態に戻す（値・動き・色。文字はそのまま）")
+              : effect.kind == .polyMask ? L("設定を最初の状態に戻す（値・動き・不透明度。描いた形はそのまま）")
+              : L("設定を最初の状態に戻す（値・動き・不透明度・色）"))
     }
 
     /// テキストの文字・動き・フォント・行の切り替え
@@ -722,7 +722,7 @@ struct EffectCard: View {
             let mode = Int(effect.value(12).rounded())
             if effect.kind == .text || mode == 1 || mode == 2 {
                 if effect.kind == .clock {
-                    Text("0 になったら出す文字（空なら 0 のまま）").font(.system(size: 12)).foregroundStyle(.secondary)
+                    Text(L("0 になったら出す文字（空なら 0 のまま）")).font(.system(size: 12)).foregroundStyle(.secondary)
                 }
                 TextEditor(text: Binding(get: { effect.text }, set: { var e = effect; e.text = $0; effect = e }))
                     .font(.system(size: 14, weight: .semibold))
@@ -731,15 +731,15 @@ struct EffectCard: View {
                     .frame(height: effect.kind == .clock ? 44 : 64)
                     .background(RoundedRectangle(cornerRadius: 5).fill(Color.black.opacity(0.35)))
                     .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.gray.opacity(0.4)))
-                    .help(effect.kind == .clock ? "カウントダウン・タイマーが 0 になったときに出す文字。改行もできる"
-                          : "出す文字。改行で行を分ける（「行の切り替え」で 1 行ずつ拍に合わせて切り替えられる）")
+                    .help(effect.kind == .clock ? L("カウントダウン・タイマーが 0 になったときに出す文字。改行もできる")
+                          : L("出す文字。改行で行を分ける（「行の切り替え」で 1 行ずつ拍に合わせて切り替えられる）"))
             }
-            labeled("動き") {
+            labeled(L("動き")) {
                 ChoiceButtons(selection: valueBinding(0),
                               items: TextLook.motions.indices.map { (Double($0), TextLook.motions[$0]) },
                               columns: narrow ? 2 : 3)
             }
-            labeled("フォント") {
+            labeled(L("フォント")) {
                 let n = narrow ? 2 : 5
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 3), count: n), spacing: 3) {
                     ForEach(TextLook.fonts.indices, id: \.self) { i in
@@ -761,12 +761,12 @@ struct EffectCard: View {
                 }
             }
             if effect.kind == .text {
-            labeled("行の切り替え") {
+            labeled(L("行の切り替え")) {
                 ChoiceButtons(selection: valueBinding(8),
                               items: TextLook.switchBeats.indices.map {
-                                  (Double($0), $0 == 0 ? "全部の行" : ParamAnim.beatsLabel(TextLook.switchBeats[$0]))
+                                  (Double($0), $0 == 0 ? L("全部の行") : ParamAnim.beatsLabel(TextLook.switchBeats[$0]))
                               })
-                    .help("改行で分けた行を、拍に合わせて 1 行ずつ出す")
+                    .help(L("改行で分けた行を、拍に合わせて 1 行ずつ出す"))
             }
             }
         }
@@ -776,27 +776,27 @@ struct EffectCard: View {
     /// 時計のモード・表示・秒より細かく
     private var clockControls: some View {
         VStack(alignment: .leading, spacing: 8) {
-            labeled("モード") {
+            labeled(L("モード")) {
                 ChoiceButtons(selection: valueBinding(12),
                               items: ClockText.modes.indices.map { (Double($0), ClockText.modes[$0]) },
                               columns: 2, help: { v in
-                                  ["パソコンの時計の今の時刻", "決めた時刻まで（過ぎた日は次の日のその時刻まで。0 のあと 1 時間は終わった表示）",
-                                   "決めた長さを、クリップを出した時から数える", "クリップを出した時から数える"][Int(v)]
+                                  [L("パソコンの時計の今の時刻"), L("決めた時刻まで（過ぎた日は次の日のその時刻まで。0 のあと 1 時間は終わった表示）"),
+                                   L("決めた長さを、クリップを出した時から数える"), L("クリップを出した時から数える")][Int(v)]
                               })
             }
             let mode = Int(effect.value(12).rounded())
             if mode == 1 {
-                labeled("目標の時刻") { timeFields([(15, "時"), (16, "分"), (17, "秒")]) }
+                labeled(L("目標の時刻")) { timeFields([(15, L("時")), (16, L("分")), (17, L("秒"))]) }
             } else if mode == 2 {
-                labeled("長さ") { timeFields([(18, "分"), (19, "秒")]) }
+                labeled(L("長さ")) { timeFields([(18, L("分")), (19, L("秒"))]) }
             }
-            labeled("表示") {
+            labeled(L("表示")) {
                 ChoiceButtons(selection: valueBinding(13),
                               items: ClockText.formats.indices.map { (Double($0), ClockText.formats[$0]) })
-                    .help("自動：1 時間以上は 時:分:秒、それより短いと 分:秒。カウントダウン・タイマーの最後の 10 秒は数字だけ")
+                    .help(L("自動：1 時間以上は 時:分:秒、それより短いと 分:秒。カウントダウン・タイマーの最後の 10 秒は数字だけ"))
             }
-            labeled("秒より細かく") {
-                ChoiceButtons(selection: valueBinding(14), items: [(0.0, "なし"), (1.0, "1/10"), (2.0, "1/100")])
+            labeled(L("秒より細かく")) {
+                ChoiceButtons(selection: valueBinding(14), items: [(0.0, L("なし")), (1.0, "1/10"), (2.0, "1/100")])
             }
         }
     }
@@ -831,17 +831,17 @@ struct EffectCard: View {
             // 狭いときは縦に
             let row = narrow ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8)) : AnyLayout(HStackLayout(spacing: 16))
             row {
-                segmented(0, ["色で光る", "消える", "反転"], width: narrow ? paramsWidth - 24 : UI.paramColumnWidth)
-                segmented(1, ["BPM", "秒"], width: 120)
+                segmented(0, [L("色で光る"), L("消える"), L("反転")], width: narrow ? paramsWidth - 24 : UI.paramColumnWidth)
+                segmented(1, ["BPM", L("秒")], width: 120)
             }
             if effect.value(1) < 0.5 {
                 HStack(spacing: 8) {
-                    Text("間隔").font(.system(size: 12)).foregroundStyle(.secondary)
+                    Text(L("間隔")).font(.system(size: 12)).foregroundStyle(.secondary)
                         .frame(width: 34, alignment: .leading)
                     segmented(2, ["1/16", "1/8", "1/4", "1/2", "1", "2", "4"], width: max(paramsWidth - 96, 120))
-                    Text("拍").font(.system(size: 12)).foregroundStyle(.secondary)
+                    Text(L("拍")).font(.system(size: 12)).foregroundStyle(.secondary)
                 }
-                .help("何拍ごとに光るか（BPM に合わせる）")
+                .help(L("何拍ごとに光るか（BPM に合わせる）"))
             }
         }
         .opacity(effect.enabled ? 1 : 0.5)
@@ -876,9 +876,9 @@ struct PaletteEditor: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
-                Text("パレット").font(.system(size: 12)).foregroundStyle(.secondary)
+                Text(L("パレット")).font(.system(size: 12)).foregroundStyle(.secondary)
                 Spacer()
-                Menu("ひな形") {
+                Menu(L("ひな形")) {
                     ForEach(PalettePreset.all) { p in
                         Button(p.name) { palette = p.colors }
                     }
@@ -889,7 +889,7 @@ struct PaletteEditor: View {
                     palette.reverse()
                 } label: { Image(systemName: "arrow.left.arrow.right") }
                     .controlSize(.large)
-                    .help("並びを逆にする（明暗を入れ替える）")
+                    .help(L("並びを逆にする（明暗を入れ替える）"))
             }
             // 暗い → 明るいのグラデーション
             LinearGradient(colors: palette.map { Color(rgb: $0) }, startPoint: .leading, endPoint: .trailing)
@@ -901,7 +901,7 @@ struct PaletteEditor: View {
                                              set: { if palette.indices.contains(i) { palette[i] = $0 } }),
                               width: 44)
                         .contextMenu {
-                            Button("この色を外す") { if palette.count > 2 { palette.remove(at: i) } }
+                            Button(L("この色を外す")) { if palette.count > 2 { palette.remove(at: i) } }
                                 .disabled(palette.count <= 2)
                         }
                 }
@@ -910,11 +910,11 @@ struct PaletteEditor: View {
                         palette.append(palette.last ?? .white)
                     } label: { Image(systemName: "plus").frame(width: 20, height: 20) }
                         .controlSize(.large)
-                        .help("色を足す（\(Effect.maxPalette) 色まで）")
+                        .help(L("色を足す（\(Effect.maxPalette) 色まで）"))
                 }
                 Spacer(minLength: 0)
             }
-            Text("左が暗い所、右が明るい所の色。色をクリックで変更、右クリックで外す")
+            Text(L("左が暗い所、右が明るい所の色。色をクリックで変更、右クリックで外す"))
                 .font(.system(size: 11)).foregroundStyle(.secondary)
         }
     }

@@ -23,9 +23,9 @@ struct OutputFormat: Codable, Equatable {
         var id: Int { rawValue }
         var label: String {
             switch self {
-            case .fit: "収める（黒帯）"
-            case .fill: "いっぱいに（切れる）"
-            case .stretch: "引き伸ばす"
+            case .fit: L("収める（黒帯）")
+            case .fill: L("いっぱいに（切れる）")
+            case .stretch: L("引き伸ばす")
             }
         }
     }
@@ -46,25 +46,25 @@ struct OutputFormat: Codable, Equatable {
 
     static let presets: [Preset] = [
         Preset(label: "HD", width: 1280, height: 720),
-        Preset(label: "フル HD", width: 1920, height: 1080),
+        Preset(label: L("フル HD"), width: 1920, height: 1080),
         Preset(label: "WUXGA", width: 1920, height: 1200),
         Preset(label: "2.5K", width: 2560, height: 1440),
         Preset(label: "4K", width: 3840, height: 2160),
-        Preset(label: "縦（スマホ）", width: 1080, height: 1920),
-        Preset(label: "正方形", width: 1080, height: 1080),
-        Preset(label: "XGA（4:3）", width: 1024, height: 768),
+        Preset(label: L("縦（スマホ）"), width: 1080, height: 1920),
+        Preset(label: L("正方形"), width: 1080, height: 1080),
+        Preset(label: L("XGA（4:3）"), width: 1024, height: 768),
     ]
 
     /// フレームレートの選択肢（0 = ディスプレイに合わせる）
     static let fpsChoices: [Double] = [0, 24, 25, 30, 50, 60]
 
     static func fpsLabel(_ f: Double) -> String {
-        f <= 0 ? "ディスプレイに合わせる" : (f == f.rounded() ? String(format: "%.0f fps", f) : String(format: "%.2f fps", f))
+        f <= 0 ? L("ディスプレイに合わせる") : (f == f.rounded() ? String(format: "%.0f fps", f) : String(format: "%.2f fps", f))
     }
 
     /// 短い説明（上のバー用）
     var summary: String {
-        (isAuto ? "出力先の大きさ" : "\(width)×\(height)") + " · " + (fps <= 0 ? "ディスプレイ" : String(format: "%g fps", fps))
+        (isAuto ? L("出力先の大きさ") : "\(width)×\(height)") + " · " + (fps <= 0 ? L("ディスプレイ") : String(format: "%g fps", fps))
     }
 
     /// 出力先（縦横比 screenAspect）の座標 0〜1 → 合成の絵が入る枠の中の座標 0〜1 への変換（コーナーピンの前にかける）
@@ -133,33 +133,33 @@ struct OutputFormatControls: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Picker("解像度", selection: sizeTag) {
-                Text("出力先に合わせる").tag("auto")
+            Picker(L("解像度"), selection: sizeTag) {
+                Text(L("出力先に合わせる")).tag("auto")
                 Divider()
                 ForEach(OutputFormat.presets) { p in
-                    Text("\(p.width) × \(p.height)（\(p.label)）").tag(p.id)
+                    Text(L("\(p.width) × \(p.height)（\(p.label)）")).tag(p.id)
                 }
                 Divider()
-                Text("指定する…").tag("custom")
+                Text(L("指定する…")).tag("custom")
             }
             if sizeTag.wrappedValue == "custom" {
                 HStack(spacing: 6) {
-                    TextField("幅", text: $customW).frame(width: 70).onSubmit(applyCustom)
+                    TextField(L("幅"), text: $customW).frame(width: 70).onSubmit(applyCustom)
                     Text("×")
-                    TextField("高さ", text: $customH).frame(width: 70).onSubmit(applyCustom)
+                    TextField(L("高さ"), text: $customH).frame(width: 70).onSubmit(applyCustom)
                     Text("px").foregroundStyle(.secondary)
-                    Button("決定", action: applyCustom)
+                    Button(L("決定"), action: applyCustom)
                 }
                 .padding(.leading, 70)
             }
             if !format.isAuto {
-                Picker("出力先との合わせ方", selection: Binding(get: { format.fit },
+                Picker(L("出力先との合わせ方"), selection: Binding(get: { format.fit },
                                                          set: { var f = format; f.fit = $0; engine.outputFormat = f })) {
                     ForEach(OutputFormat.Fit.allCases) { Text($0.label).tag($0) }
                 }
-                .help("出力先（ディスプレイ）と縦横比が違うとき")
+                .help(L("出力先（ディスプレイ）と縦横比が違うとき"))
             }
-            Picker("フレームレート", selection: Binding(get: { format.fps },
+            Picker(L("フレームレート"), selection: Binding(get: { format.fps },
                                                  set: { var f = format; f.fps = $0; engine.outputFormat = f })) {
                 ForEach(OutputFormat.fpsChoices, id: \.self) { Text(OutputFormat.fpsLabel($0)).tag($0) }
             }
@@ -179,10 +179,10 @@ struct OutputFormatControls: View {
     private var explanation: String {
         let (w, h) = engine.compositionSize
         let size = format.isAuto
-            ? "今は \(w) × \(h) で合成（出力先の縦横比・高さ 1080）。"
-            : "\(w) × \(h) で合成して、出力先の大きさに拡大・縮小して出す。"
-        let fps = format.fps <= 0 ? "ディスプレイの vsync ごとに描く。" : String(format: "1 秒に %g 回だけ描く（あいだは前の絵のまま。操作画面のプレビューも同じ）。", format.fps)
-        return size + fps + "プロジェクトに保存される。"
+            ? L("今は \(w) × \(h) で合成（出力先の縦横比・高さ 1080）。")
+            : L("\(w) × \(h) で合成して、出力先の大きさに拡大・縮小して出す。")
+        let fps = format.fps <= 0 ? L("ディスプレイの vsync ごとに描く。") : String(format: L("1 秒に %g 回だけ描く（あいだは前の絵のまま。操作画面のプレビューも同じ）。"), format.fps)
+        return size + fps + L("プロジェクトに保存される。")
     }
 
     private func applyCustom() {
@@ -203,10 +203,10 @@ struct OutputFormatButton: View {
     var body: some View {
         Button { open.toggle() } label: {
             Label(engine.outputFormat.isAuto && engine.outputFormat.fps <= 0
-                  ? "解像度・fps" : engine.outputFormat.summary, systemImage: "aspectratio")
+                  ? L("解像度・fps") : engine.outputFormat.summary, systemImage: "aspectratio")
                 .lineLimit(1)
         }
-        .help("出力の解像度とフレームレート：" + engine.outputFormat.summary)
+        .help(L("出力の解像度とフレームレート：") + engine.outputFormat.summary)
         .popover(isPresented: $open, arrowEdge: .bottom) {
             OutputFormatControls()
                 .padding(16)

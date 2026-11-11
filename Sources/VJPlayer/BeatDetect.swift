@@ -150,7 +150,7 @@ struct BPMAutoButton: View {
     var body: some View {
         Toggle(isOn: $det.enabled) {
             VStack(spacing: 0) {
-                Text("自動").font(.system(size: 12, weight: .bold))
+                Text(L("自動")).font(.system(size: 12, weight: .bold))
                 if det.enabled {
                     Text(det.detected.map { String(format: "%.1f", $0) } ?? "…")
                         .font(.system(size: 9, design: .monospaced))
@@ -162,7 +162,7 @@ struct BPMAutoButton: View {
         .toggleStyle(.button)
         .controlSize(.large)
         .help(ar.source == .off
-              ? "音から BPM を合わせる（先に上のバーの「音の入力」で音を選ぶ）"
-              : "音から BPM と拍の頭を合わせ続ける（緑 = 合っている。78〜160 BPM の間で探す）")
+              ? L("音から BPM を合わせる（先に上のバーの「音の入力」で音を選ぶ）")
+              : L("音から BPM と拍の頭を合わせ続ける（緑 = 合っている。78〜160 BPM の間で探す）"))
     }
 }

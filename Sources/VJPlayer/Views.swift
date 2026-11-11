@@ -126,7 +126,7 @@ struct ContentView: View {
         }
         .overlay(alignment: .top) { ControlLearnBanner() }
         .background(WindowTitleSync(
-            title: (engine.projectURL?.deletingPathExtension().lastPathComponent ?? "名称未設定") + " — " + AppInfo.name,
+            title: (engine.projectURL?.deletingPathExtension().lastPathComponent ?? L("名称未設定")) + " — " + AppInfo.name,
             url: engine.projectURL, edited: engine.isDirty))
         .frame(minWidth: 1300, minHeight: 800)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -146,7 +146,7 @@ struct OutputMonitor: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
-                SectionTitle("出力")
+                SectionTitle(L("出力"))
                 Circle()
                     .fill(output.target == .none ? Color.gray : Color.green)
                     .frame(width: 7, height: 7)
@@ -163,7 +163,7 @@ struct OutputMonitor: View {
                     PanelCloseButton(panel: .monitor)
                 }
                 if editCorners {
-                    Text("四隅の黄色い点をドラッグ")
+                    Text(L("四隅の黄色い点をドラッグ"))
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(.yellow)
                 }
@@ -172,12 +172,12 @@ struct OutputMonitor: View {
                 MetalPreview(kind: .output)
                 if editCorners { CornerPinOverlay() }
                 if engine.compMuted {
-                    Label("コンポジションをミュート中", systemImage: "eye.slash.fill")
+                    Label(L("コンポジションをミュート中"), systemImage: "eye.slash.fill")
                         .font(.system(size: 12, weight: .bold))
                         .foregroundStyle(.red)
                         .allowsHitTesting(false)
                 } else if engine.isBlackout {
-                    Label("ブラックアウト中", systemImage: "eye.slash.fill")
+                    Label(L("ブラックアウト中"), systemImage: "eye.slash.fill")
                         .font(.system(size: 12, weight: .bold))
                         .foregroundStyle(.red)
                         .allowsHitTesting(false)
@@ -188,13 +188,13 @@ struct OutputMonitor: View {
                 engine.addEffect(k)
                 engine.inspectorTab = .composition
             }
-            .effectPickerPopover($showPicker, targetLabel: "コンポジションに足す") { k in
+            .effectPickerPopover($showPicker, targetLabel: L("コンポジションに足す")) { k in
                 engine.addEffectOpened(k)
                 engine.inspectorTab = .composition
             }
             .contextMenu {
-                Button("コンポジションにエフェクトを探して追加…") { showPicker = true }
-                Menu("コンポジションにエフェクトを追加") {
+                Button(L("コンポジションにエフェクトを探して追加…")) { showPicker = true }
+                Menu(L("コンポジションにエフェクトを追加")) {
                     AddEffectMenuItems { k in
                         engine.addEffectOpened(k)
                         engine.inspectorTab = .composition
@@ -211,11 +211,11 @@ struct OutputMonitor: View {
 
     private var statusText: String {
         switch output.target {
-        case .none: return "出力なし"
-        case .window: return "テスト用ウィンドウ"
+        case .none: return L("出力なし")
+        case .window: return L("テスト用ウィンドウ")
         case .screen(let id):
             return output.screens.first { OutputController.displayID(of: $0) == id }
-                .map { OutputController.label(of: $0) } ?? "ディスプレイ"
+                .map { OutputController.label(of: $0) } ?? L("ディスプレイ")
         }
     }
 }
@@ -232,7 +232,7 @@ struct AppBadge: View {
                 .frame(width: 26, height: 26)
         }
         .buttonStyle(.plain)
-        .help("\(AppInfo.name) " + (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "") + "（押すとこのアプリについて）")
+        .help("\(AppInfo.name) " + (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "") + L("（押すとこのアプリについて）"))
     }
 
     /// .app ならアプリのアイコン。開発中（.app でない）は、同じ絵を Resources から
@@ -253,20 +253,20 @@ struct TopBar: View {
     var body: some View {
         HStack(spacing: 10) {
             AppBadge()
-            Picker("出力", selection: $output.target) {
-                Text("出力なし").tag(OutputTarget.none)
-                Text("ウィンドウ（テスト用）").tag(OutputTarget.window)
+            Picker(L("出力"), selection: $output.target) {
+                Text(L("出力なし")).tag(OutputTarget.none)
+                Text(L("ウィンドウ（テスト用）")).tag(OutputTarget.window)
                 ForEach(output.screens, id: \.self) { s in
                     Text(OutputController.label(of: s)).tag(OutputTarget.screen(OutputController.displayID(of: s)))
                 }
             }
             .frame(width: 240)
-            .help("出力を閉じる／元に戻す：⌘⇧F")
+            .help(L("出力を閉じる／元に戻す：⌘⇧F"))
             OutputFormatButton()
             RecordButton()
 
-            Picker("音声", selection: $engine.audioDeviceUID) {
-                Text("システム既定").tag(String?.none)
+            Picker(L("音声"), selection: $engine.audioDeviceUID) {
+                Text(L("システム既定")).tag(String?.none)
                 ForEach(audioDevices) { d in
                     Text(d.name).tag(String?.some(d.id))
                 }
@@ -278,7 +278,7 @@ struct TopBar: View {
             } label: {
                 Image(systemName: "arrow.clockwise")
             }
-            .help("オーディオデバイス一覧を更新")
+            .help(L("オーディオデバイス一覧を更新"))
             AudioInputButton()
             LinkButton()
             AutopilotButton()
@@ -290,21 +290,21 @@ struct TopBar: View {
             Divider().frame(height: 24)
 
             Toggle(isOn: $editCorners) {
-                Label("四隅を調整", systemImage: "skew")
+                Label(L("四隅を調整"), systemImage: "skew")
             }
             .toggleStyle(.button)
-            .help("コーナーピン（四隅）を調整")
+            .help(L("コーナーピン（四隅）を調整"))
             Button {
                 engine.resetCorners()
             } label: {
                 Image(systemName: "arrow.uturn.backward")
             }
-            .help("四隅をリセット")
+            .help(L("四隅をリセット"))
             Toggle(isOn: $engine.testPattern) {
-                Label("テストパターン", systemImage: "grid")
+                Label(L("テストパターン"), systemImage: "grid")
             }
             .toggleStyle(.button)
-            .help("テストパターンを出力")
+            .help(L("テストパターンを出力"))
             Divider().frame(height: 24)
             BlackoutButton()
         }
@@ -324,7 +324,7 @@ struct BlackoutButton: View {
         Button {
             engine.toggleBlackout()
         } label: {
-            Label(engine.isBlackout ? "ブラックアウト中" : "ブラックアウト",
+            Label(engine.isBlackout ? L("ブラックアウト中") : L("ブラックアウト"),
                   systemImage: engine.isBlackout ? "eye.slash.fill" : "moon.fill")
                 .frame(minWidth: 130)
         }
@@ -332,8 +332,8 @@ struct BlackoutButton: View {
         .buttonStyle(.borderedProminent)
         .opacity(engine.isBlackout && blink ? 0.55 : 1)
         .help(engine.isBlackout
-              ? "クリックで解除 (Esc)。クリップは裏で再生を続けています"
-              : "出力の映像と音を消す (Esc)。もう一度押すと元に戻る。フェード時間は設定（⌘,）。⇧Esc で全レイヤー停止")
+              ? L("クリックで解除 (Esc)。クリップは裏で再生を続けています")
+              : L("出力の映像と音を消す (Esc)。もう一度押すと元に戻る。フェード時間は設定（⌘,）。⇧Esc で全レイヤー停止"))
         .onChange(of: engine.isBlackout) { _, on in
             if on {
                 withAnimation(.easeInOut(duration: 0.5).repeatForever(autoreverses: true)) { blink = true }
@@ -426,22 +426,22 @@ struct ClipGrid: View {
                     Button {
                         engine.insertLayer(at: engine.layerCount)
                     } label: {
-                        Label("レイヤーを追加", systemImage: "plus")
+                        Label(L("レイヤーを追加"), systemImage: "plus")
                             .font(.system(size: 12))
                             .frame(width: Self.headerWidth - 16)
                     }
                     .controlSize(.large)
                     .disabled(engine.layerCount >= Engine.maxLayers)
-                    .help("一番下（一番奥）にレイヤーを足す。途中に入れるときはレイヤー欄を右クリック")
+                    .help(L("一番下（一番奥）にレイヤーを足す。途中に入れるときはレイヤー欄を右クリック"))
                     Button {
                         engine.insertAdjustmentLayer(at: 0)
                     } label: {
-                        Label("調整レイヤーを追加", systemImage: "camera.filters")
+                        Label(L("調整レイヤーを追加"), systemImage: "camera.filters")
                             .font(.system(size: 12))
                     }
                     .controlSize(.large)
                     .disabled(engine.layerCount >= Engine.maxLayers)
-                    .help("一番上に調整レイヤーを足す。そこに付けたエフェクトが、下のレイヤー全体にかかる")
+                    .help(L("一番上に調整レイヤーを足す。そこに付けたエフェクトが、下のレイヤー全体にかかる"))
                 }
             }
             .coordinateSpace(name: SlotDragState.space)
@@ -454,7 +454,7 @@ struct ClipGrid: View {
             .overlay(alignment: .topLeading) {
                 // レイヤーを動かしているときの印
                 if let s = drag.layerSource, let t = drag.layerTarget, t != s {
-                    Label("L\(s + 1) → \(t + 1) 段目へ", systemImage: "arrow.up.arrow.down")
+                    Label(L("L\(s + 1) → \(t + 1) 段目へ"), systemImage: "arrow.up.arrow.down")
                         .font(.system(size: 11, weight: .semibold))
                         .padding(.horizontal, 8).padding(.vertical, 4)
                         .background(Color.accentColor.opacity(0.85), in: Capsule())
@@ -467,8 +467,8 @@ struct ClipGrid: View {
                 // ⌘ドラッグ中のクリップ名
                 if let s = drag.source, engine.slots.indices.contains(s), let slot = engine.slots[s],
                    cueTarget.hovering || (drag.target != nil && drag.target != s) {
-                    Label(cueTarget.hovering ? "キューに足す：" + slot.name
-                          : drag.group ? "\(engine.multiSelection.count) 個を移動" : drag.copying ? "複製：" + slot.name : slot.name,
+                    Label(cueTarget.hovering ? L("キューに足す：") + slot.name
+                          : drag.group ? L("\(engine.multiSelection.count) 個を移動") : drag.copying ? L("複製：") + slot.name : slot.name,
                           systemImage: cueTarget.hovering ? "list.number" : drag.copying ? "plus.square.on.square" : "film")
                         .font(.system(size: 11, weight: .semibold))
                         .lineLimit(1)
@@ -518,8 +518,8 @@ struct ColumnButton: View {
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
         .help(engine.sceneDraft != nil
-              ? "この列のクリップを、編集中のシーンでいっぺんに流す（空き枠のレイヤーは何も流さない）"
-              : "この列のクリップを全レイヤーいっぺんに出す（空き枠のレイヤーは止まる）。右クリックで列を足す・消す")
+              ? L("この列のクリップを、編集中のシーンでいっぺんに流す（空き枠のレイヤーは何も流さない）")
+              : L("この列のクリップを全レイヤーいっぺんに出す（空き枠のレイヤーは止まる）。右クリックで列を足す・消す"))
     }
 }
 
@@ -534,12 +534,12 @@ struct ColumnBar: View {
             ForEach(0..<engine.columns, id: \.self) { c in
                 ColumnButton(column: c, cellWidth: cellWidth)
                     .contextMenu {
-                        Button("左に列を追加") { engine.insertColumn(at: c) }
+                        Button(L("左に列を追加")) { engine.insertColumn(at: c) }
                             .disabled(engine.columns >= Engine.maxColumns)
-                        Button("右に列を追加") { engine.insertColumn(at: c + 1) }
+                        Button(L("右に列を追加")) { engine.insertColumn(at: c + 1) }
                             .disabled(engine.columns >= Engine.maxColumns)
                         Divider()
-                        Button("この列を削除…", role: .destructive) { removeColumn(c) }
+                        Button(L("この列を削除…"), role: .destructive) { removeColumn(c) }
                             .disabled(engine.columns <= 1)
                     }
             }
@@ -551,14 +551,14 @@ struct ColumnBar: View {
             }
             .controlSize(.regular)
             .disabled(engine.columns >= Engine.maxColumns)
-            .help("右端に列を足す。途中に入れるときは列番号を右クリック")
+            .help(L("右端に列を足す。途中に入れるときは列番号を右クリック"))
         }
     }
 
     private func removeColumn(_ c: Int) {
         if engine.columnHasClips(c) {
-            guard confirmRemove(title: "\(c + 1) 列目を削除しますか？",
-                                message: "この列のクリップはグリッドから外れます（再生中なら止まります）。") else { return }
+            guard confirmRemove(title: L("\(c + 1) 列目を削除しますか？"),
+                                message: L("この列のクリップはグリッドから外れます（再生中なら止まります）。")) else { return }
         }
         engine.removeColumn(c)
     }
@@ -570,8 +570,8 @@ func confirmRemove(title: String, message: String) -> Bool {
     alert.messageText = title
     alert.informativeText = message
     alert.alertStyle = .warning
-    alert.addButton(withTitle: "削除")
-    alert.addButton(withTitle: "キャンセル")
+    alert.addButton(withTitle: L("削除"))
+    alert.addButton(withTitle: L("キャンセル"))
     alert.buttons.first?.hasDestructiveAction = true
     return alert.runModal() == .alertFirstButtonReturn
 }
@@ -645,7 +645,7 @@ struct LayerHeader: View {
                     .font(.system(size: 14, weight: .bold, design: .monospaced))
                     .fixedSize()
                     .onTapGesture(count: 2) { renameLayer() }
-                    .help("ダブルクリックで名前を付ける")
+                    .help(L("ダブルクリックで名前を付ける"))
                 if layer.volume == 0 || layer.audioMuted {
                     Image(systemName: "speaker.slash.fill").font(.system(size: 11)).foregroundStyle(.secondary)
                 }
@@ -665,10 +665,10 @@ struct LayerHeader: View {
                 }
                 .controlSize(.small)
                 .disabled(playing == nil)
-                .help(engine.sceneDraft != nil ? "このシーンではこのレイヤーに何も流さない" : "このレイヤーを停止")
+                .help(engine.sceneDraft != nil ? L("このシーンではこのレイヤーに何も流さない") : L("このレイヤーを停止"))
             }
             // 不透明度：左右ドラッグ（クリックだけでは変わらない）、ダブルクリックで 100%
-            ValueDrag(label: "レイヤーの不透明度", value: $layer.opacity, range: 0...1, perPoint: 0.006,
+            ValueDrag(label: L("レイヤーの不透明度"), value: $layer.opacity, range: 0...1, perPoint: 0.006,
                       defaultValue: 1, showsBar: true, format: { String(format: "%.0f%%", $0 * 100) },
                       live: layerOpacityLive, icon: "circle.lefthalf.filled")
                 .frame(height: gridSize == .small ? 18 : (gridSize == .medium ? 22 : 28))
@@ -682,7 +682,7 @@ struct LayerHeader: View {
                 if let a = engine.viewPlaying(layer.index), engine.deckOf(a) != engine.shownDeck,
                    engine.decks.indices.contains(engine.deckOf(a)) {
                     Image(systemName: "square.grid.3x3.fill").font(.system(size: 10)).foregroundStyle(.orange)
-                        .help("別のデッキ（\(engine.decks[engine.deckOf(a)].name)）のクリップを再生中")
+                        .help(L("別のデッキ（\(engine.decks[engine.deckOf(a)].name)）のクリップを再生中"))
                 }
                 // 付けた名前があればそれを（シーンの編集中も、出力のレイヤーの名前）。無ければ再生中のクリップ名
                 if let t = layerTitle, !t.isEmpty {
@@ -691,7 +691,7 @@ struct LayerHeader: View {
                         .foregroundStyle(Color.primary)
                         .lineLimit(1)
                         .onTapGesture(count: 2) { renameLayer() }
-                        .help(t + (playing.map { "\n再生中：" + $0.name } ?? "") + "\n（ダブルクリックで名前を変える）")
+                        .help(t + (playing.map { L("\n再生中：") + $0.name } ?? "") + L("\n（ダブルクリックで名前を変える）"))
                 } else {
                     Text(playing?.name ?? "—")
                         .font(.system(size: 11))
@@ -752,15 +752,15 @@ struct LayerHeader: View {
             engine.selectedLayer = layer.index
             engine.inspectorTab = .layer
         }
-        .effectPickerPopover($showPicker, targetLabel: "レイヤー \(layer.displayName) に足す") { k in
+        .effectPickerPopover($showPicker, targetLabel: L("レイヤー \(layer.displayName) に足す")) { k in
             layer.addEffectOpened(k)
             engine.selectedLayer = layer.index
             engine.inspectorTab = .layer
         }
         .contextMenu {
-            Button("名前を変える…") { renameLayer() }
-            Button("このレイヤーにエフェクトを探して追加…") { showPicker = true }
-            Menu("このレイヤーにエフェクトを追加") {
+            Button(L("名前を変える…")) { renameLayer() }
+            Button(L("このレイヤーにエフェクトを探して追加…")) { showPicker = true }
+            Menu(L("このレイヤーにエフェクトを追加")) {
                 AddEffectMenuItems { k in
                     layer.addEffectOpened(k)
                     engine.selectedLayer = layer.index
@@ -768,25 +768,25 @@ struct LayerHeader: View {
                 }
             }
             Divider()
-            Button("上にレイヤーを追加") { engine.insertLayer(at: layer.index) }
+            Button(L("上にレイヤーを追加")) { engine.insertLayer(at: layer.index) }
                 .disabled(engine.layerCount >= Engine.maxLayers)
-            Button("下にレイヤーを追加") { engine.insertLayer(at: layer.index + 1) }
+            Button(L("下にレイヤーを追加")) { engine.insertLayer(at: layer.index + 1) }
                 .disabled(engine.layerCount >= Engine.maxLayers)
             Divider()
-            Button("上へ移動") { engine.moveLayer(layer.index, to: layer.index - 1) }
+            Button(L("上へ移動")) { engine.moveLayer(layer.index, to: layer.index - 1) }
                 .disabled(layer.index == 0)
-            Button("下へ移動") { engine.moveLayer(layer.index, to: layer.index + 1) }
+            Button(L("下へ移動")) { engine.moveLayer(layer.index, to: layer.index + 1) }
                 .disabled(layer.index >= engine.layerCount - 1)
             Divider()
-            Button(layer.isAdjustment ? "調整レイヤーをやめる（クリップのレイヤーに戻す）" : "調整レイヤーにする（下のレイヤー全体にエフェクト）") {
+            Button(layer.isAdjustment ? L("調整レイヤーをやめる（クリップのレイヤーに戻す）") : L("調整レイヤーにする（下のレイヤー全体にエフェクト）")) {
                 layer.isAdjustment.toggle()
             }
             Divider()
-            Button("このレイヤーを削除…", role: .destructive) {
+            Button(L("このレイヤーを削除…"), role: .destructive) {
                 let r = layer.index
                 if engine.layerHasClips(r) {
-                    guard confirmRemove(title: "\(layer.name) を削除しますか？",
-                                        message: "このレイヤーのクリップはグリッドから外れます（再生中なら止まります）。") else { return }
+                    guard confirmRemove(title: L("\(layer.name) を削除しますか？"),
+                                        message: L("このレイヤーのクリップはグリッドから外れます（再生中なら止まります）。")) else { return }
                 }
                 engine.removeLayer(r)
             }
@@ -811,7 +811,7 @@ extension LayerHeader {
     func renameLayer() {
         guard engine.layers.indices.contains(layer.index) else { return }
         let l = engine.layers[layer.index]
-        if let t = askText(title: "\(l.name) の名前（空にすると番号だけ）", initial: l.title) { l.title = t }
+        if let t = askText(title: L("\(l.name) の名前（空にすると番号だけ）"), initial: l.title) { l.title = t }
     }
 
     /// 不透明度にアニメーションが付いていれば、今の値
@@ -843,7 +843,7 @@ struct MiniSlider: View {
                 .frame(width: 20, alignment: .trailing)
                 .onTapGesture(count: 2) { value = 1 }
         }
-        .help(help + "（数字をダブルクリックで 100）")
+        .help(help + L("（数字をダブルクリックで 100）"))
     }
 }
 
@@ -932,7 +932,7 @@ struct SlotCell: View {
         }
         .overlay(alignment: .topTrailing) {
             if liveHere {
-                Text("出力中")
+                Text(L("出力中"))
                     .font(.system(size: 9, weight: .bold))
                     .foregroundStyle(.black)
                     .padding(.horizontal, 4).padding(.vertical, 1)
@@ -956,8 +956,8 @@ struct SlotCell: View {
             }
         }
         .help(slot == nil
-              ? (adjustmentRow ? "クリックでこのレイヤーのエフェクトを外す。右上の＋でエフェクトのクリップを作る。エフェクト一覧からドラッグでも作れる"
-                               : "クリックでこのレイヤーを停止。右上の＋・右クリック・動画のドロップでクリップを入れる")
+              ? (adjustmentRow ? L("クリックでこのレイヤーのエフェクトを外す。右上の＋でエフェクトのクリップを作る。エフェクト一覧からドラッグでも作れる")
+                               : L("クリックでこのレイヤーを停止。右上の＋・右クリック・動画のドロップでクリップを入れる"))
               : "")
         // クリックを離した時ではなく「押した瞬間」に再生する。
         // 名前の帯（または ⌘）からドラッグで移動、⌥ドラッグで複製（どちらも再生しない。⌥クリックだけなら選択）。
@@ -1070,10 +1070,10 @@ struct SlotCell: View {
         .contextMenu {
             if picked {
                 let n = engine.multiSelection.count
-                Section("選んだ \(n) 個のクリップ") {
-                    Button("選んだ \(n) 個を削除…", role: .destructive) { SelectionMenu.delete(engine) }
+                Section(L("選んだ \(n) 個のクリップ")) {
+                    Button(L("選んだ \(n) 個を削除…"), role: .destructive) { SelectionMenu.delete(engine) }
                     if engine.decks.count > 1 {
-                        Menu("別のデッキの同じ場所へ移動") {
+                        Menu(L("別のデッキの同じ場所へ移動")) {
                             ForEach(Array(engine.decks.enumerated()), id: \.element.id) { d, deck in
                                 if d != engine.deckOf(index) {
                                     Button(deck.name) { if !engine.moveSelection(toDeck: d) { SelectionMenu.cannotMove() } }
@@ -1081,13 +1081,13 @@ struct SlotCell: View {
                             }
                         }
                     }
-                    Button("選択を解除") { engine.clearMultiSelection() }
+                    Button(L("選択を解除")) { engine.clearMultiSelection() }
                 }
                 Divider()
             }
             if let slot {
-                Button("エフェクトを探して追加…") { showPicker = true }
-                Menu("エフェクトを追加") {
+                Button(L("エフェクトを探して追加…")) { showPicker = true }
+                Menu(L("エフェクトを追加")) {
                     AddEffectMenuItems { k in
                         slot.addEffectOpened(k)
                         engine.selectClip(index)
@@ -1095,38 +1095,38 @@ struct SlotCell: View {
                     }
                 }
                 Divider()
-                Picker("終わったら", selection: Binding(get: { slot.endAction }, set: { slot.endAction = $0 })) {
+                Picker(L("終わったら"), selection: Binding(get: { slot.endAction }, set: { slot.endAction = $0 })) {
                     ForEach(EndAction.allCases) { Text($0.label).tag($0) }
                 }
-                if slot.hasInOut { Button("再生範囲をリセット") { slot.resetInOut() } }
-                Button("速度を 1.0x に戻す") { slot.speed = 1.0 }
-                Button("選択（出力せずに編集）") { engine.selectClip(index) }
-                Button("名前を変える…") { ClipRename.ask(slot) }
+                if slot.hasInOut { Button(L("再生範囲をリセット")) { slot.resetInOut() } }
+                Button(L("速度を 1.0x に戻す")) { slot.speed = 1.0 }
+                Button(L("選択（出力せずに編集）")) { engine.selectClip(index) }
+                Button(L("名前を変える…")) { ClipRename.ask(slot) }
                 Divider()
                 ControlMenuItems(address: "/halo/layer/\(engine.layerOf(index) + 1)/clip/\(engine.columnOf(index) + 1)",
-                                 verb: "出す", title: "L\(engine.layerOf(index) + 1) の \(engine.columnOf(index) + 1) 列目のクリップを出す")
-                Button(slot.muted ? "ミュートを解除" : "ミュート（映像と音を出さない）") { slot.muted.toggle() }
-                Button("トランスフォームをリセット") { slot.resetTransform() }
+                                 verb: L("出す", note: "動詞"), title: L("L\(engine.layerOf(index) + 1) の \(engine.columnOf(index) + 1) 列目のクリップを出す"))
+                Button(slot.muted ? L("ミュートを解除") : L("ミュート（映像と音を出さない）")) { slot.muted.toggle() }
+                Button(L("トランスフォームをリセット")) { slot.resetTransform() }
                 if !slot.isGenerator {
-                    Button("動画ファイルを付け直す…（設定はそのまま）") { ProjectMenu.relink(index) }
+                    Button(L("動画ファイルを付け直す…（設定はそのまま）")) { ProjectMenu.relink(index) }
                 }
-                Button("別のクリップに差し替え…") { engine.openPanel(for: index) }
-                Button("キューに足す") { engine.addClipCue(index) }
+                Button(L("別のクリップに差し替え…")) { engine.openPanel(for: index) }
+                Button(L("キューに足す")) { engine.addClipCue(index) }
                 if active {
-                    Button(editing ? "このシーンではこのレイヤーに何も流さない" : "このレイヤーを停止") {
+                    Button(editing ? L("このシーンではこのレイヤーに何も流さない") : L("このレイヤーを停止")) {
                         engine.viewStop(engine.layerOf(index))
                     }
                 }
                 Divider()
-                Button("このスロットを空にする", role: .destructive) { engine.clear(index) }
+                Button(L("このスロットを空にする"), role: .destructive) { engine.clear(index) }
             } else if adjustmentRow {
-                Button("エフェクトのクリップを作る") { engine.createEffectClip(at: index) }
-                Menu("エフェクトを選んでクリップを作る") {
+                Button(L("エフェクトのクリップを作る")) { engine.createEffectClip(at: index) }
+                Menu(L("エフェクトを選んでクリップを作る")) {
                     AddEffectMenuItems { k in if !engine.createEffectClip(at: index, with: k) { NSSound.beep() } }
                 }
             } else {
-                Button("クリップを読み込む…") { engine.openPanel(for: index) }
-                Menu("ジェネレーターを置く") {
+                Button(L("クリップを読み込む…")) { engine.openPanel(for: index) }
+                Menu(L("ジェネレーターを置く")) {
                     ForEach(GeneratorCategory.allCases) { cat in
                         Section(cat.label) {
                             ForEach(cat.kinds) { k in
@@ -1140,7 +1140,7 @@ struct SlotCell: View {
     }
 
     /// 探す窓の上に出す、足す先
-    private var pickerTarget: String? { engine.slots[index].map { "クリップ " + $0.name + " に足す" } }
+    private var pickerTarget: String? { engine.slots[index].map { L("クリップ \($0.name) に足す") } }
 
     /// 探す窓で選んだエフェクトを、このクリップに足す
     private func addPicked(_ k: EffectKind) {
@@ -1283,7 +1283,7 @@ struct SlotContent: View {
                             .padding(4)
                             .background(Color.red, in: RoundedRectangle(cornerRadius: 4))
                             .padding(4)
-                            .help("ミュート中（右クリックで解除）")
+                            .help(L("ミュート中（右クリックで解除）"))
                     }
                 }
                 .overlay {
@@ -1350,7 +1350,7 @@ struct SlotContent: View {
                         .allowsHitTesting(false)
                 }
             }
-            .help("名前の帯をクリック：選択（出力せずにプレビュー・編集）")
+            .help(L("名前の帯をクリック：選択（出力せずにプレビュー・編集）"))
         }
         .clipShape(RoundedRectangle(cornerRadius: 6))
     }
@@ -1406,7 +1406,7 @@ struct DetachButton: View {
             Image(systemName: "macwindow.on.rectangle").font(.system(size: 11))
         }
         .controlSize(.small)
-        .help("「\(panel.title)」を別ウィンドウに出す（常に手前にもできる。閉じるとここに戻る）")
+        .help(L("「\(panel.title)」を別ウィンドウに出す（常に手前にもできる。閉じるとここに戻る）"))
     }
 }
 
@@ -1421,27 +1421,27 @@ struct LivePanel: View {
     var body: some View {
         let layerName = engine.layers[engine.selectedLayer].displayName
         VStack(alignment: .leading, spacing: 10) {
-            SectionTitle("再生中 — \(layerName)")
+            SectionTitle(L("再生中 — \(layerName)"))
             Group {
                 if let slot = engine.selectedSlot {
                     PlayingClipInfo(slot: slot)
                 } else {
-                    Text("停止中")
+                    Text(L("停止中"))
                         .font(.system(size: 13))
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, minHeight: 70, alignment: .leading)
                 }
             }
             Divider()
-            SectionTitle("テンポ")
+            SectionTitle(L("テンポ"))
             BPMControl()
             Divider()
             HStack(spacing: 8) {
-                SectionTitle("コンポジション速度")
+                SectionTitle(L("コンポジション速度"))
                 Spacer(minLength: 0)
                 Picker("", selection: $springBack) {
-                    Text("離しても保持").tag(false)
-                    Text("離したら 1.0x").tag(true)
+                    Text(L("離しても保持")).tag(false)
+                    Text(L("離したら 1.0x")).tag(true)
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
@@ -1450,7 +1450,7 @@ struct LivePanel: View {
             }
             SpeedControl(value: $engine.masterSpeed, springBack: springBack)
                 .frame(height: 72)
-                .help("左右ドラッグで速度 / Shift で微調整 / 右クリック・ダブルクリックで 1.0x")
+                .help(L("左右ドラッグで速度 / Shift で微調整 / 右クリック・ダブルクリックで 1.0x"))
             Spacer(minLength: 0)
         }
     }
@@ -1470,14 +1470,14 @@ struct PlayingClipInfo: View {
                 Spacer(minLength: 0)
                 if slot.endAction != .hold {
                     EndActionIcon(action: slot.endAction, size: 11).foregroundStyle(.secondary)
-                        .help("終わったら：" + slot.endAction.label)
+                        .help(L("終わったら：") + slot.endAction.label)
                 }
                 if slot.syncMode == .bpm {
-                    Text("BPM 同期 " + ParamAnim.beatsLabel(slot.syncBeats) + String(format: "（%.3fx）", slot.effectiveSpeed))
+                    Text(L("BPM 同期 ") + ParamAnim.beatsLabel(slot.syncBeats) + String(format: L("（%.3fx）"), slot.effectiveSpeed))
                         .font(.system(size: 10, weight: .semibold).monospacedDigit())
                         .foregroundStyle(.purple)
                 } else if abs(slot.speed - 1) > 0.00005 {
-                    Text(String(format: "クリップ %.3fx", slot.speed))
+                    Text(String(format: L("クリップ %.3fx"), slot.speed))
                         .font(.system(size: 10, weight: .semibold).monospacedDigit())
                         .foregroundStyle(.orange)
                 }
@@ -1489,7 +1489,7 @@ struct PlayingClipInfo: View {
                 HStack {
                     Text(fmt(pos))
                     Spacer()
-                    Text("残り " + fmt(max(slot.outTime - pos, 0)))
+                    Text(L("残り ") + fmt(max(slot.outTime - pos, 0)))
                 }
                 .font(.system(size: 12, design: .monospaced))
                 .foregroundStyle(.secondary)
@@ -1555,7 +1555,7 @@ struct ScrubBar: View {
             )
             .onHover { hovering = $0 }
         }
-        .help("ドラッグで再生位置を移動（スクラブ）")
+        .help(L("ドラッグで再生位置を移動（スクラブ）"))
     }
 }
 
@@ -1602,16 +1602,16 @@ enum SelectionMenu {
         let n = engine.multiSelection.count
         guard n > 0 else { return }
         let playing = engine.multiSelection.contains { engine.activeByLayer.contains($0) }
-        guard confirmRemove(title: "選んだ \(n) 個のクリップを削除しますか？",
-                            message: "グリッドから外れます" + (playing ? "（再生中のものは止まります）" : "") + "。") else { return }
+        guard confirmRemove(title: L("選んだ \(n) 個のクリップを削除しますか？"),
+                            message: L("グリッドから外れます") + (playing ? L("（再生中のものは止まります）") : "") + "。") else { return }
         engine.deleteSelection()
     }
 
     static func cannotMove() {
         NSSound.beep()
         let a = NSAlert()
-        a.messageText = "移動できません"
-        a.informativeText = "移動先の場所に、選んでいない別のクリップがあります。"
+        a.messageText = L("移動できません")
+        a.informativeText = L("移動先の場所に、選んでいない別のクリップがあります。")
         a.runModal()
     }
 }
@@ -1634,7 +1634,7 @@ struct LayerVolumeStrip: View {
                         .fill(layer.audioMuted ? Color.red : Color.white.opacity(0.06)))
             }
             .buttonStyle(.plain)
-            .help(layer.audioMuted ? "\(layer.name)の音のミュートを解除" : "\(layer.name)の音だけを消す（映像はそのまま）")
+            .help(layer.audioMuted ? L("\(layer.name)の音のミュートを解除") : L("\(layer.name)の音だけを消す（映像はそのまま）"))
 
             GeometryReader { g in
                 let h = g.size.height
@@ -1660,7 +1660,7 @@ struct LayerVolumeStrip: View {
                     }
                     .onEnded { _ in dragStart = nil })
                 .onTapGesture(count: 2) { layer.volume = 1 }
-                .help("\(layer.name)の音量 \(Int((layer.volume * 100).rounded()))%（上下ドラッグ・⇧で微調整・ダブルクリックで 100%）")
+                .help(L("\(layer.name)の音量 \(Int((layer.volume * 100).rounded()))%（上下ドラッグ・⇧で微調整・ダブルクリックで 100%）"))
             }
         }
     }
@@ -1682,7 +1682,7 @@ struct SoloButton: View {
         .tint(layer.solo ? Color.yellow : nil)
         .background(RoundedRectangle(cornerRadius: 5).fill(layer.solo ? Color.yellow : Color.clear))
         .controlSize(.small)
-        .help(layer.solo ? "\(layer.name) のソロを外す" : "\(layer.name) をソロにする（ソロのレイヤーだけが出る。いくつでも。確認用で保存しない）")
+        .help(layer.solo ? L("\(layer.name) のソロを外す") : L("\(layer.name) をソロにする（ソロのレイヤーだけが出る。いくつでも。確認用で保存しない）"))
     }
 }
 
@@ -1706,7 +1706,7 @@ struct BlendMenuButton: View {
         .padding(.horizontal, 5).padding(.vertical, 2)
         .background(RoundedRectangle(cornerRadius: 3)
             .fill(layer.blend == .normal ? Color.white.opacity(0.08) : Color.purple.opacity(0.55)))
-        .help("重ね方：" + layer.blend.label + "（押して選ぶ）")
+        .help(L("重ね方：") + layer.blend.label + L("（押して選ぶ）"))
     }
 }
 

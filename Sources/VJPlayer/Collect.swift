@@ -98,15 +98,15 @@ enum CollectMenu {
     static func run() {
         let e = Engine.shared
         let panel = NSSavePanel()
-        panel.title = "素材をまとめて保存"
-        panel.message = "この名前のフォルダを作り、中にプロジェクトと「素材」フォルダ（使っている動画・画像のコピー）を入れます"
-        panel.nameFieldStringValue = e.projectURL?.deletingPathExtension().lastPathComponent ?? "名称未設定"
-        panel.prompt = "まとめる"
+        panel.title = L("素材をまとめて保存")
+        panel.message = L("この名前のフォルダを作り、中にプロジェクトと「素材」フォルダ（使っている動画・画像のコピー）を入れます")
+        panel.nameFieldStringValue = e.projectURL?.deletingPathExtension().lastPathComponent ?? L("名称未設定")
+        panel.prompt = L("まとめる")
         guard panel.runModal() == .OK, let url = panel.url else { return }
         let folder = url.deletingLastPathComponent(), name = url.deletingPathExtension().lastPathComponent
         let prog = CollectProgress()
         let win = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 420, height: 110), styleMask: [.titled], backing: .buffered, defer: false)
-        win.title = "素材をまとめています"
+        win.title = L("素材をまとめています")
         win.contentView = NSHostingView(rootView: CollectProgressView(p: prog).padding(16).frame(width: 420))
         win.center()
         win.makeKeyAndOrderFront(nil)
@@ -120,19 +120,19 @@ enum CollectMenu {
                 switch result {
                 case .success(let r):
                     let a = NSAlert()
-                    a.messageText = "素材をまとめました"
-                    a.informativeText = "コピー \(r.copied) 個" + (r.reused > 0 ? "（前にコピーしたもの \(r.reused) 個はそのまま）" : "")
-                        + (r.missing.isEmpty ? "" : "。見つからなかった素材：" + r.missing.joined(separator: "、"))
-                        + "\nまとめたプロジェクトを開き直します（再生中のクリップは止まります）。"
-                    a.addButton(withTitle: "開き直す")
-                    a.addButton(withTitle: "Finder で表示")
+                    a.messageText = L("素材をまとめました")
+                    a.informativeText = L("コピー \(r.copied) 個") + (r.reused > 0 ? L("（前にコピーしたもの \(r.reused) 個はそのまま）") : "")
+                        + (r.missing.isEmpty ? "" : L("。見つからなかった素材：") + r.missing.joined(separator: "、"))
+                        + L("\nまとめたプロジェクトを開き直します（再生中のクリップは止まります）。")
+                    a.addButton(withTitle: L("開き直す"))
+                    a.addButton(withTitle: L("Finder で表示"))
                     let resp = a.runModal()
                     if resp == .alertSecondButtonReturn {
                         NSWorkspace.shared.activateFileViewerSelecting([r.projectURL])
                     }
                     ProjectMenu.open(r.projectURL)
                 case .failure(let err):
-                    ProjectMenu.showError("素材をまとめられませんでした", err)
+                    ProjectMenu.showError(L("素材をまとめられませんでした"), err)
                 }
             }
         }
@@ -149,7 +149,7 @@ private struct CollectProgressView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             ProgressView(value: p.value)
-            Text(p.file.isEmpty ? "…" : "コピー中：" + p.file).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
+            Text(p.file.isEmpty ? "…" : L("コピー中：") + p.file).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
         }
     }
 }

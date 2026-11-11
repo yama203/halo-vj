@@ -207,13 +207,13 @@ struct UndoMenuItems: View {
     @ObservedObject var history: UndoHistory
     var body: some View {
         // 文字を打っている間は、その欄の「元に戻す」
-        Button("元に戻す") {
+        Button(L("元に戻す")) {
             if let tv = NSApp.keyWindow?.firstResponder as? NSTextView, tv.undoManager?.canUndo == true { tv.undoManager?.undo() }
             else { Engine.shared.undo() }
         }
             .keyboardShortcut("z", modifiers: .command)
             .disabled(!history.canUndo)
-        Button("やり直す") {
+        Button(L("やり直す")) {
             if let tv = NSApp.keyWindow?.firstResponder as? NSTextView, tv.undoManager?.canRedo == true { tv.undoManager?.redo() }
             else { Engine.shared.redo() }
         }

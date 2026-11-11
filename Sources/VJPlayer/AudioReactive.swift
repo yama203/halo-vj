@@ -13,20 +13,20 @@ enum AudioBand: Int, Codable, CaseIterable, Identifiable {
     var id: Int { rawValue }
     var label: String {
         switch self {
-        case .level: "音量"
-        case .low: "低音"
-        case .mid: "中音"
-        case .high: "高音"
-        case .attack: "アタック"
+        case .level: L("音量")
+        case .low: L("低音")
+        case .mid: L("中音")
+        case .high: L("高音")
+        case .attack: L("アタック")
         }
     }
     var help: String {
         switch self {
-        case .level: "音全体の大きさ"
-        case .low: "キック・ベースのあたり（〜150 Hz）"
-        case .mid: "声・ギター・スネアのあたり（150〜2500 Hz）"
-        case .high: "ハイハット・シンバルのあたり（2500 Hz〜）"
-        case .attack: "低音が急に大きくなった瞬間（キックの頭）にぱっと 1 になって、すっと戻る"
+        case .level: L("音全体の大きさ")
+        case .low: L("キック・ベースのあたり（〜150 Hz）")
+        case .mid: L("声・ギター・スネアのあたり（150〜2500 Hz）")
+        case .high: L("ハイハット・シンバルのあたり（2500 Hz〜）")
+        case .attack: L("低音が急に大きくなった瞬間（キックの頭）にぱっと 1 になって、すっと戻る")
         }
     }
 }
@@ -285,11 +285,11 @@ final class AudioReactive: ObservableObject {
             case .notDetermined:
                 AVCaptureDevice.requestAccess(for: .audio) { ok in
                     DispatchQueue.main.async {
-                        if ok { self.startInput() } else { self.errorMessage = "マイク（音の入力）の使用が許可されていません" }
+                        if ok { self.startInput() } else { self.errorMessage = L("マイク（音の入力）の使用が許可されていません") }
                     }
                 }
             default:
-                errorMessage = "マイク（音の入力）の使用が許可されていません。システム設定 → プライバシーとセキュリティ → マイク で Halo VJ をオンにしてください"
+                errorMessage = L("マイク（音の入力）の使用が許可されていません。システム設定 → プライバシーとセキュリティ → マイク で Halo VJ をオンにしてください")
             }
         }
     }
@@ -316,10 +316,10 @@ final class AudioReactive: ObservableObject {
                                  &d, UInt32(MemoryLayout<AudioDeviceID>.size))
         }
         let fmt = input.outputFormat(forBus: 0)
-        deviceName = (inputUID.flatMap { uid in AudioDevices.inputDevices().first { $0.id == uid }?.name } ?? "システムの既定の入力")
-            + String(format: "（%.0f kHz・%d ch）", fmt.sampleRate / 1000, Int(fmt.channelCount))
+        deviceName = (inputUID.flatMap { uid in AudioDevices.inputDevices().first { $0.id == uid }?.name } ?? L("システムの既定の入力"))
+            + String(format: L("（%.0f kHz・%d ch）"), fmt.sampleRate / 1000, Int(fmt.channelCount))
         guard fmt.sampleRate > 0, fmt.channelCount > 0 else {
-            errorMessage = "入力デバイスから音を受け取れません"
+            errorMessage = L("入力デバイスから音を受け取れません")
             return
         }
         input.installTap(onBus: 0, bufferSize: 1024, format: fmt) { [weak self] buf, _ in
@@ -331,7 +331,7 @@ final class AudioReactive: ObservableObject {
             inputEngine = e
         } catch {
             input.removeTap(onBus: 0)
-            errorMessage = "入力デバイスを開けません：\(error.localizedDescription)"
+            errorMessage = L("入力デバイスを開けません：\(error.localizedDescription)")
         }
     }
 }
@@ -398,11 +398,11 @@ struct AudioInputButton: View {
             HStack(spacing: 6) {
                 Image(systemName: ar.source == .off ? "waveform.slash" : "waveform")
                     .foregroundStyle(ar.errorMessage != nil ? Color.orange : (ar.source == .off ? Color.secondary : Color.green))
-                Text("音の入力")
+                Text(L("音の入力"))
                 if ar.source != .off { AudioMeter(band: .level).frame(width: 34) }
             }
         }
-        .help("音に反応させる音（アプリの音・マイクやライン入力）を選ぶ。パラメーターの動かし方を「音」にすると、この音で動く")
+        .help(L("音に反応させる音（アプリの音・マイクやライン入力）を選ぶ。パラメーターの動かし方を「音」にすると、この音で動く"))
         .popover(isPresented: $open, arrowEdge: .bottom) {
             AudioInputSettings().padding(16).frame(width: 380)
         }
@@ -432,23 +432,23 @@ struct AudioInputSettings: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("音に反応させる").font(.headline)
-            Text("パラメーターの波形ボタンで動かし方を「音」にすると、ここで選んだ音の大きさで「から」〜「まで」の間を動く。外の音（DJ ミキサー・ほかのアプリ）は、ライン入力や BlackHole などの仮想デバイスで入れる")
+            Text(L("音に反応させる")).font(.headline)
+            Text(L("パラメーターの波形ボタンで動かし方を「音」にすると、ここで選んだ音の大きさで「から」〜「まで」の間を動く。外の音（DJ ミキサー・ほかのアプリ）は、ライン入力や BlackHole などの仮想デバイスで入れる"))
                 .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             HStack {
-                Picker("音", selection: choice) {
-                    Text("オフ").tag(Choice.off)
-                    Text("アプリの音（クリップの音）").tag(Choice.app)
+                Picker(L("音"), selection: choice) {
+                    Text(L("オフ")).tag(Choice.off)
+                    Text(L("アプリの音（クリップの音）")).tag(Choice.app)
                     Divider()
-                    Text("入力：システムの既定").tag(Choice.input(nil))
-                    ForEach(devices) { d in Text("入力：" + d.name).tag(Choice.input(d.id)) }
+                    Text(L("入力：システムの既定")).tag(Choice.input(nil))
+                    ForEach(devices) { d in Text(L("入力：") + d.name).tag(Choice.input(d.id)) }
                 }
                 Button { devices = AudioDevices.inputDevices() } label: { Image(systemName: "arrow.clockwise") }
-                    .help("入力デバイスの一覧を更新")
+                    .help(L("入力デバイスの一覧を更新"))
             }
-            Toggle("自動で合わせる（最近いちばん大きかった音を 100% に）", isOn: $ar.autoGain)
-            ValueDrag(label: "音が止んだときに戻る速さ", value: $ar.release, range: 0.02...2, perPoint: 0.002, defaultValue: 0.15,
-                      format: { String(format: "%.2f 秒", $0) })
+            Toggle(L("自動で合わせる（最近いちばん大きかった音を 100% に）"), isOn: $ar.autoGain)
+            ValueDrag(label: L("音が止んだときに戻る速さ"), value: $ar.release, range: 0.02...2, perPoint: 0.002, defaultValue: 0.15,
+                      format: { String(format: L("%.2f 秒"), $0) })
                 .frame(height: UI.rowHeight)
             VStack(alignment: .leading, spacing: 5) {
                 ForEach(AudioBand.allCases) { b in
@@ -482,19 +482,19 @@ struct AudioHealthView: View {
                 case .off:
                     EmptyView()
                 case .ok(let db):
-                    Label(db <= -119 ? "聞き始めています…" : String(format: "音が届いています（いちばん大きい所 %.0f dB）", db),
+                    Label(db <= -119 ? L("聞き始めています…") : String(format: L("音が届いています（いちばん大きい所 %.0f dB）"), db),
                           systemImage: "checkmark.circle.fill").foregroundStyle(.green)
                 case .quiet(let db):
-                    Label(String(format: "音がとても小さい（%.0f dB）。入力の音量（システム設定 → サウンド → 入力）を上げてください", db),
+                    Label(String(format: L("音がとても小さい（%.0f dB）。入力の音量（システム設定 → サウンド → 入力）を上げてください"), db),
                           systemImage: "speaker.wave.1").foregroundStyle(.orange)
                 case .noBuffers:
-                    Label("音が届いていません（入力デバイスを開けていない）", systemImage: "exclamationmark.triangle.fill")
+                    Label(L("音が届いていません（入力デバイスを開けていない）"), systemImage: "exclamationmark.triangle.fill")
                         .foregroundStyle(.orange)
                 case .allZero:
                     VStack(alignment: .leading, spacing: 4) {
-                        Label("音が 0 のまま届いています。マイクの使用が許可されていない可能性があります",
+                        Label(L("音が 0 のまま届いています。マイクの使用が許可されていない可能性があります"),
                               systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
-                        Button("システム設定のマイクを開く") {
+                        Button(L("システム設定のマイクを開く")) {
                             if let u = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone") {
                                 NSWorkspace.shared.open(u)
                             }

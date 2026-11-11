@@ -16,9 +16,9 @@ enum MapEditMode: Hashable, CaseIterable {
     case corners, mesh, crop
     var label: String {
         switch self {
-        case .corners: "四隅"
-        case .mesh: "メッシュ"
-        case .crop: "切り抜き"
+        case .corners: L("四隅")
+        case .mesh: L("メッシュ")
+        case .crop: L("切り抜き")
         }
     }
     var guideMode: MapGuide.Mode {
@@ -419,12 +419,12 @@ enum MapEdit {
         s.corners = [[0.2, 0.2], [0.8, 0.2], [0.8, 0.8], [0.2, 0.8]]
         switch shape {
         case .rect:
-            s.name = "スライス \(number)"
+            s.name = L("スライス \(number)")
         case .triangle:
-            s.name = "三角 \(number)"
+            s.name = L("三角 \(number)")
             s.crop = [[0.5, 0], [1, 1], [0, 1]]
         case .polygon:
-            s.name = "多角形 \(number)"
+            s.name = L("多角形 \(number)")
             s.crop = (0..<6).map { k in
                 let t = Double(k) / 6 * 2 * .pi - .pi / 2
                 return [0.5 + 0.5 * cos(t), 0.5 + 0.5 * sin(t)]
@@ -435,7 +435,7 @@ enum MapEdit {
 
     static func newMask(output: Int, number: Int) -> OutputMask {
         var m = OutputMask()
-        m.name = "マスク \(number)"
+        m.name = L("マスク \(number)")
         m.output = output
         m.points = [[0.4, 0.4], [0.6, 0.4], [0.6, 0.6], [0.4, 0.6]]
         return m
@@ -449,7 +449,7 @@ enum MapEdit {
             guard let i = sliceIndex(map, id), map.slices.count < OutputMap.maxSlices else { return nil }
             var s = map.slices[i]
             s.id = UUID()
-            s.name += " のコピー"
+            s.name = L("\(s.name) のコピー")
             s.corners = s.corners.map { arr(pt($0) + off) }
             map.slices.insert(s, at: i + 1)
             return .slice(s.id)
@@ -457,7 +457,7 @@ enum MapEdit {
             guard let i = maskIndex(map, id) else { return nil }
             var m = map.masks[i]
             m.id = UUID()
-            m.name += " のコピー"
+            m.name = L("\(m.name) のコピー")
             m.points = m.points.map { arr(pt($0) + off) }
             map.masks.insert(m, at: i + 1)
             return .mask(m.id)
@@ -865,7 +865,7 @@ final class OutputMapWindow: NSObject, NSWindowDelegate {
         if let w = window { w.makeKeyAndOrderFront(nil); return }
         let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1240, height: 800),
                          styleMask: [.titled, .closable, .resizable, .miniaturizable], backing: .buffered, defer: false)
-        w.title = "出力のマッピング"
+        w.title = L("出力のマッピング")
         w.isReleasedWhenClosed = false
         w.delegate = self
         w.contentMinSize = NSSize(width: 1000, height: 620)
@@ -928,41 +928,41 @@ private struct MapTopBar: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 12) {
-                Toggle("マッピングを使う", isOn: $engine.outputMap.enabled)
+                Toggle(L("マッピングを使う"), isOn: $engine.outputMap.enabled)
                     .toggleStyle(.switch)
-                    .help("切ると今までどおり（出力 1 に、四隅の調整をかけて全体を出す）")
-                Menu("ひな形") {
-                    Button("1 台（全体）") { setSlices(OutputMap.preset(count: 1)) }
-                    Button("横に 2 台（15% 重ねてなじませる）") { setSlices(OutputMap.preset(count: 2, overlap: 0.15, separate: true)) }
-                    Button("横に 3 台（15% 重ねてなじませる）") { setSlices(OutputMap.preset(count: 3, overlap: 0.15, separate: true)) }
-                    Button("横に 2 台（重ねない）") { setSlices(OutputMap.preset(count: 2, separate: true)) }
-                    Button("縦に 2 台（15% 重ねてなじませる）") { setSlices(OutputMap.preset(count: 2, vertical: true, overlap: 0.15, separate: true)) }
+                    .help(L("切ると今までどおり（出力 1 に、四隅の調整をかけて全体を出す）"))
+                Menu(L("ひな形")) {
+                    Button(L("1 台（全体）")) { setSlices(OutputMap.preset(count: 1)) }
+                    Button(L("横に 2 台（15% 重ねてなじませる）")) { setSlices(OutputMap.preset(count: 2, overlap: 0.15, separate: true)) }
+                    Button(L("横に 3 台（15% 重ねてなじませる）")) { setSlices(OutputMap.preset(count: 3, overlap: 0.15, separate: true)) }
+                    Button(L("横に 2 台（重ねない）")) { setSlices(OutputMap.preset(count: 2, separate: true)) }
+                    Button(L("縦に 2 台（15% 重ねてなじませる）")) { setSlices(OutputMap.preset(count: 2, vertical: true, overlap: 0.15, separate: true)) }
                     Divider()
-                    Button("1 つの出力に、横に 2 つ並べる") { setSlices(OutputMap.preset(count: 2)) }
-                    Button("1 つの出力に、横に 3 つ並べる") { setSlices(OutputMap.preset(count: 3)) }
+                    Button(L("1 つの出力に、横に 2 つ並べる")) { setSlices(OutputMap.preset(count: 2)) }
+                    Button(L("1 つの出力に、横に 3 つ並べる")) { setSlices(OutputMap.preset(count: 3)) }
                 }
                 .fixedSize()
-                .help("よく使う並べ方で、スライスを入れ替える（マスクはそのまま）")
-                Toggle("テストパターン", isOn: $engine.testPattern).toggleStyle(.button)
-                    .help("出力に、スライスごとの色の格子とふちを出す")
-                Toggle("出力にガイド", isOn: $state.guideOn).toggleStyle(.button)
-                    .help("この窓が開いている間、実際の出力に、選んだものの輪郭（黄色）と点を出す")
-                Toggle("くっつく", isOn: $state.snapping).toggleStyle(.button)
-                    .help("点を動かすとき、ほかのスライス・マスクの点と画面の端・中央に吸い付く（⌘ を押している間は吸い付かない）")
+                .help(L("よく使う並べ方で、スライスを入れ替える（マスクはそのまま）"))
+                Toggle(L("テストパターン"), isOn: $engine.testPattern).toggleStyle(.button)
+                    .help(L("出力に、スライスごとの色の格子とふちを出す"))
+                Toggle(L("出力にガイド"), isOn: $state.guideOn).toggleStyle(.button)
+                    .help(L("この窓が開いている間、実際の出力に、選んだものの輪郭（黄色）と点を出す"))
+                Toggle(L("くっつく"), isOn: $state.snapping).toggleStyle(.button)
+                    .help(L("点を動かすとき、ほかのスライス・マスクの点と画面の端・中央に吸い付く（⌘ を押している間は吸い付かない）"))
                 Spacer()
-                Button("読み込む…") { load() }
-                    .help("マッピングだけのファイル（.halomap）を読み込む。今のマッピングと入れ替わる")
-                Button("保存…") { save() }
-                    .help("マッピングだけを .halomap に書き出す")
+                Button(L("読み込む…")) { load() }
+                    .help(L("マッピングだけのファイル（.halomap）を読み込む。今のマッピングと入れ替わる"))
+                Button(L("保存…")) { save() }
+                    .help(L("マッピングだけを .halomap に書き出す"))
             }
             HStack(spacing: 14) {
                 ForEach(0..<OutputController.maxOutputs, id: \.self) { i in
                     HStack(spacing: 4) {
-                        Text("出力 \(i + 1)").font(.system(size: 12, weight: .semibold))
+                        Text(L("出力 \(i + 1)")).font(.system(size: 12, weight: .semibold))
                         if state.live {
                             OutputTargetPicker(index: i)
                         } else {
-                            Text(i == 0 ? "ディスプレイ 2" : "なし").foregroundStyle(.secondary).frame(width: 200, alignment: .leading)
+                            Text(i == 0 ? L("ディスプレイ 2") : L("なし")).foregroundStyle(.secondary).frame(width: 200, alignment: .leading)
                         }
                     }
                 }
@@ -980,9 +980,9 @@ private struct MapTopBar: View {
     private func save() {
         let p = NSSavePanel()
         p.allowedContentTypes = [UTType(filenameExtension: OutputMap.fileExtension) ?? .json]
-        p.nameFieldStringValue = "マッピング.\(OutputMap.fileExtension)"
+        p.nameFieldStringValue = L("マッピング.\(OutputMap.fileExtension)")
         guard p.runModal() == .OK, let url = p.url else { return }
-        do { try engine.outputMap.write(to: url) } catch { alert("保存できませんでした", error) }
+        do { try engine.outputMap.write(to: url) } catch { alert(L("保存できませんでした"), error) }
     }
 
     private func load() {
@@ -995,7 +995,7 @@ private struct MapTopBar: View {
             engine.outputMap = m
             state.item = m.slices.first.map { .slice($0.id) }
         } catch {
-            alert("読み込めませんでした", error)
+            alert(L("読み込めませんでした"), error)
         }
     }
 
@@ -1013,8 +1013,8 @@ private struct OutputTargetPicker: View {
     @ObservedObject private var outputs = OutputController.shared
     var body: some View {
         Picker("", selection: outputs.binding(index)) {
-            Text("なし").tag(OutputTarget.none)
-            Text("ウィンドウ").tag(OutputTarget.window)
+            Text(L("なし")).tag(OutputTarget.none)
+            Text(L("ウィンドウ")).tag(OutputTarget.window)
             ForEach(outputs.screens, id: \.self) { s in
                 Text(OutputController.label(of: s)).tag(OutputTarget.screen(OutputController.displayID(of: s)))
             }
@@ -1032,7 +1032,7 @@ private struct MapItemList: View {
     var body: some View {
         VStack(spacing: 0) {
             List(selection: $state.item) {
-                Section("スライス（下ほど手前）") {
+                Section(L("スライス（下ほど手前）")) {
                     ForEach(Array(engine.outputMap.slices.enumerated()), id: \.element.id) { i, s in
                         row(color: sliceHue(i), name: s.name, output: s.output, on: s.enabled,
                             icon: s.hasCrop ? "triangle" : "rectangle") {
@@ -1042,7 +1042,7 @@ private struct MapItemList: View {
                     }
                     .onMove { engine.outputMap.slices.move(fromOffsets: $0, toOffset: $1) }
                 }
-                Section("マスク") {
+                Section(L("マスク")) {
                     ForEach(engine.outputMap.masks) { m in
                         row(color: .gray, name: m.name, output: m.output, on: m.enabled, icon: "pentagon.fill") {
                             if let k = MapEdit.maskIndex(engine.outputMap, m.id) { engine.outputMap.masks[k].enabled.toggle() }
@@ -1056,28 +1056,28 @@ private struct MapItemList: View {
             Divider()
             HStack(spacing: 6) {
                 Menu {
-                    Button("スライス（四角）") { addSlice(.rect) }
-                    Button("三角のスライス") { addSlice(.triangle) }
-                    Button("多角形のスライス") { addSlice(.polygon) }
+                    Button(L("スライス（四角）")) { addSlice(.rect) }
+                    Button(L("三角のスライス")) { addSlice(.triangle) }
+                    Button(L("多角形のスライス")) { addSlice(.polygon) }
                     Divider()
-                    Button("マスク") { addMask() }
+                    Button(L("マスク")) { addMask() }
                 } label: {
                     Image(systemName: "plus")
                 }
                 .menuIndicator(.visible)
                 .fixedSize()
-                .help("スライス・マスクを足す（今見ている出力に）")
-                Button("複製") {
+                .help(L("スライス・マスクを足す（今見ている出力に）"))
+                Button(L("複製")) {
                     guard let it = state.item else { return }
                     var m = engine.outputMap
                     if let n = MapEdit.duplicate(&m, it) { engine.outputMap = m; state.item = n }
                 }
                 .disabled(state.item == nil)
-                .help("選んだものを、少しずらして複製")
+                .help(L("選んだものを、少しずらして複製"))
                 Spacer()
                 Button { remove() } label: { Image(systemName: "minus") }
                     .disabled(state.item == nil)
-                    .help("選んだものを消す")
+                    .help(L("選んだものを消す"))
             }
             .padding(8)
         }
@@ -1088,14 +1088,14 @@ private struct MapItemList: View {
             Image(systemName: icon).font(.system(size: 9)).foregroundStyle(color)
             Text(name).lineLimit(1)
             Spacer(minLength: 2)
-            Text("出力 \(output + 1)").font(.system(size: 10)).foregroundStyle(.secondary)
+            Text(L("出力 \(output + 1)")).font(.system(size: 10)).foregroundStyle(.secondary)
             Button(action: toggle) {
                 Image(systemName: on ? "eye" : "eye.slash")
                     .foregroundStyle(on ? Color.primary : Color.secondary)
                     .frame(width: 18)
             }
             .buttonStyle(.plain)
-            .help(on ? "出さない" : "出す")
+            .help(on ? L("出さない") : L("出す"))
         }
         .opacity(on ? 1 : 0.5)
     }
@@ -1155,26 +1155,26 @@ private struct MapStageColumn: View {
     private var header: some View {
         HStack(spacing: 10) {
             Picker("", selection: $state.tab) {
-                Text("取る所").tag(MapEditorState.Tab.input)
-                Text("映す所").tag(MapEditorState.Tab.output)
+                Text(L("取る所")).tag(MapEditorState.Tab.input)
+                Text(L("映す所")).tag(MapEditorState.Tab.output)
             }
             .pickerStyle(.segmented).labelsHidden().frame(width: 160)
-            .help("取る所：コンポジションのどこを取るか　映す所：出力の画面のどこへ映すか")
+            .help(L("取る所：コンポジションのどこを取るか　映す所：出力の画面のどこへ映すか"))
             if state.tab == .output {
                 Picker("", selection: $state.output) {
-                    ForEach(0..<OutputController.maxOutputs, id: \.self) { Text("出力 \($0 + 1)").tag($0) }
+                    ForEach(0..<OutputController.maxOutputs, id: \.self) { Text(L("出力 \($0 + 1)")).tag($0) }
                 }
                 .pickerStyle(.segmented).labelsHidden().frame(width: 200)
             }
             Spacer()
-            Text("拡大 \(Int((state.zoom * 100).rounded()))%").font(.system(size: 11)).foregroundStyle(.secondary)
+            Text(L("拡大 \(Int((state.zoom * 100).rounded()))%")).font(.system(size: 11)).foregroundStyle(.secondary)
                 .monospacedDigit()
             Button { state.zoom(by: 1 / 1.25, around: nil, size: lastSize) } label: { Image(systemName: "minus.magnifyingglass") }
-                .help("小さく（スクロールでも）")
+                .help(L("小さく（スクロールでも）"))
             Button { state.zoom(by: 1.25, around: nil, size: lastSize) } label: { Image(systemName: "plus.magnifyingglass") }
-                .help("大きく（スクロールでも）")
-            Button("合わせる") { state.fit() }
-                .help("拡大と移動を元に戻して、全体を見る")
+                .help(L("大きく（スクロールでも）"))
+            Button(L("合わせる")) { state.fit() }
+                .help(L("拡大と移動を元に戻して、全体を見る"))
         }
     }
 
@@ -1182,20 +1182,20 @@ private struct MapStageColumn: View {
         HStack(spacing: 8) {
             switch state.item {
             case .slice?:
-                Text("点").foregroundStyle(.secondary)
+                Text(L("点")).foregroundStyle(.secondary)
                 Picker("", selection: Binding(get: { state.mode }, set: { state.setMode($0) })) {
                     ForEach(MapEditMode.allCases, id: \.self) { Text($0.label).tag($0) }
                 }
                 .pickerStyle(.segmented).labelsHidden().frame(width: 230)
-                .help("四隅：面の 4 つの角　メッシュ：格子の点で面をゆがめる　切り抜き：面の中の多角形")
+                .help(L("四隅：面の 4 つの角　メッシュ：格子の点で面をゆがめる　切り抜き：面の中の多角形"))
             case .mask?:
-                Text("マスクの点を動かす").foregroundStyle(.secondary)
+                Text(L("マスクの点を動かす")).foregroundStyle(.secondary)
             case nil:
-                Text("一覧でスライスかマスクを選ぶ").foregroundStyle(.secondary)
+                Text(L("一覧でスライスかマスクを選ぶ")).foregroundStyle(.secondary)
             }
             Spacer()
             if !state.selectedPoints.isEmpty {
-                Text("選んだ点 \(state.selectedPoints.count) 個").font(.system(size: 11)).foregroundStyle(.secondary)
+                Text(L("選んだ点 \(state.selectedPoints.count) 個")).font(.system(size: 11)).foregroundStyle(.secondary)
             }
         }
         .frame(height: 22)
@@ -1244,12 +1244,12 @@ private struct MapStageColumn: View {
             Text(hint).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(2)
                 .frame(maxWidth: .infinity, alignment: .leading)
             if state.tab == .output {
-                Text("下敷き").font(.system(size: 11)).foregroundStyle(.secondary)
-                Button("写真を選ぶ…") { chooseBackdrop() }
-                    .help("会場の写真などを、この出力の舞台に薄く敷く（合わせる画面だけ。出力には出ない）")
-                Button("外す") { engine.outputMap.backdrops[String(state.output)] = nil }
+                Text(L("下敷き")).font(.system(size: 11)).foregroundStyle(.secondary)
+                Button(L("写真を選ぶ…")) { chooseBackdrop() }
+                    .help(L("会場の写真などを、この出力の舞台に薄く敷く（合わせる画面だけ。出力には出ない）"))
+                Button(L("外す")) { engine.outputMap.backdrops[String(state.output)] = nil }
                     .disabled(engine.outputMap.backdrops[String(state.output)] == nil)
-                ValueDrag(label: "濃さ", value: $engine.outputMap.backdropOpacity, range: 0...1, perPoint: 0.005,
+                ValueDrag(label: L("濃さ"), value: $engine.outputMap.backdropOpacity, range: 0...1, perPoint: 0.005,
                           defaultValue: 0.5, format: EffectParam.percent)
                     .frame(width: 110, height: 24)
             }
@@ -1258,18 +1258,18 @@ private struct MapStageColumn: View {
 
     private var hint: String {
         if state.tab == .input {
-            return "四角をドラッグで動かす・角と辺で大きさ・上の丸で回す（⇧ で 15° ずつ）。何もない所のドラッグで舞台を動かす・スクロールで拡大"
+            return L("四角をドラッグで動かす・角と辺で大きさ・上の丸で回す（⇧ で 15° ずつ）。何もない所のドラッグで舞台を動かす・スクロールで拡大")
         }
-        let common = "点はクリックで選ぶ（⇧で足す・囲んでも）・矢印キーで 1 ピクセル（⇧で 10）。⌥ドラッグで舞台を動かす"
+        let common = L("点はクリックで選ぶ（⇧で足す・囲んでも）・矢印キーで 1 ピクセル（⇧で 10）。⌥ドラッグで舞台を動かす")
         switch state.item {
-        case .mask?: return "辺をクリックで点を足す・Delete で消す。中をドラッグで全体を動かす。" + common
+        case .mask?: return L("辺をクリックで点を足す・Delete で消す。中をドラッグで全体を動かす。") + common
         case .slice?:
             switch state.mode {
-            case .corners: return "角をドラッグ・面の中をドラッグで全体を動かす。" + common
-            case .mesh: return "格子の点をドラッグして面をゆがめる。" + common
-            case .crop: return "辺をクリックで点を足す・Delete で消す。" + common
+            case .corners: return L("角をドラッグ・面の中をドラッグで全体を動かす。") + common
+            case .mesh: return L("格子の点をドラッグして面をゆがめる。") + common
+            case .crop: return L("辺をクリックで点を足す・Delete で消す。") + common
             }
-        case nil: return "スライスかマスクをクリックで選ぶ。" + common
+        case nil: return L("スライスかマスクをクリックで選ぶ。") + common
         }
     }
 
@@ -1417,7 +1417,7 @@ private struct MapStageOverlay: View {
             handle(&ctx, f.toView(p), selected: state.selectedPoints.contains(k), round: mode != .corners || it.isMask)
         }
         if case .slice = it, mode == .crop, pts.isEmpty, let c = MapEdit.referencePoints(map, it).first {
-            label(&ctx, "切り抜きはまだありません（右の設定で作る）", at: f.toView(c) + CGPoint(x: 120, y: -14), color: .yellow)
+            label(&ctx, L("切り抜きはまだありません（右の設定で作る）"), at: f.toView(c) + CGPoint(x: 120, y: -14), color: .yellow)
         }
     }
 }
@@ -1444,7 +1444,7 @@ private struct MapInspector: View {
                     MaskInspector(mask: $engine.outputMap.masks[i]).id(id)
                 }
             case nil:
-                Text("一覧でスライスかマスクを選ぶと、ここに設定が出ます。")
+                Text(L("一覧でスライスかマスクを選ぶと、ここに設定が出ます。"))
                     .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -1457,8 +1457,8 @@ private func sectionTitle(_ s: String) -> some View {
 }
 
 private func outputChoice(_ b: Binding<Int>) -> some View {
-    Picker("出力", selection: b) {
-        ForEach(0..<OutputController.maxOutputs, id: \.self) { Text("出力 \($0 + 1)").tag($0) }
+    Picker(L("出力"), selection: b) {
+        ForEach(0..<OutputController.maxOutputs, id: \.self) { Text(L("出力 \($0 + 1)")).tag($0) }
     }
     .pickerStyle(.segmented)
 }
@@ -1471,53 +1471,53 @@ private struct SliceInspector: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            TextField("名前", text: $slice.name)
+            TextField(L("名前"), text: $slice.name)
             HStack {
-                Toggle("出す", isOn: $slice.enabled)
+                Toggle(L("出す"), isOn: $slice.enabled)
                 Spacer()
             }
             outputChoice($slice.output)
-            Picker("元の絵", selection: $slice.source) {
-                Text("全体（コンポジション）").tag(SliceSource.composition)
+            Picker(L("元の絵", note: "マッピング"), selection: $slice.source) {
+                Text(L("全体（コンポジション）")).tag(SliceSource.composition)
                 ForEach(layers, id: \.0) { Text($0.1).tag(SliceSource.layer($0.0)) }
                 if let id = slice.source.layerID, !layers.contains(where: { $0.0 == id }) {
-                    Text("（無いレイヤー）").tag(slice.source)
+                    Text(L("（無いレイヤー）")).tag(slice.source)
                 }
             }
-            .help("レイヤーを選ぶと、そのレイヤーだけ（レイヤーのエフェクト込み）を映す")
+            .help(L("レイヤーを選ぶと、そのレイヤーだけ（レイヤーのエフェクト込み）を映す"))
 
-            sectionTitle("取る所")
+            sectionTitle(L("取る所"))
             HStack(spacing: 4) { inputDrag("X", 0); inputDrag("Y", 1) }
-            HStack(spacing: 4) { inputDrag("幅", 2); inputDrag("高さ", 3) }
-            ValueDrag(label: "回転", value: $slice.inputRotation, range: -180...180, perPoint: 0.2, defaultValue: 0,
+            HStack(spacing: 4) { inputDrag(L("幅"), 2); inputDrag(L("高さ"), 3) }
+            ValueDrag(label: L("回転"), value: $slice.inputRotation, range: -180...180, perPoint: 0.2, defaultValue: 0,
                       format: { String(format: "%.1f°", $0) })
                 .frame(height: 26)
             HStack {
-                Toggle("左右反転", isOn: $slice.flipH)
-                Toggle("上下反転", isOn: $slice.flipV)
+                Toggle(L("左右反転"), isOn: $slice.flipH)
+                Toggle(L("上下反転"), isOn: $slice.flipV)
             }
 
-            sectionTitle("端をなじませる")
-            HStack(spacing: 4) { feather("左", 0); feather("右", 1) }
-            HStack(spacing: 4) { feather("上", 2); feather("下", 3) }
-            ValueDrag(label: "ガンマ", value: $gamma, range: 1...3, perPoint: 0.005, defaultValue: 2.2,
+            sectionTitle(L("端をなじませる"))
+            HStack(spacing: 4) { feather(L("左"), 0); feather(L("右"), 1) }
+            HStack(spacing: 4) { feather(L("上"), 2); feather(L("下"), 3) }
+            ValueDrag(label: L("ガンマ"), value: $gamma, range: 1...3, perPoint: 0.005, defaultValue: 2.2,
                       format: { String(format: "%.2f", $0) })
                 .frame(height: 26)
-                .help("なじませる所の明るさのつながり方（全部のスライスで共通。プロジェクターに合わせる。ふつうは 2.2）")
+                .help(L("なじませる所の明るさのつながり方（全部のスライスで共通。プロジェクターに合わせる。ふつうは 2.2）"))
 
-            sectionTitle("色")
-            ValueDrag(label: "不透明度", value: $slice.opacity, range: 0...1, perPoint: 0.003, defaultValue: 1, format: EffectParam.percent)
+            sectionTitle(L("色"))
+            ValueDrag(label: L("不透明度"), value: $slice.opacity, range: 0...1, perPoint: 0.003, defaultValue: 1, format: EffectParam.percent)
                 .frame(height: 26)
             HStack(spacing: 4) {
-                ValueDrag(label: "明るさ", value: $slice.brightness, range: -1...1, perPoint: 0.003, defaultValue: 0, format: EffectParam.percent)
+                ValueDrag(label: L("明るさ"), value: $slice.brightness, range: -1...1, perPoint: 0.003, defaultValue: 0, format: EffectParam.percent)
                     .frame(height: 26)
-                ValueDrag(label: "コントラスト", value: $slice.contrast, range: -1...1, perPoint: 0.003, defaultValue: 0, format: EffectParam.percent)
+                ValueDrag(label: L("コントラスト"), value: $slice.contrast, range: -1...1, perPoint: 0.003, defaultValue: 0, format: EffectParam.percent)
                     .frame(height: 26)
             }
-            HStack(spacing: 4) { gain("赤", 0); gain("緑", 1); gain("青", 2) }
-                .help("プロジェクターごとの色の違いを合わせる")
+            HStack(spacing: 4) { gain(L("赤"), 0); gain(L("緑"), 1); gain(L("青"), 2) }
+                .help(L("プロジェクターごとの色の違いを合わせる"))
 
-            sectionTitle("映す所（\(state.mode.label)）")
+            sectionTitle(L("映す所（\(state.mode.label)）"))
             modeSettings
         }
     }
@@ -1525,41 +1525,41 @@ private struct SliceInspector: View {
     @ViewBuilder private var modeSettings: some View {
         switch state.mode {
         case .corners:
-            Button("四隅を元に戻す") { slice.corners = [[0, 0], [1, 0], [1, 1], [0, 1]] }
-                .help("出力の画面いっぱいに戻す")
+            Button(L("四隅を元に戻す")) { slice.corners = [[0, 0], [1, 0], [1, 1], [0, 1]] }
+                .help(L("出力の画面いっぱいに戻す"))
         case .mesh:
             if let m = slice.mesh, m.isValid {
-                Stepper("横のマス \(m.cols)", value: Binding(get: { m.cols }, set: { MapEdit.setMeshSize(&slice, cols: $0, rows: m.rows) }),
+                Stepper(L("横のマス \(m.cols)"), value: Binding(get: { m.cols }, set: { MapEdit.setMeshSize(&slice, cols: $0, rows: m.rows) }),
                         in: 1...SliceMesh.maxCells)
-                    .help("今の形を保ったまま、点の数を変える")
-                Stepper("縦のマス \(m.rows)", value: Binding(get: { m.rows }, set: { MapEdit.setMeshSize(&slice, cols: m.cols, rows: $0) }),
+                    .help(L("今の形を保ったまま、点の数を変える"))
+                Stepper(L("縦のマス \(m.rows)"), value: Binding(get: { m.rows }, set: { MapEdit.setMeshSize(&slice, cols: m.cols, rows: $0) }),
                         in: 1...SliceMesh.maxCells)
-                Toggle("なめらかに", isOn: Binding(get: { m.smooth }, set: { slice.mesh?.smooth = $0 }))
-                    .help("点の間をなめらかな曲線でつなぐ。切ると折れ線")
+                Toggle(L("なめらかに"), isOn: Binding(get: { m.smooth }, set: { slice.mesh?.smooth = $0 }))
+                    .help(L("点の間をなめらかな曲線でつなぐ。切ると折れ線"))
                 HStack {
-                    Button("メッシュを元に戻す") { slice.mesh = .regular(cols: m.cols, rows: m.rows) }
-                        .help("点を等間隔に戻す（マスの数はそのまま）")
-                    Button("外す") {
+                    Button(L("メッシュを元に戻す")) { slice.mesh = .regular(cols: m.cols, rows: m.rows) }
+                        .help(L("点を等間隔に戻す（マスの数はそのまま）"))
+                    Button(L("外す")) {
                         slice.mesh = nil
                         state.mode = .corners
                     }
-                    .help("メッシュを使わない（四隅だけ）")
+                    .help(L("メッシュを使わない（四隅だけ）"))
                 }
             } else {
-                Button("メッシュを作る（2×2）") { MapEdit.enterMesh(&slice) }
+                Button(L("メッシュを作る（2×2）")) { MapEdit.enterMesh(&slice) }
             }
         case .crop:
-            Text(slice.hasCrop ? "点 \(slice.crop.count) 個" : "切り抜きはまだありません")
+            Text(slice.hasCrop ? L("点 \(slice.crop.count) 個") : L("切り抜きはまだありません"))
                 .foregroundStyle(.secondary)
             HStack {
-                Button("三角で作る") { slice.crop = [[0.5, 0], [1, 1], [0, 1]]; state.selectedPoints = [] }
-                Button("四角で作る") { slice.crop = [[0.1, 0.1], [0.9, 0.1], [0.9, 0.9], [0.1, 0.9]]; state.selectedPoints = [] }
+                Button(L("三角で作る")) { slice.crop = [[0.5, 0], [1, 1], [0, 1]]; state.selectedPoints = [] }
+                Button(L("四角で作る")) { slice.crop = [[0.1, 0.1], [0.9, 0.1], [0.9, 0.9], [0.1, 0.9]]; state.selectedPoints = [] }
             }
-            .help("今の切り抜きと入れ替える")
-            Toggle("内と外を入れ替える", isOn: $slice.cropInvert)
-                .help("形の中を消して、外だけ出す")
+            .help(L("今の切り抜きと入れ替える"))
+            Toggle(L("内と外を入れ替える"), isOn: $slice.cropInvert)
+                .help(L("形の中を消して、外だけ出す"))
                 .disabled(!slice.hasCrop)
-            Button("切り抜きを外す") { slice.crop = []; state.selectedPoints = [] }
+            Button(L("切り抜きを外す")) { slice.crop = []; state.selectedPoints = [] }
                 .disabled(slice.crop.isEmpty)
         }
     }
@@ -1589,17 +1589,17 @@ private struct MaskInspector: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            TextField("名前", text: $mask.name)
+            TextField(L("名前"), text: $mask.name)
             HStack {
-                Toggle("使う", isOn: $mask.enabled)
+                Toggle(L("使う"), isOn: $mask.enabled)
                 Spacer()
             }
             outputChoice($mask.output)
-            Toggle("内と外を入れ替える", isOn: $mask.invert)
-                .help("切ると形の中を黒く、入れると形の外を黒く")
-            Text("点 \(mask.points.count) 個").foregroundStyle(.secondary)
-            Button("形を元に戻す（四角）") { mask.points = [[0.4, 0.4], [0.6, 0.4], [0.6, 0.6], [0.4, 0.6]] }
-            Text("マスクは、スライスを全部描いたあとに、その出力の上を黒く塗ります。")
+            Toggle(L("内と外を入れ替える"), isOn: $mask.invert)
+                .help(L("切ると形の中を黒く、入れると形の外を黒く"))
+            Text(L("点 \(mask.points.count) 個")).foregroundStyle(.secondary)
+            Button(L("形を元に戻す（四角）")) { mask.points = [[0.4, 0.4], [0.6, 0.4], [0.6, 0.6], [0.4, 0.6]] }
+            Text(L("マスクは、スライスを全部描いたあとに、その出力の上を黒く塗ります。"))
                 .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -1613,12 +1613,12 @@ enum MapEditorPreview {
         var m = OutputMap()
         m.enabled = true
         var a = OutputSlice()
-        a.name = "左の壁"
+        a.name = L("左の壁")
         a.input = [0, 0, 0.5, 1]
         a.corners = [[0.05, 0.1], [0.45, 0.06], [0.47, 0.9], [0.04, 0.85]]
         a.feather = [0, 0.1, 0, 0]
         var b = OutputSlice()
-        b.name = "柱（メッシュ）"
+        b.name = L("柱（メッシュ）")
         b.input = [0.5, 0, 0.5, 1]
         b.inputRotation = 12
         b.corners = [[0.52, 0.08], [0.95, 0.12], [0.93, 0.92], [0.55, 0.88]]
@@ -1627,12 +1627,12 @@ enum MapEditorPreview {
         mesh.points[mesh.index(col: 2, row: 1)] = [0.72, 0.42]
         b.mesh = mesh
         var c = OutputSlice()
-        c.name = "三角"
+        c.name = L("三角")
         c.input = [0.3, 0.2, 0.4, 0.5]
         c.corners = [[0.3, 0.45], [0.7, 0.45], [0.7, 0.98], [0.3, 0.98]]
         c.crop = [[0.5, 0], [1, 1], [0, 1]]
         var mask = OutputMask()
-        mask.name = "ドア"
+        mask.name = L("ドア")
         mask.points = [[0.12, 0.5], [0.24, 0.48], [0.25, 0.86], [0.2, 0.7], [0.13, 0.84]]
         m.slices = [a, b, c]
         m.masks = [mask]

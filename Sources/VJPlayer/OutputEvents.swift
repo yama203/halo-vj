@@ -31,13 +31,13 @@ extension Engine {
     /// 止めた（stopLayer から）
     func noteOutputStop(layer r: Int) {
         guard outputEventMute == 0 else { return }
-        queueOutputEvent("L\(r + 1) を止めた", kind: .stop)
+        queueOutputEvent(L("L\(r + 1) を止めた"), kind: .stop)
     }
 
     /// シーンを呼んだ（中で出すクリップは数えない）
     func noteOutputScene(_ name: String) {
         outputPending = []
-        outputEvent = OutputEvent(text: "シーン  \(name)", kind: .scene, auto: autoRunner.acting)
+        outputEvent = OutputEvent(text: L("シーン  \(name)"), kind: .scene, auto: autoRunner.acting)
     }
 
     /// 同じ瞬間の変化をまとめてから知らせる（列ごとに出す・全部止めるなど）
@@ -53,10 +53,10 @@ extension Engine {
             if items.count == 1 {
                 self.outputEvent = OutputEvent(text: items[0].0, kind: items[0].1, auto: auto)
             } else if items.allSatisfy({ $0.1 == .stop }) {
-                self.outputEvent = OutputEvent(text: "\(items.count) つのレイヤーを止めた", kind: .stop, auto: auto)
+                self.outputEvent = OutputEvent(text: L("\(items.count) つのレイヤーを止めた"), kind: .stop, auto: auto)
             } else {
                 let n = items.filter { $0.1 == .clip }.count
-                self.outputEvent = OutputEvent(text: "\(n) つのクリップを出した", kind: .clip, auto: auto)
+                self.outputEvent = OutputEvent(text: L("\(n) つのクリップを出した"), kind: .clip, auto: auto)
             }
         }
     }
