@@ -186,13 +186,8 @@ final class Recorder: ObservableObject {
         if let fileURL {
             url = fileURL
         } else {
-            do { try FileManager.default.createDirectory(at: s.folderURL, withIntermediateDirectories: true) } catch {
-                lastError = L("保存先のフォルダを作れません：\(s.folderURL.path)")
-                return false
-            }
-            let df = DateFormatter()
-            df.dateFormat = "yyyy-MM-dd HH.mm.ss"
-            url = s.folderURL.appendingPathComponent("\(AppInfo.name) \(df.string(from: Date())).\(s.codec.ext)")
+            guard let u = newFileURL(ext: s.codec.ext) else { return false }
+            url = u
         }
         try? FileManager.default.removeItem(at: url)
         do {
@@ -264,6 +259,34 @@ final class Recorder: ObservableObject {
     }
 
     private enum RecordError: Error { case cannotAdd }
+
+    /// 保存先のフォルダに、日時の名前の新しいファイルの場所を作る（フォルダが無ければ作る）。
+    /// 静止画の保存（スナップショット）も同じ決め方を使う。folder を渡すとそこに（テスト用）。
+    /// 作れなければ lastError に書いて nil
+    func newFileURL(ext: String, in folder: URL? = nil) -> URL? {
+        let dir = folder ?? settings.folderURL
+        do { try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true) } catch {
+            lastError = L("保存先のフォルダを作れません：\(dir.path)")
+            return nil
+        }
+        let df = DateFormatter()
+        df.dateFormat = "yyyy-MM-dd HH.mm.ss"
+        let base = "\(AppInfo.name) \(df.string(from: Date()))"
+        var url = dir.appendingPathComponent("\(base).\(ext)")
+        // 同じ秒に 2 つ作ったときは、番号を付けて上書きしない
+        var n = 2
+        while FileManager.default.fileExists(atPath: url.path) {
+            url = dir.appendingPathComponent("\(base) \(n).\(ext)")
+            n += 1
+        }
+        return url
+    }
+
+    /// 録画以外で保存したもの（静止画）を、録画と同じ所（録画の設定の下）で知らせる
+    func noteSaved(_ url: URL?, error: String? = nil) {
+        if let url { lastFile = url }
+        lastError = error
+    }
 
     /// 録画を止めて、ファイルを閉じる。done は書き終わったら（メインスレッドで）
     func stop(done: ((URL?) -> Void)? = nil) {

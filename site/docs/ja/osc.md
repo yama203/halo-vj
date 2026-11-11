@@ -31,6 +31,8 @@
 - `/halo/scene/N`
 - `/halo/deck/N`
 - `/halo/record [0/1]`
+- `/halo/snapshot`（今の絵を静止画で保存）
+- `/halo/snapshot/clip`（今の絵を静止画で保存して、空いているスロットにクリップとして置く）
 - `/halo/auto`（自動操縦。→ [自動操縦](autopilot.md)）
 
 ボタンの 0（離したとき）では、再生や停止などの動作は行いません。

@@ -11,6 +11,7 @@ Halo VJ key commands and mouse actions with modifier keys.
 | `⌘Z` | Undo |
 | `⌘⇧Z` | Redo |
 | `⌘R` | Start / stop recording |
+| `⌘⇧P` | Save the current frame as an image |
 | `⌘,` | Settings |
 | `⌘E` | Search window for effects and generators |
 | `⌘⇧M` | Output mapping |

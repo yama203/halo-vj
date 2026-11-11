@@ -31,6 +31,8 @@ Numbers start at 1.
 - `/halo/scene/N`
 - `/halo/deck/N`
 - `/halo/record [0/1]`
+- `/halo/snapshot` (saves the current frame as an image)
+- `/halo/snapshot/clip` (saves the current frame and puts it in an empty slot as a clip)
 - `/halo/auto` (autopilot → [Autopilot](autopilot.md))
 
 A button value of 0 (released) does not trigger, stop, etc.

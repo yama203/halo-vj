@@ -212,6 +212,9 @@ struct VJPlayerApp: App {
                 Divider()
                 Button(L("録画を始める／止める")) { Recorder.shared.toggle() }
                     .keyboardShortcut("r", modifiers: .command)
+                Button(L("今の絵を静止画で保存")) { Engine.shared.takeSnapshot() }
+                    .keyboardShortcut("p", modifiers: [.command, .shift])
+                Button(L("今の絵をクリップにする")) { Engine.shared.takeSnapshot(asClip: true) }
             }
         }
     }
