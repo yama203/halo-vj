@@ -144,6 +144,18 @@ final class ValueDragNSView: NSView {
         ]
         var ls = (label as NSString).size(withAttributes: labelAttrs)
         let small = r.height < 24
+        let text = format(shown)
+        let vs = (text as NSString).size(withAttributes: valueAttrs)
+        let vx = r.maxX - (icon != nil && small ? 6 : 8) - vs.width
+        // 並び：小さな絵（位置・大きさ・角度）→ 名前 → 値。絵を入れると名前と値がぶつかるほど狭ければ、絵は出さない
+        let gw: CGFloat = 30, gh = min(r.height - 8, 20)
+        let showsGlyph = style.hasGlyph && icon == nil && r.minX + 8 + gw + 8 + ls.width + 8 < vx
+        let labelX = r.minX + 8 + (showsGlyph ? gw + 8 : 0)
+        if showsGlyph {
+            let accent = animating ? NSColor.systemPurple.blended(withFraction: 0.3, of: .white) ?? .systemPurple
+                : changed ? changedColor : NSColor(white: 0.85, alpha: 1)
+            drawGlyph(NSRect(x: r.minX + 8, y: r.midY - gh / 2, width: gw, height: gh), value: shown, accent: accent)
+        }
         if let icon, let img = NSImage(systemSymbolName: icon, accessibilityDescription: label)?
             .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: small ? 9 : 11, weight: .semibold)
                 .applying(NSImage.SymbolConfiguration(hierarchicalColor: NSColor(white: 0.7, alpha: 1)))) {
@@ -152,34 +164,18 @@ final class ValueDragNSView: NSView {
             img.draw(in: NSRect(x: r.minX + (small ? 6 : 8), y: r.midY - s.height / 2, width: s.width, height: s.height))
             ls = NSSize(width: s.width, height: s.height)
         } else {
-            (label as NSString).draw(at: NSPoint(x: r.minX + 8, y: r.midY - ls.height / 2), withAttributes: labelAttrs)
+            (label as NSString).draw(at: NSPoint(x: labelX, y: r.midY - ls.height / 2), withAttributes: labelAttrs)
         }
         if animating && !badge.isEmpty {
             let badgeAttrs: [NSAttributedString.Key: Any] = [
                 .font: NSFont.systemFont(ofSize: 10, weight: .semibold),
                 .foregroundColor: NSColor.systemPurple.blended(withFraction: 0.5, of: .white) ?? .white,
             ]
-            (badge as NSString).draw(at: NSPoint(x: r.minX + 14 + ls.width,
+            (badge as NSString).draw(at: NSPoint(x: (icon != nil ? r.minX + 8 : labelX) + 6 + ls.width,
                                                   y: r.midY - (badge as NSString).size(withAttributes: badgeAttrs).height / 2),
                                      withAttributes: badgeAttrs)
         }
-        let text = format(shown)
-        let vs = (text as NSString).size(withAttributes: valueAttrs)
-        let vx = r.maxX - (icon != nil && r.height < 24 ? 6 : 8) - vs.width
         (text as NSString).draw(at: NSPoint(x: vx, y: r.midY - vs.height / 2), withAttributes: valueAttrs)
-        // 値の左に小さな絵（位置・大きさ・角度）。名前とぶつかるほど狭ければ出さない
-        if style.hasGlyph {
-            let gw: CGFloat = 34, gh = min(r.height - 8, 20)
-            // 数字の幅で絵が動かないように、いちばん長くなる数字（範囲の両端）の分を空けて置く
-            let widest = [range.lowerBound, range.upperBound, -range.upperBound]
-                .map { (format($0) as NSString).size(withAttributes: valueAttrs).width }.max() ?? vs.width
-            let gx = r.maxX - (icon != nil && r.height < 24 ? 6 : 8) - max(widest, vs.width) - 10 - gw
-            if gx > r.minX + 8 + ls.width + 6 {
-                let accent = animating ? NSColor.systemPurple.blended(withFraction: 0.3, of: .white) ?? .systemPurple
-                    : changed ? changedColor : NSColor(white: 0.85, alpha: 1)
-                drawGlyph(NSRect(x: gx, y: r.midY - gh / 2, width: gw, height: gh), value: shown, accent: accent)
-            }
-        }
     }
 
     /// 位置：画面の枠と、クリップの中心の点（動かす向きに線）。大きさ：画面の枠とクリップの大きさの四角。角度：文字盤

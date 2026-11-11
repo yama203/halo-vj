@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// アニメーションを付けられる数値欄。右のボタンで「動かし方」の設定を開く。
+/// アニメーションを付けられる数値欄。左のボタンで「動かし方」の設定を開く。
 /// 動かしている間は欄に今の値が出続ける（手では動かせない）
 struct AnimValueField: View {
     let label: String
@@ -24,10 +24,8 @@ struct AnimValueField: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
+            // 並び：動かし方のボタン（アイコン）→ 名前と値の欄
             HStack(spacing: 4) {
-                ValueDrag(label: label, value: $value, range: range, perPoint: perPoint, defaultValue: defaultValue,
-                          showsBar: showsBar, format: format, live: anim.isOn ? liveValue() : nil,
-                          badge: anim.summary, style: style)
                 Button {
                     expanded.toggle()
                 } label: {
@@ -40,6 +38,9 @@ struct AnimValueField: View {
                 }
                 .buttonStyle(.plain)
                 .help("動かし方（固定／秒／BPM）")
+                ValueDrag(label: label, value: $value, range: range, perPoint: perPoint, defaultValue: defaultValue,
+                          showsBar: showsBar, format: format, live: anim.isOn ? liveValue() : nil,
+                          badge: anim.summary, style: style)
                 if let trailing { trailing }
             }
             .frame(height: UI.rowHeight)
@@ -532,6 +533,8 @@ struct EffectCard: View {
                     if p.isToggle {
                         Toggle(p.label, isOn: Binding(get: { effect.value(i) > 0.5 }, set: { valueBinding(i).wrappedValue = $0 ? 1 : 0 }))
                             .toggleStyle(.switch)
+                            // 名前の位置を、動かし方のボタンの右にある数値欄の名前にそろえる
+                            .padding(.leading, UI.paramLabelInset)
                             .frame(maxWidth: .infinity, minHeight: UI.rowHeight, maxHeight: UI.rowHeight, alignment: .leading)
                             .help(effect.kind == .colorize
                                   ? "オン：元の明るさのまま色だけ変える／オフ：黒は黒、白はその色そのものになる" : "")
@@ -542,6 +545,7 @@ struct EffectCard: View {
                             ChoiceButtons(selection: valueBinding(i),
                                           items: choices.indices.map { (Double($0), choices[$0]) })
                         }
+                        .padding(.leading, UI.paramLabelInset)
                         .frame(height: UI.rowHeight)
                     } else {
                         AnimValueField(label: p.label, value: valueBinding(i), range: p.range, perPoint: p.perPoint,

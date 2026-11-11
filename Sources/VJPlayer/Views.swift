@@ -8,6 +8,8 @@ enum UI {
     static let panelBackground = Color.white.opacity(0.035)
     /// 数値欄・ボタンなどの 1 行の高さ（押しやすさ優先）
     static let rowHeight: CGFloat = 32
+    /// 動かし方のボタン（幅 30・すき間 4）と数値欄の中の余白のぶん。スイッチ・選択肢の行の名前を、数値欄の名前にそろえる
+    static let paramLabelInset: CGFloat = 30 + 4 + 8
     /// パラメーター欄 1 列の幅と、2 列ぶんの幅
     static let paramColumnWidth: CGFloat = 260
     static let paramsWidth: CGFloat = paramColumnWidth * 2 + 16

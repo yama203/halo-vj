@@ -70,6 +70,30 @@ enum Main {
             CardPreview.writePicker(query: args[i + 1], generators: args.count > i + 3 && args[i + 3] == "gen", path: args[i + 2])
             exit(0)
         }
+        if let i = args.firstIndex(of: "--valuefield-preview"), args.count > i + 1 {
+            // 開発用：位置・大きさ・角度・不透明度の数値欄を並べて書き出す  VJPlayer --valuefield-preview out.png
+            _ = NSApplication.shared
+            NSApp.setActivationPolicy(.prohibited)
+            func row(_ l: String, _ v: Double, _ r: ClosedRange<Double>, _ st: ValueStyle, _ f: @escaping (Double) -> String,
+                     bar: Bool = false) -> some View {
+                HStack(spacing: 4) {
+                    Image(systemName: "waveform.path").frame(width: 30, height: UI.rowHeight)
+                        .background(RoundedRectangle(cornerRadius: 5).fill(Color.white.opacity(0.04)))
+                    ValueDrag(label: l, value: .constant(v), range: r, perPoint: 0.01, defaultValue: 0, showsBar: bar,
+                              format: f, style: st).frame(height: UI.rowHeight)
+                }
+            }
+            let pct: (Double) -> String = { String(format: "%+.1f%%", $0 * 100) }
+            let v = VStack(spacing: 8) {
+                row("位置 X", 0, -2...2, .position(horizontal: true), pct)
+                row("位置 Y", 0.25, -2...2, .position(horizontal: false), pct)
+                row("スケール", 1, 0...4, .scale, { String(format: "%.1f%%", $0 * 100) })
+                row("角度", 30, -360...360, .angle, { String(format: "%.1f°", $0) })
+                row("不透明度", 1, 0...1, .plain, { String(format: "%.0f%%", $0 * 100) }, bar: true)
+            }.padding(12).frame(width: 300)
+            CardPreview.writeView(AnyView(v), path: args[i + 1])
+            exit(0)
+        }
         if let i = args.firstIndex(of: "--colorpad-preview"), args.count > i + 1 {
             // 開発用：色を選ぶ窓を書き出す  VJPlayer --colorpad-preview out.png [#RRGGBB]
             _ = NSApplication.shared
