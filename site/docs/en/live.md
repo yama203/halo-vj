@@ -2,6 +2,8 @@
 
 The progress bar and the tempo controls (BPM, tap, downbeat) in the “Live” panel.
 
+![The Live panel: tempo and composition speed](shots/en/live.jpg)
+
 ## Progress bar (scrubbing)
 
 Drag the progress bar in the “Live” panel to scrub. Release it to play from that position. The audio follows as well.

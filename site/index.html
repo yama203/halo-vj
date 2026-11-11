@@ -103,6 +103,9 @@
   section { padding: 72px 0 0; }
   .label { font-size: 12px; letter-spacing: .12em; text-transform: uppercase; margin: 0 0 6px; }
   .label.m { color: var(--magenta); } .label.y { color: var(--yellow); } .label.c { color: var(--cyan); }
+  h2.sec { display: flex; align-items: center; gap: 10px; }
+  h2.sec .ic { width: 22px; height: 22px; }
+  h2.sec.m .ic { color: var(--magenta); } h2.sec.y .ic { color: var(--yellow); } h2.sec.c .ic { color: var(--cyan); }
   h2 { font-size: 24px; font-weight: 600; margin: 0 0 10px; }
   .lead { color: var(--muted); margin: 0 0 28px; max-width: 680px; }
   p { margin: 0 0 12px; }
@@ -162,6 +165,29 @@
     display: grid; place-items: center; font-size: 12px; font-weight: 600; color: var(--bg); background: var(--yellow);
   }
 
+  /* 注意の帯 */
+  .caution {
+    display: flex; gap: 10px; align-items: flex-start; max-width: 640px; margin: 18px auto 0; padding: 10px 14px;
+    border: 1px solid rgba(255, 199, 74, .35); background: rgba(255, 199, 74, .07); border-radius: 10px;
+    font-size: 13px; color: #e8dcc0; text-align: left;
+  }
+  .caution .ic { color: var(--yellow); width: 18px; height: 18px; margin-top: 2px; }
+  .caution a { color: var(--yellow); }
+
+  /* ポン出しの節 */
+  .play-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 6px; }
+  .play-grid .card h3 { display: flex; align-items: center; gap: 8px; }
+  .play-grid .card h3 .ic { color: var(--c); }
+  .play-grid .card ul { margin: 8px 0 0; padding-left: 1.1em; font-size: 14px; color: #c9c8d3; }
+  .play-grid .card li { margin: 3px 0; }
+  .play-shots { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 14px; }
+  .play-shots img { border-radius: 8px; box-shadow: 0 0 0 1px var(--line); }
+  .play-shots figure { margin: 0; }
+  .play-shots figcaption { font-size: 12px; color: var(--muted); margin-top: 4px; }
+  .keys.small { margin: 10px 0 0; }
+  .keys.small kbd { height: 28px; min-width: 26px; padding: 0 7px; font-size: 12px; }
+  .keys.small .note { margin: 0 10px 0 4px; }
+
   /* 機能のカード */
   .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
   .card {
@@ -203,6 +229,8 @@
 
   @media (max-width: 860px) {
     .cards { grid-template-columns: 1fr 1fr; }
+    .play-grid { grid-template-columns: 1fr; }
+    .play-shots { grid-template-columns: 1fr; }
     .flow { grid-template-columns: 1fr; }
     .flow .arrow { text-align: center; transform: rotate(90deg); margin: -4px 0; }
     .flow .ctl, .flow .up { grid-column: auto; }
@@ -222,7 +250,7 @@
 </style>
 </head>
 <body>
-<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><symbol id="i-grid" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><path d="M15.5 14.8v5.4l4.7-2.7z"/></symbol><symbol id="i-film" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 4v16M17 4v16M3 9h4M3 15h4M17 9h4M17 15h4"/></symbol><symbol id="i-spark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M11 3l1.9 5.6L18.5 10.5l-5.6 1.9L11 18l-1.9-5.6L3.5 10.5l5.6-1.9z"/><path d="M19 15v5M16.5 17.5h5"/></symbol><symbol id="i-wave" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h1M7 8v8M11 4v16M15 9v6M19 6v12"/></symbol><symbol id="i-plug" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3v5M15 3v5M6 8h12v3a6 6 0 0 1-12 0zM12 17v4"/></symbol><symbol id="i-screen" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></symbol><symbol id="i-layers" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l9 5-9 5-9-5z"/><path d="M3 13l9 5 9-5"/></symbol><symbol id="i-bolt" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L5 13h6l-1 9 8-11h-6z"/></symbol><symbol id="i-down" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11M7 11l5 5 5-5M5 20h14"/></symbol><symbol id="i-book" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2z"/><path d="M9 7h6"/></symbol><symbol id="i-save" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M12 8v8M8 12h8"/></symbol><symbol id="i-click" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 9l10 4-4 1.5L13.5 19z"/><path d="M5 3v3M3 5h3"/></symbol><symbol id="i-fade" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="12" r="5"/><circle cx="15" cy="12" r="5"/></symbol><symbol id="i-in" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h11M10 8l4 4-4 4M17 4h3v16h-3"/></symbol><symbol id="i-knob" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="7"/><path d="M12 12l3-4"/></symbol><symbol id="i-apple" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="11" rx="1.5"/><path d="M2 19h20"/></symbol><symbol id="i-tag" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12V4h8l10 10-8 8z"/><circle cx="8" cy="8" r="1.3"/></symbol><symbol id="i-globe" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></symbol></defs></svg>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><symbol id="i-grid" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><path d="M15.5 14.8v5.4l4.7-2.7z"/></symbol><symbol id="i-film" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 4v16M17 4v16M3 9h4M3 15h4M17 9h4M17 15h4"/></symbol><symbol id="i-spark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M11 3l1.9 5.6L18.5 10.5l-5.6 1.9L11 18l-1.9-5.6L3.5 10.5l5.6-1.9z"/><path d="M19 15v5M16.5 17.5h5"/></symbol><symbol id="i-wave" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h1M7 8v8M11 4v16M15 9v6M19 6v12"/></symbol><symbol id="i-plug" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3v5M15 3v5M6 8h12v3a6 6 0 0 1-12 0zM12 17v4"/></symbol><symbol id="i-screen" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></symbol><symbol id="i-layers" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l9 5-9 5-9-5z"/><path d="M3 13l9 5 9-5"/></symbol><symbol id="i-bolt" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L5 13h6l-1 9 8-11h-6z"/></symbol><symbol id="i-down" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11M7 11l5 5 5-5M5 20h14"/></symbol><symbol id="i-book" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2z"/><path d="M9 7h6"/></symbol><symbol id="i-save" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M12 8v8M8 12h8"/></symbol><symbol id="i-click" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 9l10 4-4 1.5L13.5 19z"/><path d="M5 3v3M3 5h3"/></symbol><symbol id="i-fade" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="12" r="5"/><circle cx="15" cy="12" r="5"/></symbol><symbol id="i-in" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h11M10 8l4 4-4 4M17 4h3v16h-3"/></symbol><symbol id="i-knob" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="7"/><path d="M12 12l3-4"/></symbol><symbol id="i-apple" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="11" rx="1.5"/><path d="M2 19h20"/></symbol><symbol id="i-tag" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12V4h8l10 10-8 8z"/><circle cx="8" cy="8" r="1.3"/></symbol><symbol id="i-globe" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></symbol><symbol id="i-play" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M7 5v14l11-7z"/></symbol><symbol id="i-list" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6h11M9 12h11M9 18h11"/><path d="M4 5.5l2 1-2 1z"/><circle cx="5" cy="12" r=".6"/><circle cx="5" cy="18" r=".6"/></symbol><symbol id="i-speed" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17a8 8 0 1 1 16 0"/><path d="M12 17l4-5"/><path d="M4 21h16"/></symbol><symbol id="i-warn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l10 18H2z"/><path d="M12 10v5M12 18v.01"/></symbol></defs></svg>
 
 <header>
   <div class="wrap bar">
@@ -256,6 +284,7 @@
       <li><svg class="ic" aria-hidden="true"><use href="#i-apple"/></svg><span lang="ja">Apple シリコン搭載 Mac ・ macOS 14 以降</span><span lang="en">Apple silicon Mac · macOS 14 or later</span></li>
       <li><svg class="ic" aria-hidden="true"><use href="#i-globe"/></svg><span lang="ja">日本語 / English</span><span lang="en">English / Japanese</span></li>
     </ul>
+    <p class="caution"><svg class="ic" aria-hidden="true"><use href="#i-warn"/></svg><span lang="ja">開発中のソフトで、AI と対話しながら作る「バイブコーディング」で作っています。大事な本番での使用は控えてください。→ <a href="#install">注意事項</a></span><span lang="en">This is work-in-progress software, built by “vibe coding” — writing code in conversation with an AI. Please avoid using it for important live shows. → <a href="#install">Notes</a></span></p>
   </div>
 
   <figure class="shot">
@@ -270,8 +299,7 @@
   </figure>
 
   <section id="features">
-    <p class="label c"><svg class="ic" aria-hidden="true"><use href="#i-grid"/></svg><span lang="ja">機能</span><span lang="en">Features</span></p>
-    <h2><span lang="ja">主な機能</span><span lang="en">What it does</span></h2>
+    <h2 class="sec c"><svg class="ic" aria-hidden="true"><use href="#i-grid"/></svg><span lang="ja">機能</span><span lang="en">Features</span></h2>
     <div class="cards">
       <div class="card" style="--c: var(--magenta)">
         <div class="badge"><svg class="ic" aria-hidden="true"><use href="#i-grid"/></svg></div>
@@ -341,8 +369,7 @@
         <img lang="en" src="assets/shots/scenes-en.jpg" alt="Scenes panel" width="820" height="580" loading="lazy">
       </div>
       <div>
-        <p class="label m"><svg class="ic" aria-hidden="true"><use href="#i-layers"/></svg><span lang="ja">シーン</span><span lang="en">Scenes</span></p>
-        <h2><span lang="ja">気に入った組み合わせを、ワンクリックで呼び出す</span><span lang="en">Recall a whole look at once</span></h2>
+        <h2 class="sec m"><svg class="ic" aria-hidden="true"><use href="#i-layers"/></svg><span lang="ja">シーン</span><span lang="en">Scenes</span></h2>
         <p>
           <span lang="ja">「今の状態をシーンに保存」を押すと、そのときの出力をサムネイル付きでまるごと保存できます。サムネイルをクリックすれば、そのシーンに切り替わります。</span>
           <span lang="en">“Save Current State as Scene” saves the whole current output with a thumbnail. Click the image to switch to that scene.</span>
@@ -376,7 +403,7 @@
           <li>Clips that stay the same are not restarted</li>
           <li>Line scenes up as cues and step through them with the Space key</li>
         </ul>
-        <h3><svg class="ic" aria-hidden="true"><use href="#i-knob"/></svg><span lang="ja">本番中でも編集できる</span><span lang="en">Edit while on air</span></h3>
+        <h3><svg class="ic" aria-hidden="true"><use href="#i-knob"/></svg><span lang="ja">編集</span><span lang="en">Editing</span></h3>
         <p>
           <span lang="ja">シーンの名前部分をクリックすると、出力はそのままでシーンの内容を編集できます。編集中のシーンはプレビューで確認でき、変更はすぐに反映されます。</span>
           <span lang="en">Click the name strip to edit a scene while the output keeps running. The preview shows the scene, and changes apply right away.</span>
@@ -403,8 +430,7 @@
         </div>
       </div>
       <div>
-        <p class="label y"><svg class="ic" aria-hidden="true"><use href="#i-bolt"/></svg><span lang="ja">FX パッド</span><span lang="en">FX Pads</span></p>
-        <h2><span lang="ja">押している間だけ、エフェクトをかける</span><span lang="en">Effects that last as long as you hold</span></h2>
+        <h2 class="sec y"><svg class="ic" aria-hidden="true"><use href="#i-bolt"/></svg><span lang="ja">FX パッド</span><span lang="en">FX Pads</span></h2>
         <p>
           <span lang="ja">パッドを押している間だけ出力の最終段にエフェクトがかかり、離すと元に戻ります。シーンとは独立しているので、シーンを切り替えてもそのまま使えます。</span>
           <span lang="en">While a pad is held, its effects apply at the very end of the output, and they disappear when you let go. They work regardless of scene changes.</span>
@@ -431,9 +457,82 @@
     </div>
   </section>
 
+  <section id="playback">
+    <h2 class="sec y"><svg class="ic" aria-hidden="true"><use href="#i-play"/></svg><span lang="ja">ポン出し</span><span lang="en">Clip triggering</span></h2>
+    <p class="lead">
+      <span lang="ja">クリップは押した瞬間に再生されます。キューに並べて順番に出したり、速度を手元で調整したりもできます。</span>
+      <span lang="en">Clips start the moment you press them. You can also line them up as cues to play in order, and adjust the speed by hand.</span>
+    </p>
+    <div class="play-grid">
+      <div class="card" style="--c: var(--magenta)">
+        <h3><svg class="ic" aria-hidden="true"><use href="#i-play"/></svg><span lang="ja">再生</span><span lang="en">Playback</span></h3>
+        <ul lang="ja">
+          <li>クリック・キーボード・MIDI で、押した瞬間に頭から再生</li>
+          <li>列番号を押すと、その列を全レイヤー同時に再生</li>
+          <li>レイヤーごとの「切り替え方」（トランジション）とフェード時間</li>
+          <li><code>Esc</code> でブラックアウト（フェード付き）。クリップは裏で再生を続ける</li>
+        </ul>
+        <ul lang="en">
+          <li>Starts from the top the moment you click, press a key or hit a MIDI button</li>
+          <li>Click a column number to play that column on every layer at once</li>
+          <li>Per-layer transition and fade time</li>
+          <li><code>Esc</code> for blackout, with a fade. Clips keep playing underneath</li>
+        </ul>
+      </div>
+      <div class="card" style="--c: var(--yellow)">
+        <h3><svg class="ic" aria-hidden="true"><use href="#i-list"/></svg><span lang="ja">キュー</span><span lang="en">Cues</span></h3>
+        <ul lang="ja">
+          <li>シーンやクリップを順番に並べて、スペースキーで次々に送り出す</li>
+          <li>「今」と「次」を大きく表示。<code>⇧スペース</code> で 1 つ前に戻る</li>
+          <li>キューごとにフェード時間、きっかけのメモ、終わったときの動作</li>
+          <li>押し間違いの連打は 0.5 秒間受け付けない</li>
+        </ul>
+        <ul lang="en">
+          <li>Line up scenes and clips, then send them out one by one with the Space key</li>
+          <li>Now and Next shown large. <code>⇧Space</code> goes back one</li>
+          <li>Per-cue fade time, a note for the cue line, and what happens at the end</li>
+          <li>Accidental repeat presses are ignored for 0.5 s</li>
+        </ul>
+      </div>
+      <div class="card" style="--c: var(--cyan)">
+        <h3><svg class="ic" aria-hidden="true"><use href="#i-speed"/></svg><span lang="ja">速度（ピッチ）</span><span lang="en">Speed (pitch)</span></h3>
+        <ul lang="ja">
+          <li>コンポジション速度を 0.25〜2.0x で調整。再生中のクリップ全体にかかる</li>
+          <li>「離したら 1.0x」にすると、ドラッグしている間だけ速度が変わる（DJ のピッチベンドのように）</li>
+          <li><code>Shift</code> で微調整、ダブルクリックで 1.0x に戻る</li>
+          <li>BPM 同期で、クリップを決めた拍数でちょうど 1 周させる</li>
+        </ul>
+        <ul lang="en">
+          <li>Composition speed from 0.25x to 2.0x, applied to every playing clip</li>
+          <li>With “1.0x on release”, the speed changes only while you drag — like a DJ pitch bend</li>
+          <li><code>Shift</code> for fine control, double-click to reset to 1.0x</li>
+          <li>BPM Sync makes a clip loop exactly over a chosen number of beats</li>
+        </ul>
+      </div>
+    </div>
+    <div class="keys small" aria-hidden="true">
+      <kbd>Space</kbd><span class="note"><span lang="ja">次へ</span><span lang="en">Go</span></span>
+      <kbd>⇧</kbd><kbd>Space</kbd><span class="note"><span lang="ja">戻る</span><span lang="en">Back</span></span>
+      <kbd>Esc</kbd><span class="note"><span lang="ja">ブラックアウト</span><span lang="en">Blackout</span></span>
+      <kbd>⇧</kbd><kbd>Esc</kbd><span class="note"><span lang="ja">全レイヤー停止</span><span lang="en">Stop all layers</span></span>
+    </div>
+    <div class="play-shots">
+      <figure>
+        <img lang="ja" src="assets/shots/cues-ja.jpg" alt="「キュー」パネル" width="824" height="700" loading="lazy">
+        <img lang="en" src="assets/shots/cues-en.jpg" alt="Cues panel" width="824" height="700" loading="lazy">
+        <figcaption><span lang="ja">「キュー」パネル。今と次が大きく出る</span><span lang="en">The Cues panel, with Now and Next shown large</span></figcaption>
+      </figure>
+      <figure>
+        <img lang="ja" src="assets/shots/live-ja.jpg" alt="「ライブ」パネル" width="824" height="700" loading="lazy">
+        <img lang="en" src="assets/shots/live-en.jpg" alt="Live panel" width="824" height="700" loading="lazy">
+        <figcaption><span lang="ja">「ライブ」パネル。テンポとコンポジション速度</span><span lang="en">The Live panel: tempo and composition speed</span></figcaption>
+      </figure>
+    </div>
+    <p style="margin-top:14px"><a href="docs/?p=cues"><span lang="ja">キューの詳しい使い方 →</span><span lang="en">More about cues →</span></a>　<a href="docs/?p=clips-range"><span lang="ja">速度の詳しい使い方 →</span><span lang="en">More about speed →</span></a></p>
+  </section>
+
   <section id="generators">
-    <p class="label c"><svg class="ic" aria-hidden="true"><use href="#i-spark"/></svg><span lang="ja">ジェネレーター</span><span lang="en">Generators</span></p>
-    <h2><span lang="ja">素材がなくても、映像が出せる</span><span lang="en">Visuals without footage</span></h2>
+    <h2 class="sec c"><svg class="ic" aria-hidden="true"><use href="#i-spark"/></svg><span lang="ja">ジェネレーター</span><span lang="en">Generators</span></h2>
     <p class="lead">
       <span lang="ja">クリップと同じようにグリッドに置くだけで、リアルタイムに動き続けます。パラメーターは音や BPM に連動させることもできます。</span>
       <span lang="en">Place one as a clip and it keeps moving in real time. Values can follow the audio or the BPM.</span>
@@ -442,8 +541,7 @@
   </section>
 
   <section id="effects">
-    <p class="label m"><svg class="ic" aria-hidden="true"><use href="#i-knob"/></svg><span lang="ja">エフェクト</span><span lang="en">Effects</span></p>
-    <h2><span lang="ja">エフェクトの例</span><span lang="en">Some of the effects</span></h2>
+    <h2 class="sec m"><svg class="ic" aria-hidden="true"><use href="#i-knob"/></svg><span lang="ja">エフェクト</span><span lang="en">Effects</span></h2>
     <p class="lead">
       <span lang="ja">クリップ、レイヤー、コンポジション、FX パッドのどこにでもかけられます（下の例は、ジェネレーターにかけたものです）。</span>
       <span lang="en">Add them to a clip, a layer, the composition or an FX pad. (These examples are applied to generators.)</span>
@@ -452,8 +550,7 @@
   </section>
 
   <section id="install">
-    <p class="label y"><svg class="ic" aria-hidden="true"><use href="#i-down"/></svg><span lang="ja">インストール</span><span lang="en">Installation</span></p>
-    <h2><span lang="ja">インストールと注意事項</span><span lang="en">Install and notes</span></h2>
+    <h2 class="sec y"><svg class="ic" aria-hidden="true"><use href="#i-down"/></svg><span lang="ja">インストールと注意事項</span><span lang="en">Install and notes</span></h2>
     <div class="two">
       <div class="card">
         <h3><span lang="ja">インストール方法</span><span lang="en">How to install</span></h3>
@@ -474,12 +571,16 @@
         <h3><span lang="ja">注意事項</span><span lang="en">Notes</span></h3>
         <ul lang="ja">
           <li>開発中のソフトです（バージョン 1.0 未満）。</li>
+          <li>AI（Claude）と対話しながらコードを書く「バイブコーディング」で作っています。動作の検証は十分ではありません。</li>
+          <li><strong>大事な本番での使用は控えてください。</strong>使う場合は、必ず事前に手元で十分に試し、ほかの VJ ソフトなどの予備を用意してください。</li>
           <li>表示言語は日本語と英語に対応しています（設定で切り替え可能）。</li>
           <li>NDI を使うには、NDI ランタイムのインストールが必要です。</li>
           <li>不具合の報告や要望は <a href="https://github.com/yama203/halo-vj/issues">GitHub の Issues</a> へ。更新履歴は <a href="https://github.com/yama203/halo-vj/releases">Releases</a> で確認できます。</li>
         </ul>
         <ul lang="en">
           <li>Work in progress (pre-1.0).</li>
+          <li>Built by “vibe coding” — writing code in conversation with an AI (Claude). It has not been thoroughly tested.</li>
+          <li><strong>Please avoid using it for important live shows.</strong> If you do use it, test it thoroughly beforehand and have a backup, such as another VJ app.</li>
           <li>The interface is in English and Japanese (switchable in Settings).</li>
           <li>NDI requires the NDI runtime to be installed.</li>
           <li>Bug reports and requests: <a href="https://github.com/yama203/halo-vj/issues">GitHub Issues</a>. Changelog: <a href="https://github.com/yama203/halo-vj/releases">Releases</a>.</li>

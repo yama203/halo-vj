@@ -2,6 +2,8 @@
 
 How to use the “Cues” panel, a cue list for triggering.
 
+![The Cues panel, with Now and Next shown large](shots/en/cues.jpg)
+
 ## Cue types
 
 Line up what to show in order, and trigger them one after another with “Go”.

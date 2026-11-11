@@ -28,3 +28,9 @@ The app is not notarized by Apple, so macOS blocks it the first time you open it
 ## Checking the version number
 
 Click the icon at the left end of the top bar to open “About Halo VJ”, which shows the version number.
+
+## Caution
+
+- This is work-in-progress software (pre-1.0).
+- It is built by “vibe coding” — writing code in conversation with an AI (Claude). It has not been thoroughly tested.
+- **Please avoid using it for important live shows.** If you do use it, test it thoroughly beforehand and have a backup, such as another VJ app.
