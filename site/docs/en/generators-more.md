@@ -1,6 +1,6 @@
 # More Generators
 
-Generators added later (Reaction-Diffusion, Fractal, Growth, Metaballs, the light and space ones, Logo Particles, and the second batch: Plasma, Aurora, Nebula / Smoke, Truchet Tiles, Hexagon Tiles, Code Rain, Spinning Wireframe, Moiré). Some have "Look" buttons. All values can be driven by sound, the beat or OSC.
+Generators added later (Reaction-Diffusion, Fractal, Growth, Metaballs, the light and space ones, Logo Particles, and the second batch: Plasma, Aurora, Nebula / Smoke, Truchet Tiles, Hexagon Tiles, Code Rain, Spinning Wireframe, Moiré, and the third batch: Sunburst, Ridge Lines, Bokeh, Spiral, Cells (Voronoi), Lissajous, Fireworks, Fire). Some have "Look" buttons. All values can be driven by sound, the beat or OSC.
 
 ## "Lines / Patterns" category
 
@@ -60,6 +60,29 @@ Two or three slightly offset sets of rings or lines overlap, producing moving in
 - Blend Mode: Cancel Overlaps (XOR; palette colors from the center outward) or Add (one palette color per set).
 - Where the lines get finer than a pixel, they fade to their average brightness so they don't flicker.
 
+### Ridge Lines
+
+Many horizontal lines stacked vertically, each rising into flowing noise peaks (like a radio pulse plot).
+
+- Hide: fills black under the front peaks so they hide the lines behind. Turn it off and the lines overlap (the surroundings are transparent).
+- Gather to Center: the ends stay flat and only the middle rises. Perspective: lines further back get thinner, darker and closer together.
+- Coloring: 1 color, Palette (front → back), Rainbow.
+
+### Spiral
+
+A hypnotic rotating spiral.
+
+- Shape: Logarithmic Spiral, Even Spiral, Rings (concentric circles flowing outward). Arms, Winding, rotation speed (°/s).
+- Coloring: 2 colors (the first palette color for the bands, the last for the gaps; make the last one black for transparent gaps), Palette (per arm), Rainbow (angle), Rainbow (radius).
+- Warp makes the arms wave. Tunnel darkens the center for depth. Near the center, detail finer than a pixel fades to its average brightness so it doesn't flicker.
+
+### Cells (Voronoi)
+
+A moving cell pattern.
+
+- Style: Outline (glowing borders), Fill (color per cell), Distance (bright centers), Cracks (thin black lines).
+- Randomness: 0 gives a neat, nearly hexagonal layout. Pulse makes each cell's brightness throb.
+
 ## "Shapes / Particles" category
 
 ### Metaballs
@@ -73,6 +96,21 @@ Draws only the edges of a cube, tetrahedron, octahedron, icosahedron, sphere, to
 - Rotation Speed X / Y / Z (°/s), Perspective (0 is parallel projection), Dim the Back (back edges get darker and thinner).
 - Coloring: 1 color, Rainbow (per edge), Palette by Depth.
 - Count: nests up to 5 copies of the same shape at different sizes.
+
+### Sunburst
+
+Rays radiating from the center rotate. The gaps are transparent.
+
+- Count, Band width, Twist (makes a swirl), Center X / Y, Center Hole, Fade Outward.
+- Coloring: 1 color, Palette (per band), Rainbow. Pulse makes the band widths throb (with its own speed).
+
+### Lissajous (Oscilloscope)
+
+Glowing curves made from combined sine waves, like an oscilloscope. The surroundings are transparent.
+
+- The X and Y frequencies set the shape, and the rotating phase animates it. Detune keeps the shape slowly changing.
+- Trail Length: 1 draws the whole curve; shorter makes a dot of light run along it. Rotate in 3D turns it into a spinning 3D figure.
+- Count: up to 4 curves with offset phases. Coloring: 1 color, Rainbow (along the curve), Palette.
 
 ## "Light / Space" category
 
@@ -109,6 +147,28 @@ Smoke or nebula that slowly billows and swirls. Thin areas are transparent.
 
 - Swirl Strength: how much it twists. Density: the amount of smoke. Flow Direction / Speed moves the whole thing (90° is up).
 - Coloring: Palette, Rainbow, Fire (black → red → yellow → white), Ice (black → blue → white). Stars can be shown too.
+
+### Bokeh
+
+Out-of-focus balls of light slowly drift and twinkle, brighter where they overlap. The surroundings are transparent.
+
+- Count, Size, Size jitter, Rim Strength (a bright ring at the edge), Shape (Circle, Hexagon, Octagon).
+- Depth adds small, dim balls in the back. The bigger the balls, the fewer fit on screen.
+
+### Fireworks
+
+Fireworks launch one after another and burst, with sparks falling under gravity as they fade. The surroundings are transparent.
+
+- Launch Rate (/s), Size, Particles, Gravity, Trail Length, Twinkle (flicker as they fade), Show Rising Trails.
+- Shape: Circle, Ring, Willow (heavy, long-falling), Double. Up to 6 shells are open at once.
+
+### Fire
+
+Flames rising from the bottom. Areas without fire are transparent.
+
+- Height, Speed, Detail, Jitter, Width (1 fills the screen; narrower makes a campfire in the middle).
+- Coloring: Fire (black → red → orange → yellow → white), Blue Flame, Palette, 1 color. Sparks, Smoke.
+- Direction: flow up, down, left or right.
 
 ## "Text / Logo / Clock" category
 

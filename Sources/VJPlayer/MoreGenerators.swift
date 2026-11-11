@@ -1190,7 +1190,7 @@ enum MoreGenerators {
         switch e.kind {
         case .laser, .synthwave, .metaballs, .starfield, .fractal:
             MoreGenRenderer.shared.render(e, into: dst, now: now, stack: stack, cb: cb)
-        case _ where EffectKind.moreGenerators2.contains(e.kind):
+        case _ where EffectKind.moreGenerators2.contains(e.kind) || EffectKind.moreGenerators3.contains(e.kind):
             MoreGen2Renderer.shared.render(e, into: dst, now: now, stack: stack, cb: cb)
         case .reactionDiffusion:
             guard let (s, dt) = life.state(key, now: now, origin: o, warm: 3, make: { ReactionDiffusionSim() }) else { return }

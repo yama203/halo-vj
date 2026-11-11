@@ -9,7 +9,8 @@ extension EffectKind {
                                             .film, .tiltShift, .emboss, .stretch, .displace, .droste]
     static let moreGenerators: [EffectKind] = [.reactionDiffusion, .laser, .synthwave, .logoParticles, .metaballs,
                                                .starfield, .fractal, .ripples, .lightning, .growth,
-                                               .plasma, .aurora, .nebula, .truchet, .hexGrid, .codeRain, .wireframe, .moire]
+                                               .plasma, .aurora, .nebula, .truchet, .hexGrid, .codeRain, .wireframe, .moire,
+                                               .sunburst, .ridgeLines, .bokeh, .spiral, .voronoi, .lissajous, .fireworks, .fire]
     var isMore: Bool { Self.moreEffects.contains(self) || Self.moreGenerators.contains(self) }
 
     var moreLabel: String? {
@@ -57,6 +58,14 @@ extension EffectKind {
         case .codeRain: L("文字の雨")
         case .wireframe: L("回るワイヤーフレーム")
         case .moire: L("モアレ（干渉する輪）")
+        case .sunburst: L("放射の光（サンバースト）")
+        case .ridgeLines: L("波打つ稜線")
+        case .bokeh: L("玉ぼけ")
+        case .spiral: L("うず巻き")
+        case .voronoi: L("細胞（ボロノイ）")
+        case .lissajous: L("リサージュ（オシロの図形）")
+        case .fireworks: L("花火")
+        case .fire: L("炎")
         default: nil
         }
     }
@@ -106,6 +115,14 @@ extension EffectKind {
         case .codeRain: "text.line.first.and.arrowtriangle.forward"
         case .wireframe: "cube.transparent"
         case .moire: "circle.hexagongrid"
+        case .sunburst: "sun.max"
+        case .ridgeLines: "chart.line.uptrend.xyaxis"
+        case .bokeh: "circle.hexagonpath"
+        case .spiral: "hurricane"
+        case .voronoi: "circle.grid.cross.fill"
+        case .lissajous: "infinity"
+        case .fireworks: "fireworks"
+        case .fire: "flame.fill"
         default: nil
         }
     }
@@ -138,6 +155,9 @@ extension EffectKind {
         case .aurora, .nebula: .space
         case .codeRain: .text
         case .wireframe: .shape
+        case .sunburst, .lissajous: .shape
+        case .ridgeLines, .spiral, .voronoi: .pattern
+        case .bokeh, .fireworks, .fire: .space
         default: nil
         }
     }
@@ -556,7 +576,7 @@ extension EffectKind {
                 EffectParam(label: L("うねり"), range: 0...1, defaultValue: 0.5, format: pc, animRange: 0.1...0.9),
                 EffectParam(label: L("すじの細かさ"), range: 0...1, defaultValue: 0.5, format: pc, animRange: 0.2...0.8),
                 EffectParam(label: L("カーテンの枚数"), range: 1...4, defaultValue: 3, perPoint: 0.03, step: 1, format: { String(format: L("%.0f 枚"), $0) }, animRange: 1...4),
-                EffectParam(label: L("明るさ"), range: 0...3, defaultValue: 1.2, perPoint: 0.005, format: pc, animRange: 0.5...2),
+                EffectParam(label: L("明るさ"), range: 0...3, defaultValue: 1.2, perPoint: 0.005, format: pc, animRange: 0.5...2, noDice: true),
                 EffectParam(label: L("星を出す"), range: 0...1, defaultValue: 1, isToggle: true),
             ]
         case .nebula:
@@ -566,7 +586,7 @@ extension EffectKind {
                 EffectParam(label: L("渦の強さ"), range: 0...2, defaultValue: 1, perPoint: 0.005, format: pc, animRange: 0.3...1.6),
                 EffectParam(label: L("流れる向き"), range: 0...360, defaultValue: 90, perPoint: 0.5, format: deg, animRange: 0...360),
                 EffectParam(label: L("流れる速さ"), range: 0...1, defaultValue: 0.08, format: pc, animRange: 0...0.4),
-                EffectParam(label: L("濃さ（煙の量）"), range: 0...1, defaultValue: 0.45, format: pc, animRange: 0.3...0.8),
+                EffectParam(label: L("濃さ（煙の量）"), range: 0...1, defaultValue: 0.45, format: pc, animRange: 0.3...0.8, noDice: true),
                 EffectParam(label: L("コントラスト"), range: 0...1, defaultValue: 0.5, format: pc, animRange: 0.2...0.9),
                 EffectParam(label: L("色の付け方"), range: 0...3, defaultValue: 0, choices: [L("パレット"), L("虹色"), L("炎"), L("氷")]),
                 EffectParam(label: L("星を出す"), range: 0...1, defaultValue: 0, isToggle: true),
@@ -589,7 +609,7 @@ extension EffectKind {
                 EffectParam(label: L("角の丸み"), range: 0...1, defaultValue: 0.15, format: pc, animRange: 0...1),
                 EffectParam(label: L("光り方"), range: 0...3, defaultValue: 0, choices: [L("波"), L("ノイズ"), L("ランダム"), L("流れる")]),
                 EffectParam(label: L("速さ"), range: 0...4, defaultValue: 1, perPoint: 0.005, animRange: 0.3...2.5),
-                EffectParam(label: L("光る量"), range: 0...1, defaultValue: 0.5, format: pc, animRange: 0.2...0.9),
+                EffectParam(label: L("光る量"), range: 0...1, defaultValue: 0.5, format: pc, animRange: 0.2...0.9, noDice: true),
                 EffectParam(label: L("ふち取りだけ"), range: 0...1, defaultValue: 0, isToggle: true),
                 EffectParam(label: L("色の付け方"), range: 0...2, defaultValue: 1, choices: [L("1 色"), L("パレット（明るさで混ぜる）"), L("虹色（マスごと）")]),
                 EffectParam(label: L("回転"), range: 0...360, defaultValue: 0, perPoint: 0.5, format: deg, animRange: 0...60),
@@ -599,7 +619,7 @@ extension EffectKind {
                 EffectParam(label: L("文字の大きさ（縦に入る行数）"), range: 10...120, defaultValue: 40, perPoint: 0.1, step: 1, format: { String(format: L("%.0f 行"), $0) }, animRange: 20...70),
                 EffectParam(label: L("落ちる速さ"), range: 0...4, defaultValue: 1, perPoint: 0.005, animRange: 0.4...2.5),
                 EffectParam(label: L("尾の長さ"), range: 0.05...1, defaultValue: 0.4, format: pc, animRange: 0.15...0.8),
-                EffectParam(label: L("列の濃さ"), range: 0...1, defaultValue: 0.6, format: pc, animRange: 0.2...1),
+                EffectParam(label: L("列の濃さ"), range: 0...1, defaultValue: 0.6, format: pc, animRange: 0.2...1, noDice: true),
                 EffectParam(label: L("文字の変わる速さ"), range: 0...1, defaultValue: 0.3, format: pc, animRange: 0.1...0.8),
                 EffectParam(label: L("先頭の白さ"), range: 0...1, defaultValue: 0.85, format: pc, animRange: 0.3...1),
                 EffectParam(label: L("光る"), range: 0...1, defaultValue: 0.4, format: pc, animRange: 0...1),
@@ -631,6 +651,113 @@ extension EffectKind {
                 EffectParam(label: L("ふくらむ速さ"), range: -4...4, defaultValue: 0.5, perPoint: 0.005, format: { String(format: "%+.2f", $0) }, animRange: -2...2),
                 EffectParam(label: L("重ね方"), range: 0...1, defaultValue: 0, choices: [L("重なりを消す（XOR）"), L("足す")]),
                 EffectParam(label: L("やわらかさ"), range: 0...1, defaultValue: 0.2, format: pc, animRange: 0...0.8),
+            ]
+        // ===== ジェネレーター（第 3 弾） =====
+        case .sunburst:
+            return [
+                EffectParam(label: L("本数"), range: 2...64, defaultValue: 16, perPoint: 0.05, step: 1, format: { String(format: L("%.0f 本"), $0) }, animRange: 6...32),
+                EffectParam(label: L("回る速さ"), range: -180...180, defaultValue: 15, perPoint: 0.5, format: degs, animRange: -60...60),
+                EffectParam(label: L("帯の太さ"), range: 0.05...0.95, defaultValue: 0.5, format: pc, animRange: 0.2...0.8),
+                EffectParam(label: L("ねじれ"), range: -2...2, defaultValue: 0, perPoint: 0.005, format: { String(format: "%+.2f", $0) }, animRange: -1...1),
+                EffectParam(label: L("中心の左右"), range: 0...1, defaultValue: 0.5, format: pc, animRange: 0.3...0.7),
+                EffectParam(label: L("中心の上下"), range: 0...1, defaultValue: 0.5, format: pc, animRange: 0.3...0.7),
+                EffectParam(label: L("中心の穴"), range: 0...0.8, defaultValue: 0, format: pc, animRange: 0...0.4),
+                EffectParam(label: L("外へ消える"), range: 0...1, defaultValue: 0.3, format: pc, animRange: 0...0.8),
+                EffectParam(label: L("やわらかさ"), range: 0...1, defaultValue: 0.1, format: pc, animRange: 0...0.6),
+                EffectParam(label: L("色の付け方"), range: 0...2, defaultValue: 1, choices: [L("1 色"), L("パレット（帯ごと）"), L("虹色")]),
+                EffectParam(label: L("脈打つ"), range: 0...1, defaultValue: 0, format: pc, animRange: 0...0.8),
+                EffectParam(label: L("脈打つ速さ"), range: 0...4, defaultValue: 1, perPoint: 0.005, animRange: 0.3...2),
+            ]
+        case .ridgeLines:
+            return [
+                EffectParam(label: L("線の数"), range: 8...80, defaultValue: 32, perPoint: 0.1, step: 1, format: { String(format: "%.0f", $0) }, animRange: 16...60),
+                EffectParam(label: L("山の高さ"), range: 0...1, defaultValue: 0.5, format: pc, animRange: 0.2...0.9),
+                EffectParam(label: L("山の細かさ"), range: 0.5...8, defaultValue: 2.5, perPoint: 0.01, format: { String(format: "%.1f", $0) }, animRange: 1...5),
+                EffectParam(label: L("流れる速さ"), range: -2...2, defaultValue: 0.3, perPoint: 0.004, format: { String(format: "%+.2f", $0) }, animRange: -1...1),
+                EffectParam(label: L("真ん中に寄せる"), range: 0...1, defaultValue: 0.7, format: pc, animRange: 0.3...1),
+                EffectParam(label: L("線の太さ"), range: 0.5...8, defaultValue: 2, perPoint: 0.02, format: px, animRange: 1...4),
+                EffectParam(label: L("隠す（手前の山で奥を隠す）"), range: 0...1, defaultValue: 1, isToggle: true),
+                EffectParam(label: L("遠近"), range: 0...1, defaultValue: 0.5, format: pc, animRange: 0...1),
+                EffectParam(label: L("色の付け方"), range: 0...2, defaultValue: 0, choices: [L("1 色"), L("パレット（奥行き）"), L("虹色")]),
+                EffectParam(label: L("光る"), range: 0...1, defaultValue: 0.3, format: pc, animRange: 0...1),
+            ]
+        case .bokeh:
+            return [
+                EffectParam(label: L("数"), range: 3...120, defaultValue: 40, perPoint: 0.1, step: 1, format: { String(format: "%.0f", $0) }, animRange: 10...80),
+                EffectParam(label: L("大きさ"), range: 0.01...0.3, defaultValue: 0.08, format: pc, animRange: 0.04...0.15),
+                EffectParam(label: L("大きさのばらつき"), range: 0...1, defaultValue: 0.6, format: pc, animRange: 0...1),
+                EffectParam(label: L("漂う速さ"), range: 0...2, defaultValue: 0.3, perPoint: 0.003, animRange: 0.1...1),
+                EffectParam(label: L("またたき"), range: 0...1, defaultValue: 0.4, format: pc, animRange: 0...1),
+                EffectParam(label: L("ふちの強さ"), range: 0...1, defaultValue: 0.4, format: pc, animRange: 0...1),
+                EffectParam(label: L("形"), range: 0...2, defaultValue: 0, choices: [L("丸"), L("六角"), L("八角")]),
+                EffectParam(label: L("色の付け方"), range: 0...2, defaultValue: 1, choices: [L("1 色"), L("パレット"), L("虹色")]),
+                EffectParam(label: L("明るさ"), range: 0...3, defaultValue: 1, perPoint: 0.005, format: pc, animRange: 0.5...2, noDice: true),
+                EffectParam(label: L("奥行き"), range: 0...1, defaultValue: 0.5, format: pc, animRange: 0...1),
+            ]
+        case .spiral:
+            return [
+                EffectParam(label: L("腕の数"), range: 1...12, defaultValue: 2, perPoint: 0.03, step: 1, format: { String(format: "%.0f", $0) }, animRange: 1...6),
+                EffectParam(label: L("巻きの強さ"), range: 0.5...20, defaultValue: 6, perPoint: 0.03, format: { String(format: "%.1f", $0) }, animRange: 2...12),
+                EffectParam(label: L("回る速さ"), range: -360...360, defaultValue: 60, perPoint: 1, format: degs, animRange: -180...180),
+                EffectParam(label: L("太さ"), range: 0.1...0.9, defaultValue: 0.5, format: pc, animRange: 0.2...0.8),
+                EffectParam(label: L("形"), range: 0...2, defaultValue: 0, choices: [L("対数らせん"), L("等間隔のらせん"), L("輪（同心円が流れる）")]),
+                EffectParam(label: L("中心の左右"), range: 0...1, defaultValue: 0.5, format: pc, animRange: 0.3...0.7),
+                EffectParam(label: L("中心の上下"), range: 0...1, defaultValue: 0.5, format: pc, animRange: 0.3...0.7),
+                EffectParam(label: L("やわらかさ"), range: 0...1, defaultValue: 0.1, format: pc, animRange: 0...0.6),
+                EffectParam(label: L("色の付け方"), range: 0...3, defaultValue: 0,
+                            choices: [L("2 色（パレットの最初と最後）"), L("パレット（腕ごと）"), L("虹色（角度）"), L("虹色（半径）")]),
+                EffectParam(label: L("ゆがみ"), range: 0...1, defaultValue: 0, format: pc, animRange: 0...0.6),
+                EffectParam(label: L("トンネル"), range: 0...1, defaultValue: 0.3, format: pc, animRange: 0...1),
+            ]
+        case .voronoi:
+            return [
+                EffectParam(label: L("細胞の大きさ（縦に入る数）"), range: 2...40, defaultValue: 8, perPoint: 0.05, format: { String(format: "%.0f", $0) }, animRange: 4...16),
+                EffectParam(label: L("動く速さ"), range: 0...2, defaultValue: 0.4, perPoint: 0.003, animRange: 0.1...1),
+                EffectParam(label: L("描き方"), range: 0...3, defaultValue: 0, choices: [L("ふち取り（光る境目）"), L("塗り（細胞ごとの色）"), L("距離（中心が明るい玉）"), L("ひび割れ（細い黒い線）")]),
+                EffectParam(label: L("ふちの太さ"), range: 0.01...0.5, defaultValue: 0.06, format: pc, animRange: 0.02...0.2),
+                EffectParam(label: L("光る"), range: 0...1, defaultValue: 0.5, format: pc, animRange: 0...1),
+                EffectParam(label: L("ばらつき"), range: 0...1, defaultValue: 1, format: pc, animRange: 0...1),
+                EffectParam(label: L("色の付け方"), range: 0...2, defaultValue: 1, choices: [L("1 色"), L("パレット（細胞ごと）"), L("虹色")]),
+                EffectParam(label: L("脈打つ"), range: 0...1, defaultValue: 0.3, format: pc, animRange: 0...1),
+            ]
+        case .lissajous:
+            return [
+                EffectParam(label: L("横の周波数"), range: 1...12, defaultValue: 3, perPoint: 0.03, step: 1, format: { String(format: "%.0f", $0) }, animRange: 1...6),
+                EffectParam(label: L("縦の周波数"), range: 1...12, defaultValue: 2, perPoint: 0.03, step: 1, format: { String(format: "%.0f", $0) }, animRange: 1...6),
+                EffectParam(label: L("位相の回る速さ"), range: -360...360, defaultValue: 30, perPoint: 1, format: degs, animRange: -120...120),
+                EffectParam(label: L("ずれ（形がゆっくり変わる）"), range: -0.2...0.2, defaultValue: 0, perPoint: 0.0005, format: { String(format: "%+.3f", $0) }, animRange: -0.05...0.05),
+                EffectParam(label: L("線の太さ"), range: 0.5...12, defaultValue: 2.5, perPoint: 0.02, format: px, animRange: 1...6),
+                EffectParam(label: L("光る"), range: 0...1, defaultValue: 0.5, format: pc, animRange: 0...1),
+                EffectParam(label: L("残像の長さ"), range: 0.05...1, defaultValue: 1, format: pc, animRange: 0.2...1),
+                EffectParam(label: L("大きさ"), range: 0.1...1.2, defaultValue: 0.8, format: pc, animRange: 0.5...1),
+                EffectParam(label: L("奥行きで回す"), range: 0...1, defaultValue: 0, isToggle: true),
+                EffectParam(label: L("色の付け方"), range: 0...2, defaultValue: 0, choices: [L("1 色"), L("虹色（曲線に沿って）"), L("パレット")]),
+                EffectParam(label: L("本数"), range: 1...4, defaultValue: 1, perPoint: 0.03, step: 1, format: { String(format: "%.0f", $0) }, animRange: 1...4),
+            ]
+        case .fireworks:
+            return [
+                EffectParam(label: L("上がる数"), range: 0.2...6, defaultValue: 1.2, perPoint: 0.01, format: { String(format: L("%.1f 発/秒"), $0) }, animRange: 0.5...3),
+                EffectParam(label: L("大きさ"), range: 0.1...0.8, defaultValue: 0.4, format: pc, animRange: 0.2...0.6),
+                EffectParam(label: L("粒の数"), range: 16...120, defaultValue: 60, perPoint: 0.2, step: 1, format: { String(format: "%.0f", $0) }, animRange: 30...100),
+                EffectParam(label: L("重さ"), range: 0...2, defaultValue: 0.6, perPoint: 0.004, format: pc, animRange: 0.2...1.2),
+                EffectParam(label: L("尾の長さ"), range: 0...1, defaultValue: 0.5, format: pc, animRange: 0...1),
+                EffectParam(label: L("きらめき"), range: 0...1, defaultValue: 0.5, format: pc, animRange: 0...1),
+                EffectParam(label: L("上がる筋を出す"), range: 0...1, defaultValue: 1, isToggle: true),
+                EffectParam(label: L("色の付け方"), range: 0...2, defaultValue: 0, choices: [L("虹色（発ごと）"), L("パレット（発ごと）"), L("1 色")]),
+                EffectParam(label: L("光る"), range: 0...2, defaultValue: 1, perPoint: 0.004, format: pc, animRange: 0.3...1.5),
+                EffectParam(label: L("形"), range: 0...3, defaultValue: 0, choices: [L("丸"), L("輪"), L("しだれ"), L("二重")]),
+            ]
+        case .fire:
+            return [
+                EffectParam(label: L("高さ"), range: 0.1...1.2, defaultValue: 0.6, format: pc, animRange: 0.3...0.9),
+                EffectParam(label: L("速さ"), range: 0...4, defaultValue: 1.5, perPoint: 0.005, animRange: 0.5...3),
+                EffectParam(label: L("細かさ"), range: 0.5...6, defaultValue: 2, perPoint: 0.01, format: { String(format: "%.1f", $0) }, animRange: 1...4),
+                EffectParam(label: L("ゆらぎ"), range: 0...1, defaultValue: 0.4, format: pc, animRange: 0...1),
+                EffectParam(label: L("幅"), range: 0.1...1, defaultValue: 1, format: pc, animRange: 0.3...1),
+                EffectParam(label: L("色の付け方"), range: 0...3, defaultValue: 0, choices: [L("炎"), L("青い炎"), L("パレット"), L("1 色")]),
+                EffectParam(label: L("火の粉"), range: 0...1, defaultValue: 0.4, format: pc, animRange: 0...1),
+                EffectParam(label: L("煙"), range: 0...1, defaultValue: 0.2, format: pc, animRange: 0...0.8),
+                EffectParam(label: L("向き"), range: 0...3, defaultValue: 0, choices: [L("上へ流れる"), L("下へ流れる"), L("左へ流れる"), L("右へ流れる")]),
             ]
         default:
             return nil
@@ -682,6 +809,14 @@ extension EffectKind {
         case .codeRain: L("縦に流れ落ちる文字の列。先頭が明るく、尾が消えていく。まわりは透明")
         case .wireframe: L("立方体や二十面体などの辺だけを光る線で描いて、ゆっくり回す。入れ子にして重ねられる。まわりは透明")
         case .moire: L("少しずつずれた輪や線が重なって、干渉の模様（モアレ）が動く。まわりは透明")
+        case .sunburst: L("中心から出る放射の帯が回る。ねじれで渦に、脈打つで帯の太さが波打つ。帯の間は透明")
+        case .ridgeLines: L("横の線が何本も並び、それぞれが山のように盛り上がって流れる（電波の図のような稜線）。手前の山が奥の線を隠す")
+        case .bokeh: L("ピントの外れた光の玉が、ゆっくり漂ってまたたく。重なると明るくなる。まわりは透明")
+        case .spiral: L("ぐるぐる回る催眠のうず巻き。らせん・等間隔のらせん・流れる輪から選べる")
+        case .voronoi: L("動く細胞の模様。光る境目・塗り・中心が明るい玉・ひび割れの描き方がある")
+        case .lissajous: L("オシロスコープのような、sin を組み合わせた光る曲線。周波数で形が変わり、位相が回って動く。まわりは透明")
+        case .fireworks: L("夜空に花火が次々に上がって開き、粒が落ちながら消えていく。まわりは透明")
+        case .fire: L("下から立ちのぼる炎。幅を狭くすると真ん中のたき火になる。火の粉と煙も出せる。炎でない所は透明")
         default: nil
         }
     }
@@ -708,6 +843,12 @@ extension EffectKind {
         case .hexGrid: return c(7) == 0
         case .codeRain: return true
         case .wireframe: return c(9) == 0
+        case .sunburst, .lissajous: return c(9) == 0
+        case .ridgeLines: return c(8) == 0
+        case .bokeh: return c(7) == 0
+        case .voronoi: return c(6) == 0
+        case .fireworks: return c(7) == 2
+        case .fire: return c(5) == 3
         default: return false
         }
     }
@@ -733,6 +874,14 @@ extension EffectKind {
         case .truchet: return c(7) == 1
         case .hexGrid: return c(7) == 1
         case .wireframe: return c(9) == 2
+        case .sunburst: return c(9) == 1
+        case .ridgeLines: return c(8) == 1
+        case .bokeh: return c(7) == 1
+        case .spiral: return c(8) <= 1
+        case .voronoi: return c(6) == 1
+        case .lissajous: return c(9) == 2
+        case .fireworks: return c(7) == 1
+        case .fire: return c(5) == 2
         default: return false
         }
     }
@@ -753,6 +902,13 @@ extension EffectKind {
         case .hexGrid: RGB(r: 1.0, g: 0.7, b: 0.2)
         case .codeRain: RGB(r: 0.2, g: 1.0, b: 0.4)
         case .wireframe: RGB(r: 0.3, g: 0.9, b: 1.0)
+        case .sunburst: RGB(r: 1.0, g: 0.8, b: 0.3)
+        case .ridgeLines: RGB(r: 0.95, g: 0.95, b: 1.0)
+        case .bokeh: RGB(r: 1.0, g: 0.75, b: 0.4)
+        case .voronoi: RGB(r: 0.3, g: 0.9, b: 1.0)
+        case .lissajous: RGB(r: 0.3, g: 1.0, b: 0.5)
+        case .fireworks: RGB(r: 1.0, g: 0.8, b: 0.4)
+        case .fire: RGB(r: 1.0, g: 0.5, b: 0.15)
         default: nil
         }
     }
@@ -771,6 +927,14 @@ extension EffectKind {
         case .truchet: [PalettePreset.hex(0x3A0CA3), PalettePreset.hex(0xF72585)]
         case .hexGrid, .moire: [PalettePreset.hex(0x00F0FF), PalettePreset.hex(0xFF00C8)]
         case .wireframe: [PalettePreset.hex(0xFF00C8), PalettePreset.hex(0x00F0FF)]
+        case .sunburst: [PalettePreset.hex(0xFF2BD6), PalettePreset.hex(0x7A2BFF), PalettePreset.hex(0x2BE3FF), PalettePreset.hex(0xFFB02B)]
+        case .ridgeLines: [PalettePreset.hex(0xFFFFFF), PalettePreset.hex(0x7A2BFF)]
+        case .bokeh: [PalettePreset.hex(0xFFB02B), PalettePreset.hex(0xFF2BD6), PalettePreset.hex(0x2BE3FF)]
+        case .spiral: [PalettePreset.hex(0xFF2BD6), PalettePreset.hex(0x14003A)]
+        case .voronoi: [PalettePreset.hex(0x00F0FF), PalettePreset.hex(0xFF00C8), PalettePreset.hex(0xFFE600)]
+        case .lissajous: [PalettePreset.hex(0x00F0FF), PalettePreset.hex(0xFF00C8)]
+        case .fireworks: [PalettePreset.hex(0xFF3D00), PalettePreset.hex(0xFFE600), PalettePreset.hex(0x00F0FF), PalettePreset.hex(0xFF00C8)]
+        case .fire: [PalettePreset.hex(0x000000), PalettePreset.hex(0x7A00FF), PalettePreset.hex(0xFF00C8), PalettePreset.hex(0xFFFFFF)]
         default: nil
         }
     }
