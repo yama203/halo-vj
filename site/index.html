@@ -226,6 +226,7 @@
 
   footer { margin-top: 72px; border-top: 1px solid var(--line); padding: 20px 0 40px; color: var(--muted); font-size: 12px; }
   footer p { margin: 0; }
+  footer p + p { margin-top: 6px; }
 
   @media (max-width: 860px) {
     .cards { grid-template-columns: 1fr 1fr; }
@@ -571,7 +572,7 @@
         <h3><span lang="ja">注意事項</span><span lang="en">Notes</span></h3>
         <ul lang="ja">
           <li>開発中のソフトです（バージョン 1.0 未満）。</li>
-          <li>AI（Claude）と対話しながらコードを書く「バイブコーディング」で作っています。動作の検証は十分ではありません。</li>
+          <li>AI（Claude）と対話しながらコードを書く「バイブコーディング」で作っています。動作の検証は十分ではありません。作り始めたきっかけや作り方は <a href="https://note.com/amaterasu/n/n574db564219c">note の記事</a>に書いています。</li>
           <li><strong>大事な本番での使用は控えてください。</strong>使う場合は、必ず事前に手元で十分に試し、ほかの VJ ソフトなどの予備を用意してください。</li>
           <li>表示言語は日本語と英語に対応しています（設定で切り替え可能）。</li>
           <li>NDI を使うには、NDI ランタイムのインストールが必要です。</li>
@@ -579,7 +580,7 @@
         </ul>
         <ul lang="en">
           <li>Work in progress (pre-1.0).</li>
-          <li>Built by “vibe coding” — writing code in conversation with an AI (Claude). It has not been thoroughly tested.</li>
+          <li>Built by “vibe coding” — writing code in conversation with an AI (Claude). It has not been thoroughly tested. Why and how it is being made: <a href="https://note.com/amaterasu/n/n574db564219c">article on note</a> (in Japanese).</li>
           <li><strong>Please avoid using it for important live shows.</strong> If you do use it, test it thoroughly beforehand and have a backup, such as another VJ app.</li>
           <li>The interface is in English and Japanese (switchable in Settings).</li>
           <li>NDI requires the NDI runtime to be installed.</li>
@@ -593,6 +594,7 @@
 
 <footer>
   <div class="wrap">
+    <p><a href="https://note.com/amaterasu/n/n574db564219c"><span lang="ja">note の記事：バイブコーディングで、Mac 用の VJ ソフトを作っています</span><span lang="en">Article on note (Japanese): building a Mac VJ app by vibe coding</span></a></p>
     <p>NDI® is a registered trademark of Vizrt NDI AB. Syphon (BSD License). Sparkle (MIT License).</p>
   </div>
 </footer>
