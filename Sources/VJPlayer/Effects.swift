@@ -12,6 +12,8 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
     case glitchBox, vhs, videoFeedback, rasterScan, crt
     /// 追加のエフェクト（MoreKinds.swift）
     case bloom, kaleidoscope, rgbSplit, pixelate, edgeNeon, zoomBlur, pixelSort, datamosh, ascii, dither, voronoiGlass
+    /// 追加のエフェクト（第 2 弾。MoreKinds.swift・MoreEffects2.swift）
+    case blur, lens, polar, tile, keyer, ledWall, slices, shake
     /// ジェネレーター（動画の代わりにクリップとして置く絵）。エフェクト一覧には出さない
     case solid, gradient, stripes, grid, noise, shapes, text, clock, phyllotaxis, lines, dots, flow, school, tunnel, physarum, particleLife, fireflies, attractor, syphonIn, camera, audioScope, ndiIn
     /// 追加のジェネレーター（MoreKinds.swift）
@@ -63,6 +65,7 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
         if let m = moreLabel { return m }
         return switch self {
         // 追加のもの（上で返している）
+        case .blur, .lens, .polar, .tile, .keyer, .ledWall, .slices, .shake: ""
         case .bloom, .kaleidoscope, .rgbSplit, .pixelate, .edgeNeon, .zoomBlur, .pixelSort, .datamosh, .ascii, .dither, .voronoiGlass, .reactionDiffusion, .laser, .synthwave, .logoParticles, .metaballs, .starfield, .fractal, .ripples, .lightning, .growth: ""
         case .plasma, .aurora, .nebula, .truchet, .hexGrid, .codeRain, .wireframe, .moire: ""
         case .mirror: L("ミラー")
@@ -121,6 +124,7 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
         if let m = moreCategory { return m }
         return switch self {
         // 追加のもの（上で返している）
+        case .blur, .lens, .polar, .tile, .keyer, .ledWall, .slices, .shake: .generator
         case .bloom, .kaleidoscope, .rgbSplit, .pixelate, .edgeNeon, .zoomBlur, .pixelSort, .datamosh, .ascii, .dither, .voronoiGlass, .reactionDiffusion, .laser, .synthwave, .logoParticles, .metaballs, .starfield, .fractal, .ripples, .lightning, .growth: .generator
         case .plasma, .aurora, .nebula, .truchet, .hexGrid, .codeRain, .wireframe, .moire: .generator
         case .mirror, .warp, .fluid: .shape
@@ -137,6 +141,7 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
         if let m = moreIcon { return m }
         return switch self {
         // 追加のもの（上で返している）
+        case .blur, .lens, .polar, .tile, .keyer, .ledWall, .slices, .shake: ""
         case .bloom, .kaleidoscope, .rgbSplit, .pixelate, .edgeNeon, .zoomBlur, .pixelSort, .datamosh, .ascii, .dither, .voronoiGlass, .reactionDiffusion, .laser, .synthwave, .logoParticles, .metaballs, .starfield, .fractal, .ripples, .lightning, .growth: ""
         case .plasma, .aurora, .nebula, .truchet, .hexGrid, .codeRain, .wireframe, .moire: ""
         case .mirror: "rectangle.split.2x1"
@@ -205,6 +210,7 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
         if isMore { return -1 }
         return switch self {
         // 追加のもの（上で返している）
+        case .blur, .lens, .polar, .tile, .keyer, .ledWall, .slices, .shake: -1
         case .bloom, .kaleidoscope, .rgbSplit, .pixelate, .edgeNeon, .zoomBlur, .pixelSort, .datamosh, .ascii, .dither, .voronoiGlass, .reactionDiffusion, .laser, .synthwave, .logoParticles, .metaballs, .starfield, .fractal, .ripples, .lightning, .growth: -1
         case .plasma, .aurora, .nebula, .truchet, .hexGrid, .codeRain, .wireframe, .moire: -1
         case .mirror: 0
@@ -239,6 +245,7 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
         if let m = moreParams { return m }
         switch self {
         // 追加のもの（上で返している）
+        case .blur, .lens, .polar, .tile, .keyer, .ledWall, .slices, .shake: return []
         case .bloom, .kaleidoscope, .rgbSplit, .pixelate, .edgeNeon, .zoomBlur, .pixelSort, .datamosh, .ascii, .dither, .voronoiGlass, .reactionDiffusion, .laser, .synthwave, .logoParticles, .metaballs, .starfield, .fractal, .ripples, .lightning, .growth: return []
         case .plasma, .aurora, .nebula, .truchet, .hexGrid, .codeRain, .wireframe, .moire: return []
         case .mirror:
@@ -935,6 +942,7 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
         if let m = moreHelp { return m }
         return switch self {
         // 追加のもの（上で返している）
+        case .blur, .lens, .polar, .tile, .keyer, .ledWall, .slices, .shake: ""
         case .bloom, .kaleidoscope, .rgbSplit, .pixelate, .edgeNeon, .zoomBlur, .pixelSort, .datamosh, .ascii, .dither, .voronoiGlass, .reactionDiffusion, .laser, .synthwave, .logoParticles, .metaballs, .starfield, .fractal, .ripples, .lightning, .growth: ""
         case .plasma, .aurora, .nebula, .truchet, .hexGrid, .codeRain, .wireframe, .moire: ""
         case .mirror: L("画面の半分を反対側に折り返す")

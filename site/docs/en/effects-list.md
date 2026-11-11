@@ -6,11 +6,11 @@ The effects in the "Effects" panel and what each category contains. Detailed val
 
 | Category | Effects |
 |---|---|
-| Color, Shape, Time | Mirror / Colorize / Levels / Posterize (color levels, dither, dots) / Invert (color and brightness, luminosity, color only; amount) / Posterize Time (frame rate that drops frames) / Strobe / Echo (trails) / Mask (shape) / Mask (free shape) / Warp (organic distortion) / Time Displace (slit scan) / Fluid (flowing paint) |
+| Color, Shape, Time | Mirror / Colorize / Levels / Posterize (color levels, dither, dots) / Invert (color and brightness, luminosity, color only; amount) / Posterize Time (frame rate that drops frames) / Strobe / Echo (trails) / Mask (shape) / Mask (free shape) / Warp (organic distortion) / Time Displace (slit scan) / Fluid (flowing paint) / Keyer (luma / color to transparent) |
 | Analog Gear | Glitch Box / VHS Tape / Video Feedback / Raster Scan / CRT Monitor → [Analog Gear Effects](effects-analog.md) |
-| Light / Blur | Bloom / Edge Neon / Zoom Blur → [Light, Shape and Glitch Effects](effects-glitch.md) |
-| Shape | Kaleidoscope / Glass Shards → [Light, Shape and Glitch Effects](effects-glitch.md) |
-| Glitch / Digital | RGB Split / Mosaic / Halftone / Pixel Sort / Datamosh Style / ASCII Mosaic / Dither → [Light, Shape and Glitch Effects](effects-glitch.md) |
+| Light / Blur | Bloom / Edge Neon / Zoom Blur / Blur → [Light, Shape and Glitch Effects](effects-glitch.md) |
+| Shape | Kaleidoscope / Glass Shards / Lens / Polar / Tile / Shake → [Light, Shape and Glitch Effects](effects-glitch.md) |
+| Glitch / Digital | RGB Split / Mosaic / Halftone / Pixel Sort / Datamosh Style / ASCII Mosaic / Dither / LED Wall / Slices → [Light, Shape and Glitch Effects](effects-glitch.md) |
 
 For Mask (shape) and Mask (free shape), see [Adding and Ordering Effects](effects.md).
 
@@ -20,6 +20,18 @@ As in Resolume, there are two modes. The hue can also be shifted.
 
 - Color: one color. Keep brightness or not.
 - Palette: replaces brightness with palette colors. Presets are available.
+
+## Keyer
+
+Makes part of the image transparent by brightness or color (in the "Color" category), so the layer below shows through.
+
+- Key by: Dark areas, Bright areas, Color.
+- Threshold: for dark or bright areas, how much to remove. 0 removes nothing.
+- Softness: the width of the edge between removed and kept areas.
+- Color and Color range: for Color, the color to remove (green at first) and how close a color must be to be removed (by hue and saturation).
+- Spill removal: for Color, subtracts the key color from what remains (removes green fringes from a green screen).
+- Invert: swaps what is kept and what is removed.
+- Show matte: shows what stays in white and what is removed in black.
 
 ## Warp (organic distortion)
 
