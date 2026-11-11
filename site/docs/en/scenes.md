@@ -2,6 +2,8 @@
 
 How to use the “Scenes” panel to save your favorite combinations and switch between them.
 
+![The Scenes panel](shots/en/scenes.jpg)
+
 ## Saving
 
 “Save Current State as Scene” saves the following, together with a thumbnail of the output:

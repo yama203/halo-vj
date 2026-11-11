@@ -2,6 +2,8 @@
 
 The contents of the settings window (`⌘,`). It holds values to set before a show.
 
+![The Settings window](shots/en/settings.jpg)
+
 ## Output resolution and frame rate
 
 Same as “Resolution / fps” at the top. → [Output, Resolution and Corner Pin](output.md)

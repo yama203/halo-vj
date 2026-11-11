@@ -2,6 +2,8 @@
 
 How to send clips to the output and stop them, and how to temporarily hide video and audio.
 
+![The grid. Green frames mark the playing clips](shots/en/grid.jpg)
+
 ## Triggering a clip
 
 - Click a slot to play it from the beginning (from the in point) the moment you click.

@@ -2,6 +2,8 @@
 
 The output display, output resolution and frame rate, audio output, corner adjustment, and the test pattern.
 
+![The output monitor](shots/en/monitor.jpg)
+
 ## Output display
 
 Choose the output display (or a test window) under “Output” at the top.

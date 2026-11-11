@@ -79,7 +79,8 @@
   article table { border-collapse: collapse; width: 100%; margin: 0 0 14px; font-size: 14px; display: block; overflow-x: auto; }
   article th, article td { border: 1px solid var(--line); padding: 6px 10px; text-align: left; vertical-align: top; }
   article th { background: var(--panel); font-weight: 600; white-space: nowrap; }
-  article img { max-width: 100%; height: auto; border: 1px solid var(--line); border-radius: 6px; }
+  /* 画面写真：クリックで別のタブに大きく出す。縦長のもの（設定ウィンドウなど）は高さを抑える */
+  article img { display: block; max-width: 100%; max-height: 620px; width: auto; height: auto; border: 1px solid var(--line); border-radius: 6px; margin: 4px 0 16px; cursor: zoom-in; }
   article blockquote { margin: 0 0 12px; padding: 4px 14px; border-left: 3px solid var(--line); color: var(--muted); }
 
   .pager { display: flex; justify-content: space-between; gap: 12px; margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--line); font-size: 14px; }
@@ -246,6 +247,10 @@
           content.innerHTML = marked.parse(md);
           fixLinks();
           anchorHeadings();
+          content.querySelectorAll('img').forEach(function (im) {
+            im.loading = 'lazy';
+            im.addEventListener('click', function () { window.open(im.src, '_blank'); });
+          });
           var h1 = content.querySelector('h1');
           document.title = (h1 ? h1.textContent.replace(/#$/, '') : title(pages[i])) + ' — Halo VJ';
           var prev = pages[i - 1], next = pages[i + 1];

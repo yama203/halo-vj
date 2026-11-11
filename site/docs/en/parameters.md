@@ -2,6 +2,8 @@
 
 The contents of the tabs in the parameter panel at the bottom, and how to change values.
 
+![The preview and the parameter panel](shots/en/parameters.jpg)
+
 ## Tabs
 
 The panel has “Composition”, “Layer” and “Clip” tabs, each with a preview.

@@ -26,6 +26,8 @@ An added card opens expanded.
 
 ## Search window (`⌘E`, "Effects" menu)
 
+![The effect and generator search window](shots/en/search.jpg)
+
 - Type to filter (name, description, English name). Hiragana also matches katakana names. Separate words with spaces to match items containing all of them.
 - Choose with ↑↓ and press Enter, or click, to add. Esc closes it.
 - The `⌘E` window also shows generators. Effects go to the current tab (composition, layer or clip); generators go to an empty slot in the selected layer.

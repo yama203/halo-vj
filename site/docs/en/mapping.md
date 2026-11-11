@@ -2,6 +2,8 @@
 
 Projection mapping and sending different parts to multiple outputs, done with “Output Mapping…” (`⌘⇧M`) in the Output menu.
 
+![The Output Mapping window](shots/en/mapping.jpg)
+
 ## What it does
 
 - Projection mapping.

@@ -2,6 +2,8 @@
 
 Using the layer column on the left; adding, reordering, naming and setting the volume of layers; and transitions between clips.
 
+![The layer column](shots/en/layers.jpg)
+
 ## Layer column
 
 The layer column on the left shows opacity, stop, blend mode and the name of the playing clip. Click it to make it the target of the layer tab in the parameter panel below.

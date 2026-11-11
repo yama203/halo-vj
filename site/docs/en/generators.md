@@ -2,6 +2,8 @@
 
 How to place, set up and set the quality of "generators", images placed as clips instead of video, plus a list of the types.
 
+![Some of the generators](shots/generators.jpg)
+
 ## What a generator is
 
 An image placed as a clip instead of a video. Gaps and the surroundings are transparent. Settings are saved in the project.

@@ -11,6 +11,8 @@ The main areas of the Halo VJ window, and how the grid, layers and number fields
 
 ## Main areas
 
+![The top bar](shots/en/topbar.jpg)
+
 | Area | Contents |
 |---|---|
 | Layer column on the left | Opacity, stop, blend mode and name of the playing clip. Click to make it the target of the layer tab below. → [Layers](layers.md) |

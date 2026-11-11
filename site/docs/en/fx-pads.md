@@ -2,6 +2,8 @@
 
 How to use the “FX Pads” panel, a row of effects that apply only while held.
 
+![The FX Pads panel, with pad 3 held](shots/en/fx-pads.jpg)
+
 ## Assigning
 
 Drag an effect from the “Effects” panel onto a pad to assign it (any number per pad). Clicking an empty FX pad opens its settings, where you can also add effects.
