@@ -736,7 +736,7 @@ extension EffectKind {
             ]
         case .fireworks:
             return [
-                EffectParam(label: L("上がる数"), range: 0.2...6, defaultValue: 1.2, perPoint: 0.01, format: { String(format: L("%.1f 発/秒"), $0) }, animRange: 0.5...3),
+                EffectParam(label: L("上がる数"), range: 0.2...6, defaultValue: 2.5, perPoint: 0.01, format: { String(format: L("%.1f 発/秒"), $0) }, animRange: 0.5...3),
                 EffectParam(label: L("大きさ"), range: 0.1...0.8, defaultValue: 0.4, format: pc, animRange: 0.2...0.6),
                 EffectParam(label: L("粒の数"), range: 16...120, defaultValue: 60, perPoint: 0.2, step: 1, format: { String(format: "%.0f", $0) }, animRange: 30...100),
                 EffectParam(label: L("重さ"), range: 0...2, defaultValue: 0.6, perPoint: 0.004, format: pc, animRange: 0.2...1.2),
