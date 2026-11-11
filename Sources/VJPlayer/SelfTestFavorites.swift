@@ -78,5 +78,46 @@ extension SelfTest {
                   && Set(qf.prefix(2)) == [.tunnel, .echo] && Set(qf) == Set(qn) && qf.count == qn.count,
                   "ピッカー：空のときは上にお気に入り・最近使った（ジェネレーターは出さない窓では飛ばす）、検索中はお気に入りが先")
         }
+
+        // ピッカー：星を押して並びが変わっても、選んでいる種類は変わらない（すぐ Enter で隣の種類が足されない）
+        do {
+            func rows(_ q: String, _ f: [EffectKind]) -> [(String, [EffectKind])] {
+                EffectPicker.rows(q, includeGenerators: true, favorites: f, recents: [.vhs])
+            }
+            func at(_ r: [(String, [EffectKind])], _ i: Int?) -> EffectKind? {
+                guard let i else { return nil }
+                let all = r.flatMap(\.1)
+                return all.indices.contains(i) ? all[i] : nil
+            }
+            func sec(_ r: [(String, [EffectKind])], _ i: Int) -> String? {
+                var i = i
+                for s in r { if i < s.1.count { return s.0 }; i -= s.1.count }
+                return nil
+            }
+            var bad: [String] = []
+            // 空のとき：下の分類の行で星を入れる（上のお気に入りの行が増える）・外す（減る）
+            for (fBefore, fAfter, k) in [([EffectKind.echo], [EffectKind.echo, .mirror], EffectKind.mirror),
+                                         ([.echo, .mirror], [.echo], .mirror), ([], [.tunnel], .tunnel)] {
+                let b = rows("", fBefore), a = rows("", fAfter)
+                let all = b.flatMap(\.1)
+                guard let i = all.lastIndex(of: k) else { bad.append("\(k.rawValue) が無い"); continue }
+                let j = EffectPicker.reselect(i, before: b, after: a)
+                if at(a, j) != k || j.flatMap({ sec(a, $0) }) != sec(b, i) { bad.append("空・\(k.rawValue)") }
+            }
+            // お気に入りの行で星を外す：その区分は消えるので、同じ種類の最初の行へ
+            do {
+                let b = rows("", [.echo, .mirror]), a = rows("", [.echo])
+                let j = EffectPicker.reselect(1, before: b, after: a)
+                if at(b, 1) != .mirror || at(a, j) != .mirror { bad.append("お気に入りの行で外す") }
+            }
+            // 検索中：星を入れると先頭へ動く
+            do {
+                let b = rows("e", []), a = rows("e", [.tunnel])
+                let i = b.flatMap(\.1).firstIndex(of: .tunnel) ?? -1
+                let j = EffectPicker.reselect(i, before: b, after: a)
+                if i <= 0 || at(a, j) != .tunnel || j == i { bad.append("検索中") }
+            }
+            check(bad.isEmpty, "ピッカー：星を押して並びが変わっても、選んでいる種類（同じ区分の行）のまま" + (bad.isEmpty ? "" : "（だめ：\(bad.joined(separator: "、"))）"))
+        }
     }
 }

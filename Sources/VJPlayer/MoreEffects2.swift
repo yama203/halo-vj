@@ -441,6 +441,14 @@ static float vn2(float2 p) {
     float2 w = f * f * (3.0 - 2.0 * f);
     return mix(mix(h2(i), h2(i + float2(1, 0)), w.x), mix(h2(i + float2(0, 1)), h2(i + float2(1, 1)), w.x), w.y);
 }
+// 縦（y）が周期 P で一周するノイズ（P は整数）。時間を P で余りにして渡しても、つなぎ目で跳ばない
+static float vn2py(float2 p, float P) {
+    float2 i = floor(p), f = fract(p);
+    float2 w = f * f * (3.0 - 2.0 * f);
+    float y0 = i.y - P * floor(i.y / P);
+    float y1 = y0 + 1.0 >= P ? 0.0 : y0 + 1.0;
+    return mix(mix(h2(float2(i.x, y0)), h2(float2(i.x + 1.0, y0)), w.x), mix(h2(float2(i.x, y1)), h2(float2(i.x + 1.0, y1)), w.x), w.y);
+}
 static float2 rot2(float2 p, float a) { float c = cos(a), s = sin(a); return float2(p.x * c - p.y * s, p.x * s + p.y * c); }
 
 // ===== フィルム =====
@@ -577,7 +585,8 @@ fragment float4 m2_stretch(VO in [[stage_in]], constant MU& u [[buffer(0)]], tex
     bool vd = dir == 2 || dir == 3;
     float along = vd ? in.uv.y : in.uv.x;
     float across = vd ? in.uv.x : in.uv.y;
-    float wob = (vn2(float2(across * u.a.w, u.b.x)) - 0.5) * u.a.z * 0.6;
+    // u.b.x は「流れ × 時間」を 1000 で余りにしたもの。ノイズも 1000 で一周させて、つなぎ目で跳ばないように
+    float wob = (vn2py(float2(across * u.a.w, u.b.x), 1000.0) - 0.5) * u.a.z * 0.6;
     float p = u.a.y + wob;
     float past, lineAt = p;
     if (dir == 0 || dir == 2) past = along - p;
@@ -683,12 +692,19 @@ final class MoreFX2Renderer {
     private var pipes: [String: MTLRenderPipelineState] = [:]
     /// 作業用の絵（名前と大きさごとに 1 枚。ぼかしの縮めた絵・ミップマップ付きの元の絵など）。
     /// 大きさの違う段（クリップ・コンポジション・見本）で交互に使っても作り直さないよう、大きさごとに持ち、
-    /// 数が上限を超えたら、いちばん長く使っていないものを 1 枚だけ捨てる
-    private var texCache: [String: (tex: MTLTexture, used: UInt64)] = [:]
+    /// 数が上限を超えたら、いちばん長く使っていないものを 1 枚だけ捨てる。
+    /// また、新しく作るときに、しばらく（idleSeconds 秒）使っていないものは捨てる
+    /// （解像度の違うクリップや、出力の大きさを変えたあとの古い大きさの絵が、残り続けないように）
+    private var texCache: [String: (tex: MTLTexture, used: UInt64, at: Double)] = [:]
     private var useCounter: UInt64 = 0
     static let maxCachedTextures = 64
+    static let idleSeconds: Double = 5
     /// テスト用：作業用の絵を作った回数
     private(set) var texturesMade = 0
+    /// テスト用：時計を進める（秒）
+    var testClockOffset: Double = 0
+    /// テスト用：いま持っている作業用の絵の名前（名前-幅x高さ）
+    var cachedTextureKeys: [String] { Array(texCache.keys) }
 
     private init() {
         let lib = try! device.makeLibrary(source: moreFX2Source, options: nil)
@@ -711,10 +727,13 @@ final class MoreFX2Renderer {
         let W = max(w, 1), H = max(h, 1)
         let key = "\(name)-\(W)x\(H)\(mip ? "m" : "")"
         useCounter += 1
+        let now = ProcessInfo.processInfo.systemUptime + testClockOffset
         if let c = texCache[key] {
-            texCache[key] = (c.tex, useCounter)
+            texCache[key] = (c.tex, useCounter, now)
             return c.tex
         }
+        // しばらく使っていないものを捨てる（GPU はもう使い終わっている）
+        texCache = texCache.filter { now - $0.value.at <= Self.idleSeconds }
         if texCache.count >= Self.maxCachedTextures, let old = texCache.min(by: { $0.value.used < $1.value.used })?.key {
             texCache[old] = nil
         }
@@ -722,7 +741,7 @@ final class MoreFX2Renderer {
         td.usage = [.renderTarget, .shaderRead]
         td.storageMode = .private
         guard let t = device.makeTexture(descriptor: td) else { return nil }
-        texCache[key] = (t, useCounter)
+        texCache[key] = (t, useCounter, now)
         texturesMade += 1
         return t
     }
@@ -905,7 +924,9 @@ final class MoreFX2Renderer {
             one("m2_emboss")
         case .stretch:
             u.a = SIMD4(Float(c(0)), v(1), v(2), v(3))
-            u.b = SIMD4(Float((Double(v(4)) * elapsed).truncatingRemainder(dividingBy: 1000)), v(5), v(6), 0)
+            // 1000 で余りにする（シェーダーのノイズも 1000 で一周する）。負の流れでも 0〜1000 に
+            let flow = Double(v(4)) * elapsed
+            u.b = SIMD4(Float(flow - 1000 * floor(flow / 1000)), v(5), v(6), 0)
             one("m2_stretch")
         case .displace:
             let amount = v(0) * k

@@ -179,6 +179,20 @@ extension SelfTest {
             for f in 3..<13 { frame(f) }
             let made = MoreFX2Renderer.shared.texturesMade - before
             check(made == 0, "追加のエフェクト：大きさの違う 2 つの絵に、量の違うぼかしなどを交互にかけても、作業用の絵を作り直さない（10 コマで \(made) 枚）")
+            // しばらく使わなかった大きさの絵は、新しく作るときに捨てる（小さい方だけ続けて、別の大きさを 1 回足す）
+            let r2 = MoreFX2Renderer.shared
+            func has(_ w: Int) -> Bool { r2.cachedTextureKeys.contains { $0.contains("-\(w)x") } }
+            let hadBig = has(big.width)
+            r2.testClockOffset = MoreFX2Renderer.idleSeconds + 1
+            let odd = ctx.device.makeTexture(descriptor: {
+                let d = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: 200, height: 150, mipmapped: false)
+                d.usage = [.shaderRead]; return d }())!
+            let cb2 = ctx.queue.makeCommandBuffer()!
+            _ = EffectProcessor().apply(stack, to: odd, key: "cacheC", cb: cb2, now: 4)
+            cb2.commit(); cb2.waitUntilCompleted()
+            let goneBig = !has(big.width) && !has(small.width)
+            r2.testClockOffset = 0
+            check(hadBig && goneBig && has(200), "追加のエフェクト：\(Int(MoreFX2Renderer.idleSeconds)) 秒より長く使っていない大きさの作業用の絵は、新しく作るときに捨てる")
         }
         check(slow.isEmpty, "追加のエフェクト（第 2・3 弾）：1920×1080 で軽い（ms：\(times.joined(separator: "・"))）"
               + (slow.isEmpty ? "" : "（重い：\(slow.joined(separator: "、"))）"))

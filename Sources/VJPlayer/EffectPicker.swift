@@ -66,6 +66,46 @@ struct EffectPicker: View {
         return favFirst(byName) + favFirst(all.filter { !byName.contains($0) })
     }
 
+    /// 画面に出る行の並び（区分の見出し・中身）。検索中は見出しの無い 1 つの区分
+    static func rows(_ query: String, includeGenerators: Bool,
+                     favorites: [EffectKind], recents: [EffectKind]) -> [(String, [EffectKind])] {
+        if query.trimmingCharacters(in: .whitespaces).isEmpty {
+            return emptySections(includeGenerators: includeGenerators, favorites: favorites, recents: recents)
+        }
+        return [("", results(query, includeGenerators: includeGenerators, favorites: favorites, recents: recents))]
+    }
+
+    /// 星を押して並びが変わったあと、同じ種類を指す番号（同じ区分の行。無ければ同じ種類の最初の行）。
+    /// 番号のままだと、並びがずれて、すぐ Enter で隣の別の種類が足されてしまうので
+    static func reselect(_ index: Int, before: [(String, [EffectKind])], after: [(String, [EffectKind])]) -> Int? {
+        var i = index
+        var section: String?, kind: EffectKind?
+        for sec in before {
+            if i < sec.1.count { section = sec.0; kind = sec.1[i]; break }
+            i -= sec.1.count
+        }
+        guard let kind else { return nil }
+        var start = 0, first: Int?
+        for sec in after {
+            if let j = sec.1.firstIndex(of: kind) {
+                if sec.0 == section { return start + j }
+                if first == nil { first = start + j }
+            }
+            start += sec.1.count
+        }
+        return first
+    }
+
+    /// 星を押す。選んでいた行が同じ種類を指したままになるよう、番号を付け直す
+    private func toggleFavorite(_ k: EffectKind) {
+        func now() -> [(String, [EffectKind])] {
+            Self.rows(query, includeGenerators: includeGenerators, favorites: fav.favorites, recents: fav.recents)
+        }
+        let before = now()
+        fav.toggle(k)
+        if let i = Self.reselect(highlight, before: before, after: now()) { highlight = i }
+    }
+
     private var results: [EffectKind] {
         Self.results(query, includeGenerators: includeGenerators, favorites: fav.favorites, recents: fav.recents)
     }
@@ -159,7 +199,7 @@ struct EffectPicker: View {
             // 右端の星：お気に入りなら出たまま、選んでいる行では押して入れられる
             let isFav = fav.isFavorite(k)
             if isFav || on {
-                Button { fav.toggle(k) } label: {
+                Button { toggleFavorite(k) } label: {
                     Image(systemName: isFav ? "star.fill" : "star")
                         .font(.system(size: 10))
                         .foregroundStyle(isFav ? Color.yellow : Color.white.opacity(0.7))

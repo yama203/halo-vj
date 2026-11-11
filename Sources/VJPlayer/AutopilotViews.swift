@@ -99,11 +99,12 @@ struct AutopilotSettings: View {
             } else {
                 ScrollView {
                     VStack(spacing: 8) {
-                        ForEach(engine.autopilot.rules.indices, id: \.self) { i in
-                            if i < engine.autopilot.rules.count {
-                                AutoRuleCard(rule: $engine.autopilot.rules[i], runner: runner) {
-                                    engine.autopilot.rules.remove(at: i)
-                                }
+                        // 番号でなく id（UUID）で回す。パネルの外でルールが減っても（レイヤーを消したときなど）、
+                        // 子のカードが古い番号を読んで範囲の外になることがない
+                        ForEach($engine.autopilot.rules) { $rule in
+                            let id = rule.id
+                            AutoRuleCard(rule: $rule, runner: runner) {
+                                engine.autopilot.rules.removeAll { $0.id == id }
                             }
                         }
                     }

@@ -147,7 +147,7 @@ extension SelfTest {
         }
         check(bad.isEmpty, "追加のジェネレーター 第 3 弾：絵が出る・真っ白でない・時間で動く・値で変わる・まわりは透明" + (bad.isEmpty ? "" : "（だめ：\(bad.joined(separator: "、"))）"))
 
-        // CPU で作る線と粒：リサージュは 1 本 384 区切りで本数ぶん。花火は同時に 6 発まで（粒 120・尾 3 で 2880 個まで）
+        // CPU で作る線と粒：リサージュは 1 本 384 区切りで本数ぶん。花火は線分の上限（fireworkSegBudget）まで
         let li = Effect(kind: .lissajous)
         var li4 = li; li4.values[10] = 4
         let ls1 = MoreGen2Renderer.lissajousSegs(li, v: { Float(li.value($0)) }, t: 2, size: SIMD2(1920, 1080))
@@ -163,7 +163,29 @@ extension SelfTest {
         let f1 = MoreGen2Renderer.fireworkSegs(fw, v: { Float(fw.value($0)) }, t: 12.3, size: SIMD2(1920, 1080))
         let f2 = MoreGen2Renderer.fireworkSegs(fw, v: { Float(fw.value($0)) }, t: 12.3, size: SIMD2(1920, 1080))
         let same = f1.count == f2.count && zip(f1, f2).allSatisfy { $0.ab == $1.ab }
-        check(ls1.count == 384 && ls4.count == 384 * 4 && most > 0 && most <= 6 * 120 * 4 && same,
+        check(ls1.count == 384 && ls4.count == 384 * 4 && most > 0 && most <= MoreGen2Renderer.fireworkSegBudget && same,
               "リサージュ・花火：線分の数が決まりどおり（リサージュ \(ls1.count)・\(ls4.count)、花火いちばん多くて \(most)）、花火は時刻だけで決まる")
+
+        // 花火：6 発/秒・しだれ（いちばん重なる）でも、どの発も寿命の終わり（ほぼ消えるまで）出続け、線分は上限以内
+        do {
+            var fw6 = Effect(kind: .fireworks)
+            fw6.values[0] = 6; fw6.values[2] = 120; fw6.values[4] = 1; fw6.values[9] = 2
+            let rate: Float = 6, life: Float = 3.6
+            var cut: [String] = [], top = 0
+            for i in 0..<120 {
+                let t = 20 + Float(i) * 0.05
+                let segs = MoreGen2Renderer.fireworkSegs(fw6, v: { Float(fw6.value($0)) }, t: t, size: SIMD2(1920, 1080))
+                top = max(top, segs.count)
+                let ids = Set(segs.map { Int($0.info.z) })
+                for k in 0...Int(t * rate) {
+                    let tk = (Float(k) + 0.7 * MoreGen2Renderer.hash(k, 1)) / rate
+                    let rise: Float = 0.8 + 0.4 * MoreGen2Renderer.hash(k, 5)
+                    // 開いてから寿命の 9 割（明るさ 1 割以下）までは、出ていないといけない
+                    if t >= tk && t - tk - rise < life * 0.9 && !ids.contains(k) { cut.append("\(k)@\(t)") }
+                }
+            }
+            check(cut.isEmpty && top <= MoreGen2Renderer.fireworkSegBudget,
+                  "花火：6 発/秒・しだれでも途中で消える発が無く（\(cut.prefix(3).joined(separator: "・"))）、線分は上限以内（いちばん多くて \(top)・上限 \(MoreGen2Renderer.fireworkSegBudget)）")
+        }
     }
 }

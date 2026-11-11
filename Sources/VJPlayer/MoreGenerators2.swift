@@ -598,7 +598,8 @@ static float2 vpt(float2 g, float jit, float T) {
     float2 h = h22(g);
     float row = g.y - 2.0 * floor(g.y * 0.5);
     float2 base = float2(0.25 + 0.5 * row, 0.5);
-    return base + jit * (0.42 * sin(T + 6.2831853 * h) + (h - 0.5) * 0.3);
+    // ずれは 0.5 マス以内（0.35 + 0.15）。となりのマスの点と入れ替わらないように
+    return base + jit * (0.35 * sin(T + 6.2831853 * h) + (h - 0.5) * 0.3);
 }
 fragment float4 g2_voronoi(VO in [[stage_in]], constant MU& u [[buffer(0)]]) {
     float H = u.size.y;
@@ -608,15 +609,26 @@ fragment float4 g2_voronoi(VO in [[stage_in]], constant MU& u [[buffer(0)]]) {
     float T = u.a.y, jit = u.b.y;
     float2 mg = 0.0, mr = 0.0;
     float md = 8.0;
-    for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++) {
-        float2 g = float2(i, j);
-        float2 r = g + vpt(n + g, jit, T) - f;
-        float dd = dot(r, r);
-        if (dd < md) { md = dd; mr = r; mg = g; }
+    // いちばん近い点：段ごとに点の並びが半マスずれている（横は ±0.25 マスはみ出す）ので、
+    // 段ごとに「点がそのマスの中に入るように 0.25 ずらした」マスを真ん中にして 3 つ見る（はみ出した点を見落とさない）
+    for (int j = -1; j <= 1; j++) {
+        float cy = n.y + float(j);
+        float row = cy - 2.0 * floor(cy * 0.5);
+        float cx = floor(p.x + 0.25 - 0.5 * row) - n.x;
+        for (int i = -1; i <= 1; i++) {
+            float2 g = float2(cx + float(i), float(j));
+            float2 r = g + vpt(n + g, jit, T) - f;
+            float dd = dot(r, r);
+            if (dd < md) { md = dd; mr = r; mg = g; }
+        }
     }
     // ふちまでの距離：となりの点との中点（垂直二等分線）までの距離
+    // 点はマスの外まで動くので、いちばん近い点のまわり 5×5 を見る（3×3 だと、境目が切れることがある）。
+    // ただし自分と四すみは見ない（四すみの点とは 1.4 マス以上はなれていて、まず隣の細胞にならない。重さを抑えるため）。距離の描き方では使わないので見ない
     float bd = 8.0;
-    for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++) {
+    int mode = int(u.a.z + 0.5);
+    if (mode != 2) for (int j = -2; j <= 2; j++) for (int i = -2; i <= 2; i++) {
+        if ((abs(i) == 2 && abs(j) == 2) || (i == 0 && j == 0)) continue;
         float2 g = mg + float2(i, j);
         float2 r = g + vpt(n + g, jit, T) - f;
         float2 dv = r - mr;
@@ -629,7 +641,6 @@ fragment float4 g2_voronoi(VO in [[stage_in]], constant MU& u [[buffer(0)]]) {
     int cm = int(u.b.z + 0.5);
     float3 col = cm == 0 ? u.color.rgb : (cm == 1 ? pal(u, hc) : hue(hc + u.time * 0.02));
     float pulse = 1.0 - u.b.w * 0.5 * (1.0 + sin(u.time * 2.5 + hc * 6.2831853));
-    int mode = int(u.a.z + 0.5);
     float w = u.a.w;
     float3 rgb; float a;
     if (mode == 0) {
@@ -846,7 +857,9 @@ final class MoreGen2Renderer {
             u.c = SIMD4(v(8).rounded(), 0, 0, 0)
             full(dst, "g2_fire", &u, cb: cb, texture: noiseTable)
         case .lissajous:
-            drawSegs(Self.lissajousSegs(e, v: v, t: t, size: SIMD2(Float(dst.width), Float(dst.height))), into: dst, cb: cb)
+            // 位相は Double の時間で求める（u.time と同じ 10000 秒の折り返し）
+            let td = max(now - stack.origin, 0).truncatingRemainder(dividingBy: 10000)
+            drawSegs(Self.lissajousSegs(e, v: v, t: t, td: td, size: SIMD2(Float(dst.width), Float(dst.height))), into: dst, cb: cb)
         case .fireworks:
             drawSegs(Self.fireworkSegs(e, v: v, t: t, size: SIMD2(Float(dst.width), Float(dst.height))), into: dst, cb: cb, pipe: "segAdd")
         default:
@@ -858,6 +871,28 @@ final class MoreGen2Renderer {
 
     struct Seg { var ab: SIMD4<Float>; var col: SIMD4<Float>; var info: SIMD4<Float> }
 
+    /// 線分のバッファの入れ物（大きさ＝2 の累乗ごと）。GPU が使い終わったら（コマンドバッファの完了で）戻して、次のコマで使い回す
+    /// render は描画スレッドからもメインスレッドからも呼ばれるので、ロックで守る
+    private var segPool: [Int: [MTLBuffer]] = [:]
+    private let segPoolLock = NSLock()
+
+    private func segBuffer(_ len: Int, cb: MTLCommandBuffer) -> MTLBuffer? {
+        var cap = 4096
+        while cap < len { cap *= 2 }
+        segPoolLock.lock()
+        let reused = segPool[cap]?.popLast()
+        segPoolLock.unlock()
+        guard let buf = reused ?? device.makeBuffer(length: cap, options: .storageModeShared) else { return nil }
+        cb.addCompletedHandler { [weak self] _ in
+            guard let self else { return }
+            self.segPoolLock.lock()
+            // 1 つの大きさにつき 4 本まで取っておく
+            if self.segPool[cap, default: []].count < 4 { self.segPool[cap, default: []].append(buf) }
+            self.segPoolLock.unlock()
+        }
+        return buf
+    }
+
     private func drawSegs(_ segs: [Seg], into dst: MTLTexture, cb: MTLCommandBuffer, pipe: String = "seg") {
         let rpd = MTLRenderPassDescriptor()
         rpd.colorAttachments[0].texture = dst
@@ -868,10 +903,15 @@ final class MoreGen2Renderer {
         if !segs.isEmpty, let p = pipes[pipe] {
             enc.setRenderPipelineState(p)
             var size = SIMD2<Float>(Float(dst.width), Float(dst.height))
-            guard let buf = device.makeBuffer(bytes: segs, length: MemoryLayout<Seg>.stride * segs.count, options: .storageModeShared) else {
-                enc.endEncoding(); return
+            let len = MemoryLayout<Seg>.stride * segs.count
+            if len <= 4096 {
+                // 小さいときは、バッファを作らずに直接わたす
+                segs.withUnsafeBytes { enc.setVertexBytes($0.baseAddress!, length: len, index: 0) }
+            } else {
+                guard let buf = segBuffer(len, cb: cb) else { enc.endEncoding(); return }
+                segs.withUnsafeBytes { buf.contents().copyMemory(from: $0.baseAddress!, byteCount: len) }
+                enc.setVertexBuffer(buf, offset: 0, index: 0)
             }
-            enc.setVertexBuffer(buf, offset: 0, index: 0)
             enc.setVertexBytes(&size, length: 8, index: 1)
             enc.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4, instanceCount: segs.count)
         }
@@ -1024,12 +1064,18 @@ final class MoreGen2Renderer {
     // MARK: - リサージュ
 
     /// sin を組み合わせた曲線を、折れ線（1 本 384 区切り）の線分にする
-    static func lissajousSegs(_ e: Effect, v: (Int) -> Float, t: Float, size: SIMD2<Float>) -> [Seg] {
-        let deg = Float.pi / 180
+    /// td は t と同じ時間の Double（無ければ t から）。位相は大きくなるので Double で求めて、一周の余りにしてから Float にする
+    /// （Float のまま大きくすると、点ごとの誤差で線が震える）
+    static func lissajousSegs(_ e: Effect, v: (Int) -> Float, t: Float, td: Double? = nil, size: SIMD2<Float>) -> [Seg] {
         let A = size.x / max(size.y, 1), k = size.y / 1080
         let fx = v(0).rounded(), fy = v(1).rounded()
-        let phase = v(2) * deg * t
-        let drift = v(3) * t * 2 * .pi              // 縦の位相がゆっくりずれて、形が変わる
+        let T = td ?? Double(t)
+        let twoPi = 2 * Double.pi
+        func wrap(_ x: Double, _ period: Double = 2 * .pi) -> Float { Float(x - period * floor(x / period)) }
+        let phaseD = Double(v(2)) * .pi / 180 * T
+        let phase = wrap(phaseD)
+        let phase7 = wrap(phaseD * 0.7)                  // 奥行きの向きは 0.7 倍で回る（こちらも別に余りを取る）
+        let drift = wrap(Double(v(3)) * T * twoPi)      // 縦の位相がゆっくりずれて、形が変わる
         let width = v(4) * k, glow = v(5) * 9 * k
         let trail = v(6), sz = v(7)
         let deep = v(8) > 0.5
@@ -1039,7 +1085,8 @@ final class MoreGen2Renderer {
         let M = 384
         let full = trail >= 0.999
         // 残像が短いときは、点が曲線の上を走る（先頭が明るく、後ろは暗く）
-        let head = t * 2 * .pi * 0.3
+        // fx・fy は整数だが、奥行きの (fx + fy) / 2 は半端になりうるので 4π の余り。s が負にならないよう 4π 足しておく
+        let head = wrap(T * twoPi * 0.3, 2 * twoPi) + 2 * Float(twoPi)
         let ry = t * 0.5, rx: Float = 0.45
         var segs: [Seg] = []
         segs.reserveCapacity(M * count)
@@ -1049,7 +1096,7 @@ final class MoreGen2Renderer {
                 var x = sin(fx * s + phase + pj), y = sin(fy * s + drift + pj * 0.5)
                 var f: Float = 1
                 if deep {
-                    let z0 = sin((fx + fy) * 0.5 * s + phase * 0.7 + pj)
+                    let z0 = sin((fx + fy) * 0.5 * s + phase7 + pj)
                     let x1 = x * cos(ry) + z0 * sin(ry), z1 = -x * sin(ry) + z0 * cos(ry)
                     let y1 = y * cos(rx) - z1 * sin(rx), z2 = y * sin(rx) + z1 * cos(rx)
                     f = 1 / (1 - 0.3 * z2)
@@ -1075,15 +1122,35 @@ final class MoreGen2Renderer {
 
     // MARK: - 花火
 
+    /// 花火の線分の数の上限（バッファの大きさもこれに合わせる）
+    static let fireworkSegBudget = 6000
+    /// 1 発が上がっている時間の最大（0.8〜1.2 秒）
+    static let fireworkRiseMax: Float = 1.2
+
+    /// 同時に生きている発の数の上限・1 発あたりの粒の数・尾の数（値だけで決まる。時刻によらないので、途中で粒が減ったりしない）
+    static func fireworkPlan(rate: Float, n: Int, tail: Float, shape: Int) -> (alive: Int, n: Int, tails: Int) {
+        let life: Float = shape == 2 ? 3.6 : 2.2
+        // k 発目は (k + 0〜0.7) / rate 秒に生まれて、上がる時間＋life 秒生きる。重なるのは多くてこの数
+        let alive = Int(ceil(rate * (fireworkRiseMax + life))) + 1
+        let per = fireworkSegBudget / max(alive, 1)
+        var n = n, tails = tail > 0.01 ? 3 : 0
+        // 多いときは、まず尾を 1 本まで減らし、それでも足りなければ粒を減らす
+        while n * (1 + tails) > per && tails > 1 { tails -= 1 }
+        if n * (1 + tails) > per { n = max(per / (1 + tails), 4) }
+        return (alive, n, tails)
+    }
+
     /// 時間だけで決める花火：k 発目の生まれた時刻・場所・色はハッシュで、粒の場所は「生まれてからの時間」で出す
+    /// 線分の info.z に何発目かを入れておく（テスト用。描くときは使わない）
     static func fireworkSegs(_ e: Effect, v: (Int) -> Float, t: Float, size: SIMD2<Float>) -> [Seg] {
         let A = size.x / max(size.y, 1), k = size.y / 1080
         let rate = max(v(0), 0.05), sz = v(1)
-        let n = min(max(Int(v(2).rounded()), 4), 120)
         let heavy = v(3), tail = v(4), sparkle = v(5)
         let streak = v(6) > 0.5
         let cm = Int(v(7).rounded()), glowAmt = v(8)
         let shape = Int(v(9).rounded())
+        let plan = fireworkPlan(rate: rate, n: min(max(Int(v(2).rounded()), 4), 120), tail: tail, shape: shape)
+        let n = plan.n
         let col = SIMD3<Float>(Float(e.color.r), Float(e.color.g), Float(e.color.b))
         let life: Float = shape == 2 ? 3.6 : 2.2
         let drag: Float = shape == 2 ? 1.3 : 2.2
@@ -1092,17 +1159,14 @@ final class MoreGen2Renderer {
         var segs: [Seg] = []
         func uv(_ p: SIMD2<Float>) -> SIMD2<Float> { SIMD2(p.x / A, p.y) }
         let kmax = Int(floor(t * rate))
-        var alive = 0
-        var kk = kmax
-        // 新しい発から順に、生きているものを 6 発まで
-        while kk >= 0 && alive < 6 {
-            let ki = kk
-            kk -= 1
+        // 生きているかもしれない発を、古い方から全部（途中で打ち切らない。数は fireworkPlan の alive 以内）
+        let kmin = max(Int(floor((t - fireworkRiseMax - life) * rate)) - 1, 0)
+        for ki in stride(from: kmin, through: kmax, by: 1) {
             let tk = (Float(ki) + 0.7 * hash(ki, 1)) / rate
             if t < tk { continue }
             let rise: Float = 0.8 + 0.4 * hash(ki, 5)
-            if t - tk > rise + life { if Float(kmax - ki) / rate > rise + life + 2 { break } else { continue } }
-            alive += 1
+            if t - tk > rise + life { continue }
+            let id = Float(ki)
             let bx = (0.12 + 0.76 * hash(ki, 2)) * A
             let by: Float = 0.18 + 0.3 * hash(ki, 3)
             let hc = hash(ki, 4)
@@ -1121,9 +1185,9 @@ final class MoreGen2Renderer {
                 let c = mix3(color(false), SIMD3(repeating: 1), 0.6)
                 if streak {
                     let y2 = y + 0.06 * (1 - pr)
-                    segs.append(Seg(ab: SIMD4(uv(SIMD2(x, y)).x, y, uv(SIMD2(x, y2)).x, y2), col: SIMD4(c.x, c.y, c.z, 0.45), info: SIMD4(dot * 0.7, glow * 0.5, 0, 0)))
+                    segs.append(Seg(ab: SIMD4(uv(SIMD2(x, y)).x, y, uv(SIMD2(x, y2)).x, y2), col: SIMD4(c.x, c.y, c.z, 0.45), info: SIMD4(dot * 0.7, glow * 0.5, id, 0)))
                 }
-                segs.append(Seg(ab: SIMD4(x / A, y, x / A, y), col: SIMD4(c.x, c.y, c.z, 0.9), info: SIMD4(dot, glow, 0, 0)))
+                segs.append(Seg(ab: SIMD4(x / A, y, x / A, y), col: SIMD4(c.x, c.y, c.z, 0.9), info: SIMD4(dot, glow, id, 0)))
                 continue
             }
             let a = t - tk - rise
@@ -1158,21 +1222,24 @@ final class MoreGen2Renderer {
                 if b <= 0.01 { continue }
                 let c = mix3(color(inner), SIMD3(repeating: 1), 0.5 * flash)
                 let p = pos(dir, sp, a)
-                segs.append(Seg(ab: SIMD4(p.x / A, p.y, p.x / A, p.y), col: SIMD4(c.x, c.y, c.z, min(b, 1.5)), info: SIMD4(dot, glow, 0, 0)))
-                // 尾：少し前の場所との間を、だんだん薄い線で
-                if tail > 0.01 {
+                segs.append(Seg(ab: SIMD4(p.x / A, p.y, p.x / A, p.y), col: SIMD4(c.x, c.y, c.z, min(b, 1.5)), info: SIMD4(dot, glow, id, 0)))
+                // 尾：少し前の場所との間を、だんだん薄い線で（本数を減らしたときも、尾の長さは同じ）
+                if plan.tails > 0 {
                     var q = p
-                    for j in 1...3 {
-                        let aj = a - Float(j) * 0.06 * tail * (shape == 2 ? 2 : 1)
+                    for j in 1...plan.tails {
+                        let jf = Float(j) * 3 / Float(plan.tails)
+                        let aj = a - jf * 0.06 * tail * (shape == 2 ? 2 : 1)
                         if aj <= 0 { break }
                         let r = pos(dir, sp, aj)
-                        let bj = b * 0.7 * (1 - Float(j) / 4)
-                        segs.append(Seg(ab: SIMD4(q.x / A, q.y, r.x / A, r.y), col: SIMD4(c.x, c.y, c.z, bj), info: SIMD4(dot * 0.7, glow * 0.4, 0, 0)))
+                        let bj = b * 0.7 * (1 - Float(j) / Float(plan.tails + 1))
+                        segs.append(Seg(ab: SIMD4(q.x / A, q.y, r.x / A, r.y), col: SIMD4(c.x, c.y, c.z, bj), info: SIMD4(dot * 0.7, glow * 0.4, id, 0)))
                         q = r
                     }
                 }
             }
         }
+        // 念のため（上がる数が範囲の外まで動かされたとき）。ふつうは fireworkPlan で収まっている
+        if segs.count > fireworkSegBudget { segs.removeLast(segs.count - fireworkSegBudget) }
         return segs
     }
 
