@@ -381,6 +381,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
+    /// 今キーを受けている窓が、ポップオーバー・シート・確認ダイアログ（モーダル）か
+    private static var isTransientKeyWindow: Bool {
+        if NSApp.modalWindow != nil { return true }
+        guard let w = NSApp.keyWindow else { return false }
+        return w.sheetParent != nil || w.className.contains("Popover")
+    }
+
     /// Esc でブラックアウト切り替え、⇧Esc で全レイヤー停止。
     /// （クリップのキー割り当ては、あとで手動で決められるようにする予定。今は割り当てなし）
     private static func handleKey(_ event: NSEvent) -> Bool {
@@ -398,6 +405,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if [51, 117, 123, 124, 125, 126].contains(event.keyCode), NSApp.keyWindow?.firstResponder is MapStageNSView { return false }
         // キーの割り当て（覚えている途中は、どのキーも覚える）
         if ControlHub.shared.key(event, down: true) { return true }
+        // ポップオーバー・シート・確認ダイアログの中では横取りしない（Esc で閉じる・スペースで押す、など そちらで使う）
+        if Self.isTransientKeyWindow { return false }
 
         if event.keyCode == 53 { // Esc
             if event.isARepeat { return true }

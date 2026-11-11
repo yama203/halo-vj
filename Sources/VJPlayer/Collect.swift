@@ -55,20 +55,25 @@ extension Engine {
             progress?(Double(k) / total, src.lastPathComponent)
             if map[p] != nil { reused += 1; continue }
             guard fm.fileExists(atPath: p) else { missing.append(src.lastPathComponent); continue }
-            // 名前がぶつかったら番号を付ける（中身が同じなら使い回す）
+            // 名前がぶつかったら番号を付ける（中身が同じなら使い回す）。
+            // 前からある別のファイル（大きさが違う）は消さずに、次の番号にする
             var fileName = src.lastPathComponent
             var n = 2
-            while used.contains(fileName.lowercased()) {
+            var same = false
+            let size = try? fm.attributesOfItem(atPath: p)[.size] as? Int
+            while true {
+                if !used.contains(fileName.lowercased()) {
+                    let d = media.appendingPathComponent(fileName)
+                    guard fm.fileExists(atPath: d.path) else { break }
+                    let b = try? fm.attributesOfItem(atPath: d.path)[.size] as? Int
+                    if size != nil && size == b { same = true; break }
+                }
                 fileName = src.deletingPathExtension().lastPathComponent + " \(n)." + src.pathExtension
                 n += 1
             }
             used.insert(fileName.lowercased())
+            if same { reused += 1; map[p] = fileName; continue }
             let dst = media.appendingPathComponent(fileName)
-            if fm.fileExists(atPath: dst.path) {
-                let a = try? fm.attributesOfItem(atPath: p)[.size] as? Int, b = try? fm.attributesOfItem(atPath: dst.path)[.size] as? Int
-                if a != nil && a == b { reused += 1; map[p] = fileName; continue }
-                try fm.removeItem(at: dst)
-            }
             try fm.copyItem(at: src, to: dst)
             copied += 1
             map[p] = fileName

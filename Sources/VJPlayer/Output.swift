@@ -68,6 +68,7 @@ final class OutputController: NSObject, ObservableObject, NSWindowDelegate {
                              styleMask: [.titled, .resizable, .closable, .miniaturizable], backing: .buffered, defer: false)
             w.title = L("出力 \(out + 1)")
             w.isReleasedWhenClosed = false
+            w.delegate = self   // 閉じボタンで閉じたら「出力なし」に戻す（windowWillClose）
             w.contentView = MetalLayerView(frame: w.contentLayoutRect, kind: .output, output: out)
             w.center()
             extraWindows[i] = w
@@ -111,7 +112,13 @@ final class OutputController: NSObject, ObservableObject, NSWindowDelegate {
     private func screensChanged() {
         screens = NSScreen.screens
         for i in extra.indices {
-            if case .screen(let id) = extra[i], !screens.contains(where: { Self.displayID(of: $0) == id }) { extra[i] = .none }
+            guard case .screen(let id) = extra[i] else { continue }
+            if let s = screens.first(where: { Self.displayID(of: $0) == id }) {
+                // まだあるディスプレイ：大きさ・位置が変わっていたら合わせ直す
+                if let w = extraWindows[i], w.frame != s.frame { w.setFrame(s.frame, display: true) }
+            } else {
+                extra[i] = .none
+            }
         }
         // 出力先のディスプレイが抜かれたら出力を閉じる
         if case .screen(let id) = target, !screens.contains(where: { Self.displayID(of: $0) == id }) {
@@ -174,6 +181,12 @@ final class OutputController: NSObject, ObservableObject, NSWindowDelegate {
     }
 
     func windowWillClose(_ notification: Notification) {
+        let closing = notification.object as? NSWindow
+        // 出力 2・3 のウィンドウを閉じたら、その出力だけ「出力なし」に戻す
+        if let closing, let i = extraWindows.first(where: { $0.value === closing })?.key {
+            DispatchQueue.main.async { if self.extraWindows[i] === closing { self.extra[i] = .none } }
+            return
+        }
         // 「出力」ウィンドウを閉じたら出力なしに戻す
         DispatchQueue.main.async { self.target = .none }
     }

@@ -112,6 +112,16 @@ final class ControlHub: ObservableObject {
 
     func bindings(for address: String) -> [ControlBinding] { bindings.filter { $0.address == address } }
 
+    /// 押した（1）・離した（0）に直す。CC は 64 以上で押した、未満で離した。
+    /// ノートは弱く叩いても押した（ベロシティが 0 より大きければ 1）
+    static func pressValue(_ kind: ControlTrigger.Kind, _ value: Double) -> Double {
+        switch kind {
+        case .cc: value >= 0.5 ? 1 : 0
+        case .note: value > 0 ? 1 : 0
+        default: value
+        }
+    }
+
     /// ボタンが押された・離された（value 0〜1。メインスレッドで）
     func fire(_ t: ControlTrigger, value: Double) {
         if learning != nil {
@@ -120,8 +130,7 @@ final class ControlHub: ObservableObject {
             return
         }
         for b in bindings where b.trigger.matches(t) {
-            // CC は 64 以上で押した、未満で離した
-            let v = t.kind == .cc ? (value >= 0.5 ? 1.0 : 0.0) : value
+            let v = Self.pressValue(t.kind, value)
             if !forTests { OSCCommands.run(OSCMessage(address: b.address, args: [.float(Float(v))])) }
         }
     }

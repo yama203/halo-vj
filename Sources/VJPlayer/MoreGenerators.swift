@@ -1112,7 +1112,8 @@ final class LogoParticleSim {
         func v(_ i: Int) -> Double { e.value(i, at: now, beat: stack.beat, origin: stack.origin) }
         let A = Float(dst.width) / Float(max(dst.height, 1))
         let n = min(max(Int(v(0).rounded()), 100), 30000)
-        if e.text != source || n != count || pos.count != n {
+        // 文字・数が変わったときだけ読み直す（空の結果も覚えて、毎コマ読み直さない）
+        if e.text != source || n != count {
             let pts = Self.samplePoints(e.text, count: n)
             target = pts.map(\.0)
             tcolor = pts.map(\.1)
@@ -1129,7 +1130,8 @@ final class LogoParticleSim {
         let steps = dt > 0.05 ? min(Int(dt / 0.02), 120) : 1
         let h = Float(min(max(dt, 0) / Double(steps), 0.05))
         if h > 0 {
-            let T = Float(now)
+            // 起動してからの秒をそのまま Float にすると細かさが足りなくなるので、出し始めからの秒に
+            let T = Float(now - stack.origin)
             for _ in 0..<steps {
             for i in pos.indices {
                 let goal = target[i] * size

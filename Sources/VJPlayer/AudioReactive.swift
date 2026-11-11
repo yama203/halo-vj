@@ -170,6 +170,8 @@ final class AudioReactive: ObservableObject {
     private var onsetEnd = 0.0
     private var mixerListener: UUID?
     private var inputEngine: AVAudioEngine?
+    /// 入力デバイスの抜き差し・サンプルレートの変化の知らせ（来たら入力をやり直す）
+    private var inputConfigObserver: NSObjectProtocol?
     /// テスト用：値を決め打ちにする（音量・低音・中音・高音・アタック）
     private var override: [Double]?
 
@@ -243,7 +245,7 @@ final class AudioReactive: ObservableObject {
             let N = scopeRing.count
             for (k, v) in mono.suffix(N).enumerated() { scopeRing[(scopeWritten + k) % N] = v }
             scopeWritten += min(n, N)
-            scopeLastCount = n
+            scopeLastCount = min(n, N)   // 輪より大きいかたまりでも、輪の大きさまで
             scopeLastTime = now
             scopeRate = buf.format.sampleRate
         }
@@ -297,6 +299,8 @@ final class AudioReactive: ObservableObject {
     private func stopAll() {
         if let id = mixerListener { AudioOutput.shared.removeMixerListener(id) }
         mixerListener = nil
+        if let o = inputConfigObserver { NotificationCenter.default.removeObserver(o) }
+        inputConfigObserver = nil
         if let e = inputEngine {
             e.inputNode.removeTap(onBus: 0)
             e.stop()
@@ -329,6 +333,13 @@ final class AudioReactive: ObservableObject {
             e.prepare()
             try e.start()
             inputEngine = e
+            // デバイスが変わるとエンジンは止まるので、AudioOutput と同じように知らせを受けて開き直す
+            inputConfigObserver = NotificationCenter.default.addObserver(
+                forName: .AVAudioEngineConfigurationChange, object: e, queue: .main
+            ) { [weak self] _ in
+                guard let self, self.source == .input, self.inputEngine === e else { return }
+                self.restart()
+            }
         } catch {
             input.removeTap(onBus: 0)
             errorMessage = L("入力デバイスを開けません：\(error.localizedDescription)")

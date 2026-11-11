@@ -579,6 +579,15 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
     /// レイヤーを足す・消す・動かしたときに、シーンのレイヤーごとの中身も同じように並べ直す
     private func remapSceneLayers(oldCount: Int, newCount: Int, _ map: (Int) -> Int?) {
         remapCueLayers(map)
+        // 自動操縦のレイヤーのルールも同じように付け替える（消えたレイヤーのルールはオフに）
+        if autopilot.rules.contains(where: { if case .layer = $0.target { true } else { false } }) {
+            var ap = autopilot
+            for k in ap.rules.indices {
+                guard case .layer(let r) = ap.rules[k].target else { continue }
+                if let nr = map(r) { ap.rules[k].target = .layer(nr) } else { ap.rules[k].on = false }
+            }
+            if ap != autopilot { autopilot = ap }
+        }
         guard !scenes.isEmpty else { return }
         var out = scenes
         for k in out.indices {
@@ -699,6 +708,11 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
     private func restructure(layers newLayers: [Layer], columns newColumns: Int,
                              layerMap: (Int) -> Int?, columnMap: (Int) -> Int? = { $0 },
                              decks newDecks: [Deck]? = nil, deckMap: (Int) -> Int? = { $0 }) {
+        // シーン・キューのフェードは古い段数のまま動くので、形を変える前に終える（途中のレイヤーを読んで落ちないように）
+        sceneTween?.invalidate()
+        sceneTween = nil
+        sceneProgress = nil
+        finishCueFade()
         for r in layers.indices { finishCrossfade(r) }
         multiSelection = []
         let oldColumns = columns
@@ -738,11 +752,23 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
         renderLock.withLock {
             frames = newFrames
             outgoingFrames = Array(repeating: nil, count: newLayers.count)
-            // 描画スレッドが古い段数のまま読まないよう、ここで形を合わせておく
-            renderState.layers = newLayers.indices.map { r in
-                var st = RenderState.LayerState(slot: nil, opacity: 0, blend: .normal)
-                if let a = newActive[r] { st.slot = newSlots[a] }
-                return st
+            // 描画スレッドが古い段数のまま読まないよう、ここで形を合わせておく。
+            // 残る段は前の状態（不透明度など）を写す（syncRenderState までの間に出力が黒くならないように）
+            let oldStates = renderState.layers
+            var newStates = newLayers.indices.map { _ in RenderState.LayerState(slot: nil, opacity: 0, blend: .normal) }
+            for (r, old) in oldStates.enumerated() {
+                guard r < layers.count, let nr = layerMap(r), newStates.indices.contains(nr) else { continue }
+                var st = old
+                // クロスフェードは上で終えたので、消えていく方は持たない
+                st.outgoing = nil; st.outgoingGenerator = nil; st.outgoingStill = nil
+                st.crossfade = Fade()
+                newStates[nr] = st
+            }
+            for r in newStates.indices { newStates[r].slot = newActive[r].map { newSlots[$0] } ?? nil }
+            renderState.layers = newStates
+            // プレビューが消えた段を指していたらやめる（残る段なら新しい番号へ）
+            if case .live(let r) = renderState.preview {
+                if r < layers.count, let nr = layerMap(r), newLayers.indices.contains(nr) { renderState.preview = .live(layer: nr) } else { renderState.preview = .none }
             }
         }
         outgoing = Array(repeating: nil, count: newLayers.count)
@@ -907,7 +933,9 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
         guard slots.indices.contains(index), let src = slots[index] else { return }
         let r = layerOf(index)
         if activeByLayer[r] == index { stopLayer(r) }
-        setSlot(index, Self.copy(of: src, url: url))
+        let c = Self.copy(of: src, url: url)
+        c.id = src.id   // 付け直しは同じクリップ（シーン・キューが目印で探せるように。複製は新しい目印のまま）
+        setSlot(index, c)
         scheduleSave()
     }
 
@@ -1048,11 +1076,16 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
         if let i = inspectedIndex, i == from || i == to {
             inspectedIndex = newIndex(i)
         }
+        // ⇧クリックの選択も、動いたクリップについていく
+        if multiSelection.contains(from) || multiSelection.contains(to) {
+            multiSelection = Set(multiSelection.map(newIndex))
+        }
         scheduleSave()
     }
 
     func clear(_ index: Int) {
         setSlot(index, nil)
+        multiSelection.remove(index)   // 消したクリップは選択から外す
         scheduleSave()
     }
 
@@ -1472,7 +1505,7 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
             let f: FrameHolder?
             switch renderState.preview {
             case .none: f = nil
-            case .live(let r): f = frames[r]
+            case .live(let r): f = frames.indices.contains(r) ? frames[r] : nil
             case .player, .generator: f = previewFrame
             case .image(let s): f = s.imageTexture(at: CACurrentMediaTime()).map { FrameHolder(texture: $0) }
             }
@@ -1858,9 +1891,48 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
             outputFormat: outputFormat == OutputFormat() ? nil : outputFormat)
     }
 
+    /// 保存ファイルを読む。ファイルはあるのに読めないときは、次の保存で空のまま上書きして失わないよう、
+    /// 同じフォルダの state.broken-日時.json へ移してから nil を返す（movedTo に移した先）
+    static func loadSavedState(at url: URL) -> (state: SavedState?, movedTo: URL?) {
+        guard FileManager.default.fileExists(atPath: url.path) else { return (nil, nil) }
+        do {
+            let data = try Data(contentsOf: url)
+            return (try JSONDecoder().decode(SavedState.self, from: data), nil)
+        } catch {
+            let f = DateFormatter()
+            f.locale = Locale(identifier: "en_US_POSIX")
+            f.dateFormat = "yyyyMMdd-HHmmss"
+            let dir = url.deletingLastPathComponent()
+            var dest = dir.appendingPathComponent("state.broken-\(f.string(from: Date())).json")
+            var n = 2
+            while FileManager.default.fileExists(atPath: dest.path) {
+                dest = dir.appendingPathComponent("state.broken-\(f.string(from: Date()))-\(n).json")
+                n += 1
+            }
+            do {
+                try FileManager.default.moveItem(at: url, to: dest)
+                NSLog("VJPlayer: 保存ファイルが読めないので、\(dest.path) へ移して空で始めます \(error)")
+                return (nil, dest)
+            } catch let moveError {
+                NSLog("VJPlayer: 保存ファイルが読めず、移すこともできません \(error) \(moveError)")
+                return (nil, nil)
+            }
+        }
+    }
+
     private func restore() {
-        guard let data = try? Data(contentsOf: Engine.stateURL),
-              let state = try? JSONDecoder().decode(SavedState.self, from: data) else { return }
+        let (loaded, movedTo) = Engine.loadSavedState(at: Engine.stateURL)
+        if let movedTo {
+            // 使う人に 1 回だけ知らせる（起動が終わってから）
+            DispatchQueue.main.async {
+                let alert = NSAlert()
+                alert.messageText = L("前回の状態を読み込めませんでした")
+                alert.informativeText = L("空の状態で始めます。読めなかったファイルは次の場所に残してあります：\n\(movedTo.path)")
+                alert.alertStyle = .warning
+                alert.runModal()
+            }
+        }
+        guard let state = loaded else { return }
         audioDeviceUID = state.audioDeviceUID
         apply(state, baseDir: state.projectPath.map { URL(fileURLWithPath: $0).deletingLastPathComponent() })
         projectURL = state.projectPath.map { URL(fileURLWithPath: $0) }

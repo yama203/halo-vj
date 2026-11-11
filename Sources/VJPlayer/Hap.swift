@@ -216,17 +216,25 @@ final class HapDecoder {
     private var cache: CVMetalTextureCache?
     private var textures: [MTLPixelFormat: MTLTexture] = [:]
 
-    init?(width: Int, height: Int) {
-        guard width > 0, height > 0, let q = device.makeCommandQueue(),
+    /// キューとパイプラインは全部のデコーダーで 1 つ（シェーダーの組み立ては重いので 1 回だけ。
+    /// static let は初めて使うときに 1 回だけ作られ、いくつかのスレッドから同時に来ても安全）
+    private static let shared: (queue: MTLCommandQueue, pipe: MTLRenderPipelineState)? = {
+        let device = MetalContext.shared.device
+        guard let q = device.makeCommandQueue(),
               let lib = try? device.makeLibrary(source: hapShaderSource, options: nil) else { return nil }
-        self.width = width; self.height = height
-        queue = q
         let d = MTLRenderPipelineDescriptor()
         d.vertexFunction = lib.makeFunction(name: "hap_v")
         d.fragmentFunction = lib.makeFunction(name: "hap_f")
         d.colorAttachments[0].pixelFormat = .bgra8Unorm
         guard let p = try? device.makeRenderPipelineState(descriptor: d) else { return nil }
-        pipe = p
+        return (q, p)
+    }()
+
+    init?(width: Int, height: Int) {
+        guard width > 0, height > 0, let shared = Self.shared else { return nil }
+        self.width = width; self.height = height
+        queue = shared.queue
+        pipe = shared.pipe
         let attrs: [String: Any] = [
             kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
             kCVPixelBufferWidthKey as String: width, kCVPixelBufferHeightKey as String: height,

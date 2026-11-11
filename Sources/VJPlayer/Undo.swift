@@ -105,8 +105,14 @@ extension Engine {
             let h = undoHistory
             let past = h.past, future = h.future, committed = h.committed
             let deck = currentDeck
+            // 戻す歩に入っていない、本番中の値（ブラックアウト・BPM・コンポジション速度）はそのまま保つ
+            let blackout = isBlackout, speed = masterSpeed
+            var state = state
+            state.bpm = state.bpm ?? bpm
             apply(state, baseDir: projectURL?.deletingLastPathComponent())
             currentDeck = min(deck, decks.count - 1)
+            if isBlackout != blackout { isBlackout = blackout }
+            masterSpeed = speed
             h.past = past; h.future = future; h.committed = committed
         }
         scheduleSaveWithoutUndo()
@@ -186,6 +192,10 @@ extension Engine {
             let new = s ?? nil
             if slots[i] !== new { setSlot(i, new) }
         }
+        // ⇧クリックの選択は番号で持っているので、戻したら空に（違うクリップを指さないように）
+        multiSelection = []
+        // 編集中のシーンは、戻したシーンで読み直す（古い下書きのまま次の操作で上書きしないように）
+        if sceneDraft != nil { reloadSceneDraft() }
     }
 
     private func restorePads(_ p: [SavedPad]?) {

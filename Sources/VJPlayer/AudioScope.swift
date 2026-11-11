@@ -95,7 +95,7 @@ extension AudioReactive {
             // 最後のかたまりの分だけ遅らせて、届いてからの時間で前へ進める
             let ahead = min(Int((now - scopeLastTime) * scopeRate), scopeLastCount)
             let end = scopeWritten - scopeLastCount + max(ahead, 0)
-            let c = min(count, N - scopeLastCount)
+            let c = max(0, min(count, N - scopeLastCount))
             var out = [Float](repeating: 0, count: count)
             for k in 0..<c {
                 let i = end - c + k

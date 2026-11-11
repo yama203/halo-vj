@@ -1271,7 +1271,7 @@ fragment float4 fodFinal(VOut in [[stage_in]], constant ODUniforms& u [[buffer(0
     float gradPx = gm / (2.0 * max(u.c.z, 1.0));             // 1 ピクセルあたりの傾き
     float dist = h > 1e-7 ? sigma * sigma * gradPx / h : 1e9;
     float wavelength = max(1600.0 / max(u.b.x, 1.0), 6.0) * u.c.w;   // 細かさ 24 で約 67px ごと（1080p）
-    float phase = 6.2831853 * (dist / wavelength - u.b.z * u.c.x);   // 時間とともに外へ広がる
+    float phase = 6.2831853 * (dist / wavelength - u.b.z);   // 時間とともに外へ広がる（u.b.z は 時刻×速さ の小数部）
     float wave = sin(phase);
     float env = (1.0 - smoothstep(0.55 * spread, spread, dist)) * smoothstep(1e-7, 1e-5, h);
     float2 off = dir * wave * u.a.w * 14.0 * u.c.w * env;
@@ -1553,12 +1553,15 @@ final class EffectProcessor {
         return p
     }
 
-    /// エコーの前の絵（エフェクトごとに 2 枚を交互に使う）と、最後に描いた時刻
-    private var echoes: [String: (tex: [MTLTexture], next: Int, last: Double)] = [:]
+    /// エコーの前の絵（エフェクトごとに 2 枚を交互に使う）と、最後に描いた時刻・最後に使った時刻（実時間）。
+    /// しばらく使っていないものは捨てる（群れと同じ）
+    private var echoes: [String: (tex: [MTLTexture], next: Int, last: Double, used: Double)] = [:]
 
     private func echoTextures(_ key: String, width w: Int, height h: Int, now: Double) -> (prev: MTLTexture, out: MTLTexture, dt: Double)? {
         var e = echoes[key]
+        let wall = CACurrentMediaTime()
         if e == nil || e!.tex[0].width != w || e!.tex[0].height != h {
+            echoes = echoes.filter { wall - $0.value.used < 30 }
             let t = (0..<2).compactMap { _ -> MTLTexture? in
                 let td = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba16Float, width: w, height: h, mipmapped: false)
                 td.usage = [.renderTarget, .shaderRead]
@@ -1566,7 +1569,7 @@ final class EffectProcessor {
                 return ctx.device.makeTexture(descriptor: td)
             }
             guard t.count == 2 else { return nil }
-            e = (t, 0, -1)
+            e = (t, 0, -1, wall)
         }
         guard var e else { return nil }
         // しばらく描いていなかった（クリップを止めていた等）なら、前の絵は捨てる
@@ -1574,6 +1577,7 @@ final class EffectProcessor {
         let prev = e.tex[1 - e.next], out = e.tex[e.next]
         e.next = 1 - e.next
         e.last = now
+        e.used = wall
         echoes[key] = e
         return (prev, out, dt)
     }
@@ -2126,9 +2130,11 @@ final class Compositor {
         func v(_ i: Int) -> Float { Float(fx.value(i, at: now, beat: g.blendFX.beat, origin: g.blendFX.origin)) }
         // px の値は 1080p の出力での大きさ。プレビューでも本番の出力でも、画面に対して同じ見え方になるように比例させる
         let k = Float(h) / 1080
+        // 波紋の進み（時刻×速さ）は Double で小数部だけにして渡す（途中で跳ばない）
+        let wave = now * fx.value(6, at: now, beat: g.blendFX.beat, origin: g.blendFX.origin)
         var u = ODUniforms(inv: matrix.inverse, opacity: opacity,
                            a: SIMD4(v(0), v(1), v(2), v(3)),
-                           b: SIMD4(v(4), v(5), Float(now.truncatingRemainder(dividingBy: 1000)), Float(scale)),
+                           b: SIMD4(v(4), v(5), Float(wave - floor(wave)), Float(scale)),
                            c: SIMD4(v(6), v(7) * k, Float(rscale), k),
                            size: SIMD2(Float(w), Float(h)))
         func pass(_ dst: MTLTexture, _ pipe: MTLRenderPipelineState, _ setup: (MTLRenderCommandEncoder) -> Void) {
@@ -2202,6 +2208,25 @@ final class Compositor {
 /// メインスレッド（画面操作・SwiftUI）が忙しくても、出力の映像は止まらない。
 /// 1 vsync ごとに: 各レイヤーの新しいフレームを取り込む → 登録された全ての画面（出力・プレビュー）に描く
 final class RenderLoop {
+    /// 何も出していないときに Syphon・NDI・照明へ送る黒（大きさが変わったら作り直す。描画スレッドだけで使う）
+    private var black: MTLTexture?
+    private func blackTexture(_ w: Int, _ h: Int) -> MTLTexture? {
+        if let b = black, b.width == w, b.height == h { return b }
+        let td = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: max(w, 1), height: max(h, 1), mipmapped: false)
+        td.usage = [.renderTarget, .shaderRead]
+        td.storageMode = .private
+        guard let t = MetalContext.shared.device.makeTexture(descriptor: td), let cb = MetalContext.shared.queue.makeCommandBuffer() else { return nil }
+        let rpd = MTLRenderPassDescriptor()
+        rpd.colorAttachments[0].texture = t
+        rpd.colorAttachments[0].loadAction = .clear
+        rpd.colorAttachments[0].storeAction = .store
+        rpd.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
+        cb.makeRenderCommandEncoder(descriptor: rpd)?.endEncoding()
+        cb.commit()
+        black = t
+        return t
+    }
+
     static let shared = RenderLoop(engine: .shared)
 
     struct Stats {
@@ -2459,7 +2484,12 @@ final class RenderLoop {
             cb.commit()
         }
 
-        if let syphonKey, let tex = sharedTextures[syphonKey], let cb = ctx.queue.makeCommandBuffer() {
+        // レイヤーが全部止まっているときは合成しないので、Syphon・NDI・照明には黒を送る
+        // （録画が黒を描くのと同じ。送らないと、受け手に最後の絵が残る）
+        let syphonTex = syphonKey.flatMap { k in
+            sharedTextures[k] ?? (groups.isEmpty ? shared[k].flatMap { blackTexture($0.size.0, $0.size.1) } : nil)
+        }
+        if let tex = syphonTex, let cb = ctx.queue.makeCommandBuffer() {
             if syphonOn { SyphonOutput.shared.publish(tex, cb: cb) }
             if dmxOn { DMXSampler.shared.sample(tex, cb: cb) }
             if ndiOn { NDIOutput.shared.publish(tex, cb: cb) }

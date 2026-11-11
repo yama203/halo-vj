@@ -70,6 +70,9 @@ final class CameraInputs: ObservableObject {
     @Published private(set) var permission: AVAuthorizationStatus = AVCaptureDevice.authorizationStatus(for: .video)
     private let lock = NSLock()
     private var sessions: [String: CameraSession] = [:]
+    /// 開けなかったカメラと、その時刻（retrySeconds の間は開き直さない）
+    private var failedAt: [String: Double] = [:]
+    static let retrySeconds = 3.0
 
     func requestAccess() {
         AVCaptureDevice.requestAccess(for: .video) { _ in
@@ -98,7 +101,10 @@ final class CameraInputs: ObservableObject {
         let now = CACurrentMediaTime()
         return lock.withLock {
             if sessions[id] == nil {
-                guard let s = CameraSession(id: id) else { return nil }
+                // 開けなかったカメラは、しばらく開き直さない（毎コマ開こうとして重くならないように）
+                if let t = failedAt[id], now - t < Self.retrySeconds { return nil }
+                guard let s = CameraSession(id: id) else { failedAt[id] = now; return nil }
+                failedAt[id] = nil
                 sessions[id] = s
             }
             sessions[id]?.used = now

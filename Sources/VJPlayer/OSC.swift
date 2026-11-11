@@ -13,12 +13,15 @@ struct OSCMessage: Equatable {
 
     enum OSCArg: Equatable {
         case int(Int32), float(Float), string(String)
+        /// 数として読んだ値。NaN・無限大は数として扱わない（保存できなくなるので捨てる）
         var number: Double? {
-            switch self {
+            let v: Double? = switch self {
             case .int(let i): Double(i)
             case .float(let f): Double(f)
             case .string(let s): Double(s)
             }
+            guard let v, v.isFinite else { return nil }
+            return v
         }
     }
 
@@ -50,11 +53,14 @@ struct OSCMessage: Equatable {
     /// パケット（メッセージかバンドル）を読む
     static func decode(_ data: Data) -> [OSCMessage] {
         let b = [UInt8](data)
-        return decode(b, 0, b.count)
+        return decode(b, 0, b.count, depth: 0)
     }
 
-    private static func decode(_ b: [UInt8], _ start: Int, _ end: Int) -> [OSCMessage] {
-        guard end - start >= 4 else { return [] }
+    /// バンドルの入れ子はこの深さまで（それより深いものは読まない）
+    static let maxBundleDepth = 8
+
+    private static func decode(_ b: [UInt8], _ start: Int, _ end: Int, depth: Int) -> [OSCMessage] {
+        guard end - start >= 4, depth <= maxBundleDepth else { return [] }
         var i = start
         func readStr() -> String? {
             guard i < end, let z = b[i..<end].firstIndex(of: 0) else { return nil }
@@ -77,7 +83,7 @@ struct OSCMessage: Equatable {
             while i + 4 <= end, let n = read32() {
                 let size = Int(n)
                 guard size > 0, i + size <= end else { break }
-                out += decode(b, i, i + size)
+                out += decode(b, i, i + size, depth: depth + 1)
                 i += size
             }
             return out
@@ -124,6 +130,9 @@ final class OSCHub: ObservableObject {
 
     private let lock = NSLock()
     private var values: [String: Double] = [:]
+    /// 覚えておくアドレスの数・送り元ごとのつながりの数の上限
+    static let maxValues = 2048
+    static let maxConnections = 64
     private var learnHandler: ((String) -> Void)?
     private var listener: NWListener?
     /// 受け口・送り口（ネットワークのキューと画面のスレッドの両方から触るので connLock の中で）
@@ -173,8 +182,14 @@ final class OSCHub: ObservableObject {
 
     /// メッセージを受け取る（受信のスレッドから。テストからも）
     func handle(_ m: OSCMessage, runCommands: Bool = true) {
+        // NaN・無限大の入ったメッセージは丸ごと捨てる（値に入ると保存できなくなる。「値なし」扱いで押す系が動かないように）
+        if m.args.contains(where: { if case .float(let f) = $0 { !f.isFinite } else { false } }) { return }
         let learned: ((String) -> Void)? = lock.withLock {
-            if let v = m.number { values[m.address] = v }
+            if let v = m.number {
+                // 届いたアドレスの表は増えすぎないように（いっぱいなら、どれか 1 つを捨てる）
+                if values[m.address] == nil, values.count >= Self.maxValues { values.remove(at: values.startIndex) }
+                values[m.address] = v
+            }
             let h = learnHandler
             learnHandler = nil
             return h
@@ -210,7 +225,23 @@ final class OSCHub: ObservableObject {
         }
         l.newConnectionHandler = { [weak self] c in
             guard let self else { return }
-            self.connLock.withLock { self.conns.append(c) }
+            // 切れた・やめたつながりは表から外す
+            c.stateUpdateHandler = { [weak self, weak c] st in
+                guard let self, let c else { return }
+                switch st {
+                case .failed, .cancelled: self.connLock.withLock { self.conns.removeAll { $0 === c } }
+                default: break
+                }
+            }
+            // 送り元が多すぎるときは、古いものからやめる
+            let old: [NWConnection] = self.connLock.withLock {
+                self.conns.append(c)
+                let over = max(0, self.conns.count - Self.maxConnections)
+                let out = Array(self.conns.prefix(over))
+                self.conns.removeFirst(over)
+                return out
+            }
+            old.forEach { $0.cancel() }
             c.start(queue: self.queue)
             self.receive(c)
         }
@@ -557,5 +588,7 @@ struct OSCAnimControls: View {
             }
             Text(L("値 0〜1 で「から」〜「まで」を動く（1 より大きい値は 1）")).font(.system(size: 10)).foregroundStyle(.secondary)
         }
+        // 画面から消えるとき、自分が覚える待ちのままならやめる（あとで届いたアドレスが、見えない所に入らないように）
+        .onDisappear { if waiting { osc.cancelLearn(); waiting = false } }
     }
 }

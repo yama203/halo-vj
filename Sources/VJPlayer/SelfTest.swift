@@ -499,6 +499,7 @@ enum SelfTest {
 
         // 31. NDI（ランタイムがあるときだけ）
         testNDI(check: check, wait: wait)
+        testReviewFixes(paths: paths, check: check, wait: wait)
 
         let out = AudioOutput.shared.engine.outputNode
         let feeding = AudioOutput.shared.engine.inputConnectionPoint(for: out, inputBus: 0)?.node as? AVAudioMixerNode
