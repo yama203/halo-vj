@@ -146,6 +146,11 @@ tools/release.sh 0.2.0             # タグ v0.2.0 を付けて push し、GitHu
 - アプリは `https://github.com/yama203/halo-vj/releases/latest/download/appcast.xml` を見る。いちばん新しい Release に appcast.xml があればよい（リポジトリは公開にしておく）。
 - 署名の秘密鍵：ログインキーチェーン（Sparkle の `generate_keys` で作ったもの）と、その書き出し `~/.halo-vj/sparkle_ed25519`。**無くすと、今入っているアプリに新しい版を届けられなくなる**ので、どこか安全な所にも控えておく。リポジトリには入れない。
 - NDI SDK for Apple が入っていれば、libndi も同梱される（「映像（NDI）」の行を参照）。
+- キーチェーンに「Developer ID Application」の証明書があれば、Hardened Runtime で署名して Apple の公証に出し、結果を貼り付けてから zip にする。準備の手順は [docs/notarization.md](docs/notarization.md)。
+
+## 紹介ページ
+
+`site/` が紹介ページ（https://yama203.github.io/halo-vj/ ）。main に push すると `.github/workflows/pages.yml` が GitHub Pages に出す（初回だけ、リポジトリの Settings → Pages → Source を「GitHub Actions」にする）。手元で見るときは `python3 -m http.server --directory site`。
 
 ## ビルド
 

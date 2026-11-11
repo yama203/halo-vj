@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  公証（Hardened Runtime）で署名するときの許可。tools/make_app.sh が HALO_SIGN_ID のときに使う。
+  Hardened Runtime では、ここに書いていないことはできなくなる。
+-->
+<plist version="1.0">
+<dict>
+  <!-- 音に反応させる：マイク・ライン入力 -->
+  <key>com.apple.security.device.audio-input</key><true/>
+  <!-- カメラ・HDMI キャプチャ・iPhone の映像 -->
+  <key>com.apple.security.device.camera</key><true/>
+  <!-- NDI：入っている NDI ランタイム（別の会社の署名の libndi）を実行時に読み込む -->
+  <key>com.apple.security.cs.disable-library-validation</key><true/>
+</dict>
+</plist>

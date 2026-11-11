@@ -112,9 +112,33 @@ cat > "$APP/Contents/Resources/Credits.html" <<'CREDITS'
 <p>Syphon &copy; Syphon contributors (BSD License).<br><a href="https://syphon.github.io">syphon.github.io</a></p>
 </div>
 CREDITS
-# 署名：作り直しても同じアプリと見なされるように、指定要件をバンドル ID にする
-# （ふつうのアドホック署名だと、作り直すたびにマイクの許可が外れて、音が 0 のまま届く）
-codesign --force --sign - --requirements "=designated => identifier \"$BUNDLE_ID\"" "$APP"
+# 署名
+SIGN_ID="${HALO_SIGN_ID:-}"
+if [ -z "$SIGN_ID" ]; then
+  # ふだん（開発中）：アドホック署名。作り直しても同じアプリと見なされるように、指定要件をバンドル ID にする
+  # （ふつうのアドホック署名だと、作り直すたびにマイクの許可が外れて、音が 0 のまま届く）
+  codesign --force --sign - --requirements "=designated => identifier \"$BUNDLE_ID\"" "$APP"
+else
+  # 公証用（tools/release.sh が「Developer ID Application」の証明書で渡す）：Hardened Runtime で、内側から順に署名する。
+  # HALO_SIGN_ID=- にすると、同じ形をアドホックで作る（証明書が無くても、Hardened Runtime で動くかを確かめられる）
+  ENT="tools/HaloVJ.entitlements"
+  if [ "$SIGN_ID" = "-" ]; then TS=(); REQ=(--requirements "=designated => identifier \"$BUNDLE_ID\""); else TS=(--timestamp); REQ=(); fi
+  # （bash 3.2 の set -u では空の配列をそのまま展開できないので ${X[@]+…} の形にしている）
+  sign() { codesign --force --sign "$SIGN_ID" --options runtime ${TS[@]+"${TS[@]}"} "$@"; }
+  # Sparkle（https://sparkle-project.org/documentation/sandboxing/#code-signing の順）
+  SP_FW="$APP/Contents/Frameworks/Sparkle.framework"
+  sign "$SP_FW/Versions/B/XPCServices/Installer.xpc"
+  sign --preserve-metadata=entitlements "$SP_FW/Versions/B/XPCServices/Downloader.xpc"
+  sign "$SP_FW/Versions/B/Autoupdate"
+  sign "$SP_FW/Versions/B/Updater.app"
+  sign "$SP_FW"
+  # 同梱した NDI
+  if [ -f "$APP/Contents/Frameworks/libndi.dylib" ]; then sign "$APP/Contents/Frameworks/libndi.dylib"; fi
+  # アプリ本体（最後に）
+  sign --entitlements "$ENT" ${REQ[@]+"${REQ[@]}"} "$APP"
+  codesign --verify --strict --deep "$APP"
+  echo "署名しました（Hardened Runtime）: $SIGN_ID"
+fi
 # ファイルの種類とアイコンを Finder に覚え直させる
 # （確かめ用の別の場所に作ったときは覚えさせない。プロジェクトのファイルがそちらで開くようになるので）
 if [ -z "${HALO_APP_PATH:-}" ]; then
