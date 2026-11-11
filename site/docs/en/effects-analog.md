@@ -59,3 +59,11 @@ Values: Lines, Lift height, Line width, Tilt back, Color (Original color, 1 colo
 - Vignette
 - Brightness
 - Flicker
+
+## Film
+
+Adds the look of old film (in the "Analog Gear" category). Grain, scratches and flicker change at the frame rate.
+
+Values: Grain (noise on brightness), Grain size (px at 1080p), Vignette, Vignette size, Scratches (thin vertical lines now and then), Dust (black specks now and then), Flicker (overall brightness changes a little each frame), Shake (the frame jumps up and down a little), Fading (lower saturation, toward sepia), Frame rate (6 to 60 fps).
+
+With everything except Frame rate at 0, the image is unchanged.

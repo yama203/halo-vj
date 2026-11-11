@@ -434,6 +434,246 @@ fragment float4 m2_shake(VO in [[stage_in]], constant MU& u [[buffer(0)]], textu
     }
     return finish(o, col, u.mixAmt);
 }
+
+// ===================== 第 3 弾 =====================
+static float vn2(float2 p) {
+    float2 i = floor(p), f = fract(p);
+    float2 w = f * f * (3.0 - 2.0 * f);
+    return mix(mix(h2(i), h2(i + float2(1, 0)), w.x), mix(h2(i + float2(0, 1)), h2(i + float2(1, 1)), w.x), w.y);
+}
+static float2 rot2(float2 p, float a) { float c = cos(a), s = sin(a); return float2(p.x * c - p.y * s, p.x * s + p.y * c); }
+
+// ===== フィルム =====
+// a = 粒子, 粒の大きさ(画素), 周辺を暗く, 周辺の広さ / b = 傷, ごみ, ちらつき / c = 色あせ, コマの番号, 上下のゆれ(uv)
+fragment float4 m2_film(VO in [[stage_in]], constant MU& u [[buffer(0)]], texture2d<float> t [[texture(0)]]) {
+    constexpr sampler sn(filter::nearest, address::clamp_to_edge);
+    constexpr sampler sl(filter::linear, address::clamp_to_edge);
+    float4 o = t.sample(sn, in.uv);
+    float k = u.size.y / 1080.0;
+    float f = u.c.y;
+    float4 c = abs(u.c.z) > 1e-7 ? t.sample(sl, in.uv + float2(0.0, u.c.z)) : o;
+    float a = c.a;
+    float3 rgb = a > 1e-4 ? c.rgb / a : float3(0.0);
+    float2 px = in.uv * u.size;
+    // 色あせ：彩度を下げてセピアへ、黒を少し浮かせる
+    if (u.c.x > 0.0) {
+        float g = lum(rgb);
+        rgb = mix(rgb, g * float3(1.07, 0.95, 0.77) * 0.92 + 0.05, saturate(u.c.x));
+    }
+    // ちらつき：全体の明るさがコマごとに少し変わる
+    rgb *= 1.0 + (h21(f, 3.7) - 0.5) * u.b.z * 0.35;
+    // 粒子：コマごとに変わる細かいノイズ（暗い所ほど目立つ）
+    if (u.a.x > 0.0) {
+        float cs = max(u.a.y, 0.5);
+        float2 sh = float2(h21(f, 1.1), h21(f, 2.3)) * 512.0;
+        float n = (vn2(px / cs + sh) - 0.5) + (vn2(px / cs * 2.03 + sh.yx) - 0.5) * 0.5;
+        rgb += n * u.a.x * 0.32 * (1.15 - 0.5 * lum(rgb));
+    }
+    // 傷：縦の細い線がときどき走る（コマごとに 3 本まで）
+    if (u.b.x > 0.0) {
+        for (int i = 0; i < 3; i++) {
+            float fi = float(i);
+            if (h21(f, 10.0 + fi) < u.b.x * 0.7) {
+                float x = h21(f, 20.0 + fi) * u.size.x + sin(in.uv.y * 9.0 + fi * 2.0) * 2.0 * k;
+                float w = (0.6 + h21(f, 30.0 + fi) * 1.4) * k;
+                float m = 1.0 - smoothstep(w * 0.5, w * 0.5 + 1.0, abs(px.x - x));
+                m *= step(abs(in.uv.y - h21(f, 40.0 + fi)), 0.3 + h21(f, 50.0 + fi) * 0.7);
+                rgb = mix(rgb, h21(f, 60.0 + fi) > 0.4 ? float3(0.92) : float3(0.04), m * 0.7);
+            }
+        }
+    }
+    // ごみ：黒い小さな点（マスごとにまれに 1 つ）
+    if (u.b.y > 0.0) {
+        float cell = 90.0 * k;
+        float2 cid = floor(px / cell);
+        if (h2(cid + f * 1.37) < u.b.y * 0.06) {
+            float2 ctr = (cid + 0.25 + 0.5 * float2(h2(cid + f + 3.1), h2(cid + f + 7.7))) * cell;
+            float rad = (1.5 + 4.0 * h2(cid + f + 9.2)) * k;
+            float2 d = px - ctr;
+            float dd = length(d) - rad * (0.6 + 0.8 * vn2(d / max(rad * 0.6, 1.0) + cid));
+            rgb = mix(rgb, float3(0.03), (1.0 - smoothstep(-0.5, 0.8, dd)) * 0.85);
+        }
+    }
+    // 周辺を暗く
+    if (u.a.z > 0.0) {
+        float d = length((in.uv - 0.5) * 2.0) / 1.41421;
+        rgb *= 1.0 - saturate(u.a.z) * pow(saturate(d * 1.1 / max(u.a.w, 0.05)), 2.2);
+    }
+    return finish(o, float4(max(rgb, 0.0) * a, a), u.mixAmt);
+}
+
+// ===== ミニチュア風 =====
+// a = 帯の位置, 帯の幅, やわらかさ, 角度(ラジアン) / b = 形(0 帯 1 丸), 彩度, コントラスト, b1 を広げる(1)
+// c = b2 を広げる(1), ぼかしあり(1) / b1 = 半分の量でぼかした絵, b2 = 全部の量でぼかした絵
+fragment float4 m2_tilt(VO in [[stage_in]], constant MU& u [[buffer(0)]], texture2d<float> t [[texture(0)]],
+                        texture2d<float> b1 [[texture(1)]], texture2d<float> b2 [[texture(2)]]) {
+    constexpr sampler sn(filter::nearest, address::clamp_to_edge);
+    constexpr sampler sl(filter::linear, address::clamp_to_edge);
+    float4 o = t.sample(sn, in.uv);
+    float A = u.size.x / max(u.size.y, 1.0);
+    float2 p = (in.uv - float2(0.5, u.a.x)) * float2(A, 1.0);
+    float d = u.b.x > 0.5 ? length(p) : abs(dot(p, float2(-sin(u.a.w), cos(u.a.w))));
+    float hw = u.a.y * 0.5;
+    float f = smoothstep(hw, hw + max(u.a.z, 0.01) * 0.6, d);   // 0 ピント → 1 いちばんぼける
+    float4 c = o;
+    if (u.c.y > 0.5) {
+        float4 x1 = u.b.w > 0.5 ? sampSmooth(b1, in.uv) : b1.sample(sl, in.uv);
+        float4 x2 = u.c.x > 0.5 ? sampSmooth(b2, in.uv) : b2.sample(sl, in.uv);
+        c = f < 0.5 ? mix(o, x1, f * 2.0) : mix(x1, x2, f * 2.0 - 1.0);
+    }
+    if (abs(u.b.y - 1.0) > 1e-4 || abs(u.b.z - 1.0) > 1e-4) {
+        float a = c.a;
+        float3 rgb = a > 1e-4 ? c.rgb / a : float3(0.0);
+        rgb = mix(float3(lum(rgb)), rgb, u.b.y);
+        rgb = (rgb - 0.5) * u.b.z + 0.5;
+        c = float4(max(rgb, 0.0) * a, a);
+    }
+    return finish(o, c, u.mixAmt);
+}
+
+// ===== 浮き彫り =====
+// a = 強さ, 光の向き(ラジアン), 太さ(画素), 色の残し方(0 灰色 1 元の色に重ねる 2 金属) / b = 元の絵, なめらかに
+static float embH(texture2d<float> t, float2 uv, float2 e, float sm) {
+    constexpr sampler sl(filter::linear, address::clamp_to_edge);
+    float h = lum(t.sample(sl, uv).rgb);
+    if (sm > 0.0) {
+        float a = lum(t.sample(sl, uv + float2(e.x, e.y)).rgb) + lum(t.sample(sl, uv + float2(-e.x, e.y)).rgb)
+                + lum(t.sample(sl, uv + float2(e.x, -e.y)).rgb) + lum(t.sample(sl, uv + float2(-e.x, -e.y)).rgb);
+        h = mix(h, (h + a) / 5.0, saturate(sm));
+    }
+    return h;
+}
+fragment float4 m2_emboss(VO in [[stage_in]], constant MU& u [[buffer(0)]], texture2d<float> t [[texture(0)]]) {
+    constexpr sampler sn(filter::nearest, address::clamp_to_edge);
+    float4 o = t.sample(sn, in.uv);
+    float w = max(u.a.z, 0.5);
+    float2 L = float2(cos(u.a.y), -sin(u.a.y));       // 135° で左上から光
+    float2 d = L * w / u.size;
+    float2 e = float2(w * 1.5) / u.size;
+    float sm = u.b.y;
+    float g = embH(t, in.uv + d, e, sm) - embH(t, in.uv - d, e, sm);
+    float s = 0.5 + g * u.a.x * 0.5;
+    float a = o.a;
+    float3 cu = a > 1e-4 ? o.rgb / a : float3(0.0);
+    int mode = int(u.a.w + 0.5);
+    float3 rgb;
+    if (mode == 0) rgb = float3(saturate(s));
+    else if (mode == 1) rgb = cu + (s - 0.5);
+    else {
+        float m = saturate((s - 0.5) * 2.2 + 0.35 + (lum(cu) - 0.5) * 0.4);
+        rgb = float3(0.78, 0.80, 0.86) * m + pow(m, 6.0) * 0.6;
+    }
+    rgb = mix(rgb, cu, saturate(u.b.x));
+    return finish(o, float4(saturate(rgb) * a, a), u.mixAmt);
+}
+
+// ===== 引き伸ばし =====
+// a = 向き(0 右へ 1 左へ 2 下へ 3 上へ 4 両側へ), 位置, 位置の揺れ, 揺れの細かさ / b = 揺れの流れ, なじませ, 筋を足す
+fragment float4 m2_stretch(VO in [[stage_in]], constant MU& u [[buffer(0)]], texture2d<float> t [[texture(0)]]) {
+    constexpr sampler sn(filter::nearest, address::clamp_to_edge);
+    constexpr sampler sl(filter::linear, address::clamp_to_edge);
+    float4 o = t.sample(sn, in.uv);
+    int dir = int(u.a.x + 0.5);
+    bool vd = dir == 2 || dir == 3;
+    float along = vd ? in.uv.y : in.uv.x;
+    float across = vd ? in.uv.x : in.uv.y;
+    float wob = (vn2(float2(across * u.a.w, u.b.x)) - 0.5) * u.a.z * 0.6;
+    float p = u.a.y + wob;
+    float past, lineAt = p;
+    if (dir == 0 || dir == 2) past = along - p;
+    else if (dir == 1 || dir == 3) past = p - along;
+    else {
+        // 両側へ：位置 = 真ん中に残す幅（1 で全部残る）
+        float hw = u.a.y * 0.5 + wob;
+        float dc = along - 0.5;
+        past = abs(dc) - hw;
+        lineAt = 0.5 + (dc < 0.0 ? -hw : hw);
+    }
+    if (past <= 0.0) return o;
+    lineAt = saturate(lineAt);
+    float4 c = t.sample(sl, vd ? float2(across, lineAt) : float2(lineAt, across));
+    if (u.b.z > 0.0) {
+        // 筋：1 行（1080p での 1 画素）ごとに少し明るさが違う
+        float rowPx = across * (vd ? u.size.x : u.size.y) / max(u.size.y / 1080.0, 0.5);
+        float row = floor(rowPx);
+        float sv = h21(row, 3.3) * 0.7 + vn2(float2(row * 0.15, past * 4.0)) * 0.3 - 0.5;
+        c.rgb = min(c.rgb * (1.0 + sv * u.b.z * 0.8), float3(c.a));
+    }
+    float m = u.b.y > 1e-4 ? smoothstep(0.0, u.b.y, past) : 1.0;
+    return finish(o, mix(o, c, m), u.mixAmt);
+}
+
+// ===== 明るさでずらす =====
+// a = ずれ(画素), 角度(ラジアン), 何で(0 明るさ 1 赤と緑 2 輪郭), 真ん中の明るさ / b = 色のずれ, 端, 地図を広げる(1)
+// mp = ずらす地図（元の絵か、ぼかした絵）
+fragment float4 m2_displace(VO in [[stage_in]], constant MU& u [[buffer(0)]], texture2d<float> t [[texture(0)]],
+                            texture2d<float> mp [[texture(1)]]) {
+    constexpr sampler sn(filter::nearest, address::clamp_to_edge);
+    constexpr sampler sl(filter::linear, address::clamp_to_edge);
+    float4 o = t.sample(sn, in.uv);
+    bool smooth = u.b.z > 0.5;
+    float4 m = smooth ? sampSmooth(mp, in.uv) : mp.sample(sl, in.uv);
+    int mode = int(u.a.z + 0.5);
+    float mid = u.a.w;
+    float2 off;
+    if (mode == 0) {
+        off = float2(cos(u.a.y), sin(u.a.y)) * (lum(m.rgb) - mid);
+    } else if (mode == 1) {
+        off = rot2(float2(m.r - mid, m.g - mid), u.a.y);
+    } else {
+        float2 e = 2.0 / float2(mp.get_width(), mp.get_height());
+        float gx = lum(mp.sample(sl, in.uv + float2(e.x, 0)).rgb) - lum(mp.sample(sl, in.uv - float2(e.x, 0)).rgb);
+        float gy = lum(mp.sample(sl, in.uv + float2(0, e.y)).rgb) - lum(mp.sample(sl, in.uv - float2(0, e.y)).rgb);
+        float2 g = float2(gx, gy);
+        float gl = length(g);
+        off = rot2(g / (gl + 1e-4) * min(gl * 6.0, 1.0) * 0.5, u.a.y);
+    }
+    off *= u.a.x / u.size;
+    int edge = int(u.b.y + 0.5);
+    float4 cg = sampEdge(t, in.uv + off, edge);
+    float4 col = cg;
+    if (u.b.x > 0.0) {
+        float4 cr = sampEdge(t, in.uv + off * (1.0 + u.b.x * 0.5), edge), cb = sampEdge(t, in.uv + off * (1.0 - u.b.x * 0.5), edge);
+        col = float4(cr.r, cg.g, cb.b, max(max(cr.a, cg.a), cb.a));
+    }
+    return finish(o, col, u.mixAmt);
+}
+
+// ===== 入れ子（ドロステ） =====
+// a = 縮む割合, 数, 1 段の角度(ラジアン), 寄っていく量(0〜1) / b = 中心x, 中心y, 枠(高さに対する割合), 形(0 四角 1 丸) / c.x = 外も埋める
+static float drD(float2 p, float A, bool rnd) { return rnd ? length(p) / 0.5 : max(abs(p.x) / (0.5 * A), abs(p.y) / 0.5); }
+fragment float4 m2_droste(VO in [[stage_in]], constant MU& u [[buffer(0)]], texture2d<float> t [[texture(0)]],
+                          texture2d<float> m [[texture(1)]]) {
+    constexpr sampler sn(filter::nearest, address::clamp_to_edge);
+    float4 o = t.sample(sn, in.uv);
+    float A = u.size.x / max(u.size.y, 1.0);
+    float2 asp = float2(A, 1.0);
+    float2 c = u.b.xy;
+    float2 p = (in.uv - c) * asp;
+    float s = clamp(u.a.x, 0.05, 0.99);
+    float n = max(floor(u.a.y + 0.5), 1.0);
+    float ang = u.a.z, z = u.a.w;
+    bool rnd = u.b.w > 0.5;
+    float d = max(drD(p, A, rnd), 1e-6);
+    float k = floor(log(d) / log(s) + z);              // どの段にいるか（外が 0、内へ 1, 2, …）
+    // 段ごとに回すと、さかい目も回るので直す
+    for (int it = 0; it < 2; it++) {
+        float dq = drD(rot2(p, -(k - z) * ang) / pow(s, k - z), A, rnd);
+        if (dq > 1.0) k -= 1.0; else if (dq <= s) k += 1.0;
+    }
+    k = clamp(k, u.c.x > 0.5 ? -40.0 : 0.0, n - 1.0);
+    float sc = pow(s, k - z);
+    float2 q = rot2(p, -(k - z) * ang) / sc;
+    float lod = (k - z) * -log2(s);
+    float4 col = sampLod(m, q / asp + c, lod, 0);
+    // 枠：内側の段のふちに線（色は「色」）
+    if (u.b.z > 0.0 && k - z > 1e-4) {
+        float ed = rnd ? 0.5 - length(q) : min(0.5 * A - abs(q.x), 0.5 - abs(q.y));
+        float mk = saturate((u.b.z - ed * sc) * u.size.y + 0.5);
+        col = mix(col, float4(u.color.rgb, 1.0), mk * step(0.0, ed + 1e-3));
+    }
+    return finish(o, col, u.mixAmt);
+}
 """
 
 /// 追加のエフェクト（第 2 弾）を描く
@@ -441,9 +681,14 @@ final class MoreFX2Renderer {
     static let shared = MoreFX2Renderer()
     let device = MetalContext.shared.device
     private var pipes: [String: MTLRenderPipelineState] = [:]
-    /// ミップマップ付きの元の絵（タイル・極座標・レンズで、縮めて取るときのちらつきを防ぐ）
-    /// （大きさごとに 1 枚。クリップとコンポジションで大きさが違っても、毎コマ作り直さないように）
-    private var mipTex: [SIMD2<Int>: MTLTexture] = [:]
+    /// 作業用の絵（名前と大きさごとに 1 枚。ぼかしの縮めた絵・ミップマップ付きの元の絵など）。
+    /// 大きさの違う段（クリップ・コンポジション・見本）で交互に使っても作り直さないよう、大きさごとに持ち、
+    /// 数が上限を超えたら、いちばん長く使っていないものを 1 枚だけ捨てる
+    private var texCache: [String: (tex: MTLTexture, used: UInt64)] = [:]
+    private var useCounter: UInt64 = 0
+    static let maxCachedTextures = 64
+    /// テスト用：作業用の絵を作った回数
+    private(set) var texturesMade = 0
 
     private init() {
         let lib = try! device.makeLibrary(source: moreFX2Source, options: nil)
@@ -454,24 +699,37 @@ final class MoreFX2Renderer {
             d.colorAttachments[0].pixelFormat = fmt
             return try! device.makeRenderPipelineState(descriptor: d)
         }
-        for f in ["m2_copy", "m2_blurOut", "m2_blurLast", "m2_lens", "m2_polar", "m2_tile", "m2_keyer", "m2_led", "m2_slices", "m2_shake"] { pipes[f] = r(f) }
+        for f in ["m2_copy", "m2_blurOut", "m2_blurLast", "m2_lens", "m2_polar", "m2_tile", "m2_keyer", "m2_led", "m2_slices", "m2_shake",
+                  "m2_film", "m2_tilt", "m2_emboss", "m2_stretch", "m2_displace", "m2_droste"] { pipes[f] = r(f) }
         for f in ["m2_copy", "m2_down", "m2_blur"] { pipes[f + "16"] = r(f, .rgba16Float) }
     }
 
     private func pipe(_ name: String) -> MTLRenderPipelineState { pipes[name]! }
 
+    /// 作業用の絵（rgba16Float）。名前と大きさ（とミップマップの有無）ごとに 1 枚
+    private func tex(_ name: String, _ w: Int, _ h: Int, mip: Bool = false) -> MTLTexture? {
+        let W = max(w, 1), H = max(h, 1)
+        let key = "\(name)-\(W)x\(H)\(mip ? "m" : "")"
+        useCounter += 1
+        if let c = texCache[key] {
+            texCache[key] = (c.tex, useCounter)
+            return c.tex
+        }
+        if texCache.count >= Self.maxCachedTextures, let old = texCache.min(by: { $0.value.used < $1.value.used })?.key {
+            texCache[old] = nil
+        }
+        let td = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba16Float, width: W, height: H, mipmapped: mip)
+        td.usage = [.renderTarget, .shaderRead]
+        td.storageMode = .private
+        guard let t = device.makeTexture(descriptor: td) else { return nil }
+        texCache[key] = (t, useCounter)
+        texturesMade += 1
+        return t
+    }
+
     /// 元の絵を、ミップマップ付きの絵に写す
     private func mipSource(_ input: MTLTexture, cb: MTLCommandBuffer) -> MTLTexture? {
-        let key = SIMD2(input.width, input.height)
-        if mipTex[key] == nil {
-            if mipTex.count >= 4 { mipTex.removeAll() }
-            let td = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba16Float, width: input.width, height: input.height,
-                                                              mipmapped: true)
-            td.usage = [.renderTarget, .shaderRead]
-            td.storageMode = .private
-            mipTex[key] = device.makeTexture(descriptor: td)
-        }
-        guard let m = mipTex[key] else { return nil }
+        guard let m = tex("mip", input.width, input.height, mip: true) else { return nil }
         MoreFXRenderer.shared.pass(m, pipe("m2_copy16"), cb: cb) { enc in enc.setFragmentTexture(input, index: 0) }
         guard let blit = cb.makeBlitCommandEncoder() else { return nil }
         blit.generateMipmaps(for: m)
@@ -605,60 +863,99 @@ final class MoreFX2Renderer {
             u.b = SIMD4(Float(dOff.x), Float(dOff.y), Float(dRot), moving ? 1 : 0)
             u.c = SIMD4(Float([0, 1, 2, 0][min(max(edgeChoice, 0), 3)]), 0, 0, 0)
             one("m2_shake")
+        case .film:
+            let vals = [v(0), v(2), v(4), v(5), v(6), v(7), v(8)]
+            if vals.allSatisfy({ $0 <= 0.0005 }) { copy(); return }
+            let fps = Double(max(v(9), 1))
+            let fr = floor(elapsed * fps)
+            func h(_ x: Double) -> Double { let s = sin(x * 12.9898 + 4.1) * 43758.5453; return s - floor(s) }
+            // ゆれ：コマが上下に少し跳ねる（ときどき大きく）
+            var jump = (h(fr) - 0.5) * 0.012
+            if h(fr + 0.37) > 0.93 { jump *= 3 }
+            u.a = SIMD4(v(0), v(1) * k, v(2), v(3))
+            u.b = SIMD4(v(4), v(5), v(6), 0)
+            u.c = SIMD4(v(8), Float(fr.truncatingRemainder(dividingBy: 9973)), Float(jump) * v(7), 0)
+            one("m2_film")
+        case .tiltShift:
+            let amount = v(0) * k
+            let sat = v(6), con = v(7)
+            if amount <= 0.01 && abs(sat - 1) < 1e-4 && abs(con - 1) < 1e-4 { copy(); return }
+            u.a = SIMD4(v(1), v(2), v(3), v(4) * deg)
+            u.b = SIMD4(Float(c(5)), sat, con, 0)
+            var b1: MTLTexture = input, b2: MTLTexture = input
+            if amount > 0.01 {
+                // ぼかしの量が場所で変わるのを、半分の量・全部の量の 2 枚との混ぜで近似
+                guard let r1 = blurTex(input, sigma: amount * 0.25, tag: "t1", u: u, cb: cb),
+                      let r2 = blurTex(input, sigma: amount * 0.5, tag: "t2", u: u, cb: cb) else { return }
+                b1 = r1.tex; b2 = r2.tex
+                u.b.w = r1.smooth ? 1 : 0
+                u.c = SIMD4(r2.smooth ? 1 : 0, 1, 0, 0)
+            }
+            base.pass(dst, pipe("m2_tilt"), cb: cb) { enc in
+                enc.setFragmentBytes(&u, length: MemoryLayout<MoreFXUniforms>.stride, index: 0)
+                enc.setFragmentTexture(input, index: 0)
+                enc.setFragmentTexture(b1, index: 1)
+                enc.setFragmentTexture(b2, index: 2)
+            }
+        case .emboss:
+            if v(0) <= 0.0005 && c(4) == 1 { copy(); return }
+            let angle = (Double(v(1)) + Double(v(2)) * elapsed).truncatingRemainder(dividingBy: 360)
+            u.a = SIMD4(v(0), Float(angle) * deg, v(3) * k, Float(c(4)))
+            u.b = SIMD4(v(5), v(6), 0, 0)
+            one("m2_emboss")
+        case .stretch:
+            u.a = SIMD4(Float(c(0)), v(1), v(2), v(3))
+            u.b = SIMD4(Float((Double(v(4)) * elapsed).truncatingRemainder(dividingBy: 1000)), v(5), v(6), 0)
+            one("m2_stretch")
+        case .displace:
+            let amount = v(0) * k
+            if amount <= 0.01 { copy(); return }
+            u.a = SIMD4(amount, v(1) * deg, Float(c(2)), v(4))
+            u.b = SIMD4(v(5), Float([0, 1, 2][min(max(c(6), 0), 2)]), 0, 0)
+            var map: MTLTexture = input
+            if v(3) > 0.001 {
+                // ずらす地図を先にぼかす（なめらかなゆがみ）
+                guard let r = blurTex(input, sigma: (2 + v(3) * 30) * k, tag: "d", u: u, cb: cb) else { return }
+                map = r.tex
+                u.b.z = r.smooth ? 1 : 0
+            }
+            base.pass(dst, pipe("m2_displace"), cb: cb) { enc in
+                enc.setFragmentBytes(&u, length: MemoryLayout<MoreFXUniforms>.stride, index: 0)
+                enc.setFragmentTexture(input, index: 0)
+                enc.setFragmentTexture(map, index: 1)
+            }
+        case .droste:
+            let ang = (Double(v(2)) + Double(v(3)) * elapsed) * Double.pi / 180
+            let zoom = Double(v(4)) * elapsed
+            u.a = SIMD4(v(0), v(1), Float(ang.truncatingRemainder(dividingBy: 2 * .pi)), Float(zoom - floor(zoom)))
+            u.b = SIMD4(v(5), v(6), v(7), Float(c(8)))
+            u.c = SIMD4(v(9), 0, 0, 0)
+            one("m2_droste", mip: true)
         default:
             return
         }
     }
 
-    /// ぼかし：広いときは半分ずつ縮めてから、横・縦にガウスでぼかす
-    private func blur(_ e: Effect, v: (Int) -> Float, input: MTLTexture, into dst: MTLTexture, u: MoreFXUniforms, cb: MTLCommandBuffer,
-                      copy: () -> Void) {
+    /// ぼかした絵を作る（ぼかし・ミニチュア風・明るさでずらすで使う）。sigma は input の画素。
+    /// 広いときは半分ずつ縮めてからぼかす。返す絵が縮めたもの（smooth）なら、B スプラインで広げて取る
+    func blurTex(_ input: MTLTexture, sigma: Float, horiz: Bool = true, vert: Bool = true, edge: Float = 0, tag: String,
+                 u: MoreFXUniforms, cb: MTLCommandBuffer) -> (tex: MTLTexture, smooth: Bool)? {
         let base = MoreFXRenderer.shared
-        let amount = v(0) * Float(dst.height) / 1080
-        if amount <= 0.01 { copy(); return }
-        let kind = Int(v(1).rounded())
-        let edge: Float = Int(v(3).rounded()) == 1 ? 2 : 0
-        let horiz = kind != 2, vert = kind != 1
-        // 量 = おおよその半径（シグマの 2 倍）
-        let sigma = amount * 0.5
         var D = 1
         while sigma / Float(D) > (D == 1 ? 2 : 3), D < 64 { D *= 2 }
-        // 縮める（ぼかす向きだけ）
         var src = input
         var level = 1
         while level < D {
             level *= 2
             let w = horiz ? max(input.width / level, 1) : input.width
             let h = vert ? max(input.height / level, 1) : input.height
-            guard let t = base.temp("blur2L\(level)", w, h) else { return }
+            guard let t = tex("blurL\(level)\(horiz ? "h" : "")\(vert ? "v" : "")", w, h) else { return nil }
             base.pass(t, pipe("m2_down16"), cb: cb) { enc in enc.setFragmentTexture(src, index: 0) }
             src = t
         }
         let sl = sigma / Float(D)
         let w = src.width, h = src.height
-        if D == 1 {
-            // 縮めないとき：(横を作業用の絵に) → 最後の向きは重ねるのと一緒に
-            var last = u
-            last.a = SIMD4(v(2), 0, 0, 0)
-            var lastSrc = input
-            if horiz && vert {
-                guard let a = base.temp("blur2A", w, h) else { return }
-                var hu = u; hu.b = SIMD4(1 / Float(w), 0, sl, edge)
-                base.pass(a, pipe("m2_blur16"), cb: cb) { enc in
-                    enc.setFragmentBytes(&hu, length: MemoryLayout<MoreFXUniforms>.stride, index: 0)
-                    enc.setFragmentTexture(input, index: 0)
-                }
-                lastSrc = a
-            }
-            last.b = vert ? SIMD4(0, 1 / Float(h), sl, edge) : SIMD4(1 / Float(w), 0, sl, edge)
-            base.pass(dst, pipe("m2_blurLast"), cb: cb) { enc in
-                enc.setFragmentBytes(&last, length: MemoryLayout<MoreFXUniforms>.stride, index: 0)
-                enc.setFragmentTexture(input, index: 0)
-                enc.setFragmentTexture(lastSrc, index: 1)
-            }
-            return
-        }
-        guard let a = base.temp("blur2A", w, h), let b = base.temp("blur2B", w, h) else { return }
+        guard let a = tex("blurA" + tag, w, h), let b = tex("blurB" + tag, w, h) else { return nil }
         var cur = src
         if horiz {
             var hu = u; hu.b = SIMD4(1 / Float(w), 0, sl, edge)
@@ -677,11 +974,48 @@ final class MoreFX2Renderer {
             }
             cur = a
         }
-        var o = u; o.a = SIMD4(v(2), D > 1 ? 1 : 0, 0, 0)
+        return (cur, D > 1)
+    }
+
+    /// ぼかし：縮めないときは、最後の向きのぼかしと重ねるのを 1 回で
+    private func blur(_ e: Effect, v: (Int) -> Float, input: MTLTexture, into dst: MTLTexture, u: MoreFXUniforms, cb: MTLCommandBuffer,
+                      copy: () -> Void) {
+        let base = MoreFXRenderer.shared
+        let amount = v(0) * Float(dst.height) / 1080
+        if amount <= 0.01 { copy(); return }
+        let kind = Int(v(1).rounded())
+        let edge: Float = Int(v(3).rounded()) == 1 ? 2 : 0
+        let horiz = kind != 2, vert = kind != 1
+        // 量 = おおよその半径（シグマの 2 倍）
+        let sigma = amount * 0.5
+        if sigma <= 2 {
+            let w = input.width, h = input.height
+            var last = u
+            last.a = SIMD4(v(2), 0, 0, 0)
+            var lastSrc = input
+            if horiz && vert {
+                guard let a = tex("blurA", w, h) else { return }
+                var hu = u; hu.b = SIMD4(1 / Float(w), 0, sigma, edge)
+                base.pass(a, pipe("m2_blur16"), cb: cb) { enc in
+                    enc.setFragmentBytes(&hu, length: MemoryLayout<MoreFXUniforms>.stride, index: 0)
+                    enc.setFragmentTexture(input, index: 0)
+                }
+                lastSrc = a
+            }
+            last.b = vert ? SIMD4(0, 1 / Float(h), sigma, edge) : SIMD4(1 / Float(w), 0, sigma, edge)
+            base.pass(dst, pipe("m2_blurLast"), cb: cb) { enc in
+                enc.setFragmentBytes(&last, length: MemoryLayout<MoreFXUniforms>.stride, index: 0)
+                enc.setFragmentTexture(input, index: 0)
+                enc.setFragmentTexture(lastSrc, index: 1)
+            }
+            return
+        }
+        guard let r = blurTex(input, sigma: sigma, horiz: horiz, vert: vert, edge: edge, tag: "", u: u, cb: cb) else { return }
+        var o = u; o.a = SIMD4(v(2), r.smooth ? 1 : 0, 0, 0)
         base.pass(dst, pipe("m2_blurOut"), cb: cb) { enc in
             enc.setFragmentBytes(&o, length: MemoryLayout<MoreFXUniforms>.stride, index: 0)
             enc.setFragmentTexture(input, index: 0)
-            enc.setFragmentTexture(cur, index: 1)
+            enc.setFragmentTexture(r.tex, index: 1)
         }
     }
 }

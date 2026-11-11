@@ -28,6 +28,18 @@ A plain blur. Wide blurs shrink the image by halves first, so they stay light.
 
 Values: Amount (px at 1080p; 0 leaves the image unchanged), Type (Normal, Horizontal only, Vertical only), Keep highlights (mixes in the brighter of the blurred and original image for a soft-focus look), Edges (Stretch, Transparent).
 
+### Tilt-Shift
+
+Blurs outside an in-focus band so the scene looks like a miniature. The farther from the band, the stronger the blur.
+
+Values: Blur (px at 1080p), Band position, Band width, Falloff softness, Rotation (tilts the band), Shape (Band, Circle (sharp only around the center)), Saturation, Contrast. With Blur 0, Saturation 100% and Contrast 100% the image is unchanged.
+
+### Emboss
+
+Turns brightness slopes into a lit relief.
+
+Values: Strength, Light direction (135° lights from the upper left), Light rotation speed, Thickness (px at 1080p), Color (Gray relief, Over original colors, Metal), Original image, Smooth (blurs a little first). Strength 0 with Over original colors leaves the image unchanged.
+
 ## Shape
 
 ### Kaleidoscope
@@ -69,6 +81,18 @@ Shakes the whole image: handheld camera, earthquake, zoom pulse.
 Values: Shake (px at 1080p), Speed (times per second), Type (Smooth, Jerky, Horizontal only, Vertical only), Rotation, Zoom pulse, Motion blur (blurs along the motion), Edges (Stretch, Mirror, Transparent, Zoom in to hide).
 
 Shake at 0 stops everything, including rotation and zoom pulse, and leaves the image unchanged (rotation and zoom pulse grow as Shake goes from 0 to 20 px). Assign Shake to audio or beat motion to shake the screen on the kick.
+
+### Shift by Brightness
+
+Displaces the image by its own brightness (or color, or contours), so bright areas seem to pop out.
+
+Values: Offset (px at 1080p; 0 leaves the image unchanged), Rotation, Displace by (Brightness, Red and green (red moves sideways, green up and down), Contours (along the brightness slope)), Blur the map first (smooth warps), Neutral brightness (areas this bright do not move), Color shift (red, green and blue move by different amounts), Edges (Stretch, Mirror, Transparent).
+
+### Droste
+
+The picture repeats inside itself, smaller each time, like facing mirrors.
+
+Values: Shrink ratio, Count (1 to 12; deeper levels keep showing the last level), Rotate (angle per level), Rotation speed, Zoom speed (pulls into or out of the nest; one level later it looks the same again, so it loops forever), Center, Frame (a line on the edge of each level, in the "Color"), Shape (Square, Circle), Fill the outside too (when the center is moved, fills the outside with an enlarged picture). Count 1 and Zoom speed 0 leave the image unchanged.
 
 ## Glitch / Digital
 
@@ -119,3 +143,9 @@ Values: Cell size (px at 1080p), Shape (Round dots, RGB stripes, Square), Partic
 Cuts the image into bands and shifts each band sideways (up and down for vertical bands). Great when driven by the beat.
 
 Values: Direction (Horizontal bands, Vertical bands), Bands, Offset (relative to the screen width; 0 leaves the image unchanged), Shift pattern (Random, Staggered, Wave, Stairs), Change rate (reshuffles per second; 0 stops), Smooth (eases between reshuffles), Uneven band widths, Shift colors too, Edges (Mirror, Stretch, Transparent).
+
+### Stretch
+
+Stretches the pixels on one line all the way to the edge, like a moving scanner.
+
+Values: Direction (Right, Left, Down, Up, Both sides), Position (where the line is; for Both sides, the width kept in the middle), Position wobble (each row shifts the line, giving a sawtooth edge), Wobble detail, Wobble flow speed, Blend (mixes with the original just before the line), Add streaks (thin streaks in the stretched area). A position with nothing to stretch (100% for Right) leaves the image unchanged.

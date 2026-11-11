@@ -7,10 +7,10 @@ The effects in the "Effects" panel and what each category contains. Detailed val
 | Category | Effects |
 |---|---|
 | Color, Shape, Time | Mirror / Colorize / Levels / Posterize (color levels, dither, dots) / Invert (color and brightness, luminosity, color only; amount) / Posterize Time (frame rate that drops frames) / Strobe / Echo (trails) / Mask (shape) / Mask (free shape) / Warp (organic distortion) / Time Displace (slit scan) / Fluid (flowing paint) / Keyer (luma / color to transparent) |
-| Analog Gear | Glitch Box / VHS Tape / Video Feedback / Raster Scan / CRT Monitor → [Analog Gear Effects](effects-analog.md) |
-| Light / Blur | Bloom / Edge Neon / Zoom Blur / Blur → [Light, Shape and Glitch Effects](effects-glitch.md) |
-| Shape | Kaleidoscope / Glass Shards / Lens / Polar / Tile / Shake → [Light, Shape and Glitch Effects](effects-glitch.md) |
-| Glitch / Digital | RGB Split / Mosaic / Halftone / Pixel Sort / Datamosh Style / ASCII Mosaic / Dither / LED Wall / Slices → [Light, Shape and Glitch Effects](effects-glitch.md) |
+| Analog Gear | Glitch Box / VHS Tape / Video Feedback / Raster Scan / CRT Monitor / Film → [Analog Gear Effects](effects-analog.md) |
+| Light / Blur | Bloom / Edge Neon / Zoom Blur / Blur / Tilt-Shift / Emboss → [Light, Shape and Glitch Effects](effects-glitch.md) |
+| Shape | Kaleidoscope / Glass Shards / Lens / Polar / Tile / Shake / Shift by Brightness / Droste → [Light, Shape and Glitch Effects](effects-glitch.md) |
+| Glitch / Digital | RGB Split / Mosaic / Halftone / Pixel Sort / Datamosh Style / ASCII Mosaic / Dither / LED Wall / Slices / Stretch → [Light, Shape and Glitch Effects](effects-glitch.md) |
 
 For Mask (shape) and Mask (free shape), see [Adding and Ordering Effects](effects.md).
 

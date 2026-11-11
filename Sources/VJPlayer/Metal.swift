@@ -1658,6 +1658,8 @@ final class EffectProcessor {
         case .rasterScan:
             guard let (s, _) = life.state(key, now: now, origin: o, warm: 0, make: { RasterSim() }) else { return }
             s.render(e, input: input, into: dst, now: now, stack: stack, mixAmt: mixAmt, cb: cb)
+        case .film, .tiltShift, .emboss, .stretch, .displace, .droste:
+            MoreFX2Renderer.shared.render(e, input: input, into: dst, now: now, stack: stack, mixAmt: mixAmt, cb: cb)
         case .blur, .lens, .polar, .tile, .keyer, .ledWall, .slices, .shake:
             MoreFX2Renderer.shared.render(e, input: input, into: dst, now: now, stack: stack, mixAmt: mixAmt, cb: cb)
         case .kaleidoscope, .rgbSplit, .pixelate, .edgeNeon, .zoomBlur, .ascii, .dither, .voronoiGlass:
