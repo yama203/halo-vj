@@ -47,7 +47,7 @@ The list and the right-click menu of empty slots are grouped by category (Color 
 | Lines, Dots, Tunnel, Phyllotaxis, Light Flow, Audio Scope | [Line, Particle and Light Generators](generators-lines.md) |
 | Flock (fish, birds), Physarum (slime mold), Particle Life, Firefly Sync, Strange Attractor | [Life and Nature Generators](generators-nature.md) |
 | Stripes, Checker / Grid / Dots, Noise (Smooth / Static), Shapes (Circle, Ring, Square, Frame, Triangle; can be tiled) | This page |
-| Reaction-Diffusion, Fractal, Growth, Metaballs, Laser Show, Synthwave Terrain, Starfield Warp, Water Ripples, Lightning / Discharge, Logo Particles, Plasma, Aurora, Nebula / Smoke, Truchet Tiles, Hexagon Tiles, Code Rain, Spinning Wireframe, Moiré | [More Generators](generators-more.md) |
+| Reaction-Diffusion, Fractal, Growth, Metaballs, Laser Show, Synthwave Terrain, Starfield Warp, Water Ripples, Lightning / Discharge, Logo Particles, Plasma, Aurora, Nebula / Smoke, Truchet Tiles, Hexagon Tiles, Code Rain, Spinning Wireframe, Moiré, Sunburst, Ridge Lines, Bokeh, Spiral, Cells (Voronoi), Lissajous, Fireworks, Fire | [More Generators](generators-more.md) |
 | Text, Clock / Countdown | [Text and Clock Generators](generators-text.md) |
 | From Camera, From Syphon, From NDI | [Camera](camera.md), [Syphon](syphon.md), [NDI](ndi.md) |
 

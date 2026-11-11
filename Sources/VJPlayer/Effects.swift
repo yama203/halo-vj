@@ -20,6 +20,8 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
     case reactionDiffusion, laser, synthwave, logoParticles, metaballs, starfield, fractal, ripples, lightning, growth
     /// 追加のジェネレーター 第 2 弾（MoreKinds.swift・MoreGenerators2.swift）
     case plasma, aurora, nebula, truchet, hexGrid, codeRain, wireframe, moire
+    /// 追加のジェネレーター 第 3 弾（MoreKinds.swift・MoreGenerators2.swift）
+    case sunburst, ridgeLines, bokeh, spiral, voronoi, lissajous, fireworks, fire
     /// 特殊合成（レイヤーの重ね方）の値。エフェクト一覧には出さない
     /// 切り替えの形（レイヤーの切り替え方で、新しいクリップに内部でかける。一覧には出さない）
     case transitionMask
@@ -43,6 +45,7 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
     static let generators: [EffectKind] = [.solid, .gradient, .flow, .lines, .dots, .school, .tunnel, .physarum, .particleLife, .fireflies, .attractor, .audioScope, .reactionDiffusion, .metaballs, .fractal, .growth,
                                            .laser, .synthwave, .starfield, .ripples, .lightning, .logoParticles,
                                            .plasma, .aurora, .nebula, .truchet, .hexGrid, .codeRain, .wireframe, .moire,
+                                           .sunburst, .ridgeLines, .bokeh, .spiral, .voronoi, .lissajous, .fireworks, .fire,
                                            .syphonIn, .ndiIn, .camera, .stripes, .grid, .noise, .shapes, .phyllotaxis, .text, .clock]
     /// 文字を描くジェネレーター（テキスト・時計。描き方は同じ）
     var isText: Bool { self == .text || self == .clock }
@@ -68,6 +71,7 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
         case .blur, .lens, .polar, .tile, .keyer, .ledWall, .slices, .shake: ""
         case .bloom, .kaleidoscope, .rgbSplit, .pixelate, .edgeNeon, .zoomBlur, .pixelSort, .datamosh, .ascii, .dither, .voronoiGlass, .reactionDiffusion, .laser, .synthwave, .logoParticles, .metaballs, .starfield, .fractal, .ripples, .lightning, .growth: ""
         case .plasma, .aurora, .nebula, .truchet, .hexGrid, .codeRain, .wireframe, .moire: ""
+        case .sunburst, .ridgeLines, .bokeh, .spiral, .voronoi, .lissajous, .fireworks, .fire: ""
         case .mirror: L("ミラー")
         case .colorize: L("カラーライズ")
         case .levels: L("レベル")
@@ -127,6 +131,7 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
         case .blur, .lens, .polar, .tile, .keyer, .ledWall, .slices, .shake: .generator
         case .bloom, .kaleidoscope, .rgbSplit, .pixelate, .edgeNeon, .zoomBlur, .pixelSort, .datamosh, .ascii, .dither, .voronoiGlass, .reactionDiffusion, .laser, .synthwave, .logoParticles, .metaballs, .starfield, .fractal, .ripples, .lightning, .growth: .generator
         case .plasma, .aurora, .nebula, .truchet, .hexGrid, .codeRain, .wireframe, .moire: .generator
+        case .sunburst, .ridgeLines, .bokeh, .spiral, .voronoi, .lissajous, .fireworks, .fire: .generator
         case .mirror, .warp, .fluid: .shape
         case .colorize, .levels, .posterize, .invert: .color
         case .posterizeTime, .timeWarp, .strobe, .echo: .time
@@ -144,6 +149,7 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
         case .blur, .lens, .polar, .tile, .keyer, .ledWall, .slices, .shake: ""
         case .bloom, .kaleidoscope, .rgbSplit, .pixelate, .edgeNeon, .zoomBlur, .pixelSort, .datamosh, .ascii, .dither, .voronoiGlass, .reactionDiffusion, .laser, .synthwave, .logoParticles, .metaballs, .starfield, .fractal, .ripples, .lightning, .growth: ""
         case .plasma, .aurora, .nebula, .truchet, .hexGrid, .codeRain, .wireframe, .moire: ""
+        case .sunburst, .ridgeLines, .bokeh, .spiral, .voronoi, .lissajous, .fireworks, .fire: ""
         case .mirror: "rectangle.split.2x1"
         case .colorize: "paintpalette"
         case .levels: "slider.horizontal.3"
@@ -213,6 +219,7 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
         case .blur, .lens, .polar, .tile, .keyer, .ledWall, .slices, .shake: -1
         case .bloom, .kaleidoscope, .rgbSplit, .pixelate, .edgeNeon, .zoomBlur, .pixelSort, .datamosh, .ascii, .dither, .voronoiGlass, .reactionDiffusion, .laser, .synthwave, .logoParticles, .metaballs, .starfield, .fractal, .ripples, .lightning, .growth: -1
         case .plasma, .aurora, .nebula, .truchet, .hexGrid, .codeRain, .wireframe, .moire: -1
+        case .sunburst, .ridgeLines, .bokeh, .spiral, .voronoi, .lissajous, .fireworks, .fire: -1
         case .mirror: 0
         case .colorize: 1
         case .levels: 2
@@ -248,6 +255,7 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
         case .blur, .lens, .polar, .tile, .keyer, .ledWall, .slices, .shake: return []
         case .bloom, .kaleidoscope, .rgbSplit, .pixelate, .edgeNeon, .zoomBlur, .pixelSort, .datamosh, .ascii, .dither, .voronoiGlass, .reactionDiffusion, .laser, .synthwave, .logoParticles, .metaballs, .starfield, .fractal, .ripples, .lightning, .growth: return []
         case .plasma, .aurora, .nebula, .truchet, .hexGrid, .codeRain, .wireframe, .moire: return []
+        case .sunburst, .ridgeLines, .bokeh, .spiral, .voronoi, .lissajous, .fireworks, .fire: return []
         case .mirror:
             return [
                 EffectParam(label: L("左右"), range: 0...2, defaultValue: 1, choices: [L("なし"), L("左を右へ"), L("右を左へ")]),
@@ -945,6 +953,7 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
         case .blur, .lens, .polar, .tile, .keyer, .ledWall, .slices, .shake: ""
         case .bloom, .kaleidoscope, .rgbSplit, .pixelate, .edgeNeon, .zoomBlur, .pixelSort, .datamosh, .ascii, .dither, .voronoiGlass, .reactionDiffusion, .laser, .synthwave, .logoParticles, .metaballs, .starfield, .fractal, .ripples, .lightning, .growth: ""
         case .plasma, .aurora, .nebula, .truchet, .hexGrid, .codeRain, .wireframe, .moire: ""
+        case .sunburst, .ridgeLines, .bokeh, .spiral, .voronoi, .lissajous, .fireworks, .fire: ""
         case .mirror: L("画面の半分を反対側に折り返す")
         case .colorize: L("明るさをもとに、1 色で染める（カラー）か、パレットの色に置き換える（パレット）")
         case .levels: L("黒と白の位置・ガンマで明るさとコントラストを整える")

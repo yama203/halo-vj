@@ -10,6 +10,8 @@ import simd
 extension EffectKind {
     /// 第 2 弾のジェネレーター（描き方は MoreGen2Renderer）
     static let moreGenerators2: [EffectKind] = [.plasma, .aurora, .nebula, .truchet, .hexGrid, .codeRain, .wireframe, .moire]
+    /// 第 3 弾のジェネレーター（描き方は同じ MoreGen2Renderer）
+    static let moreGenerators3: [EffectKind] = [.sunburst, .ridgeLines, .bokeh, .spiral, .voronoi, .lissajous, .fireworks, .fire]
 }
 
 private let moreGen2Source = """
@@ -415,6 +417,293 @@ fragment float4 g2_seg_f(SVO in [[stage_in]]) {
     float3 c = in.col.rgb * v + float3(core * in.col.a * 0.35);
     return float4(c, saturate(v));
 }
+// ===================== 第 3 弾 =====================
+static float fbmT3(texture2d<float> nt, float2 p) {
+    float s = 0.0, a = 0.5;
+    for (int i = 0; i < 3; i++) { s += a * vnT(nt, p); p = p * 2.03 + float2(17.3, 9.1); a *= 0.5; }
+    return s / 0.875;
+}
+// 1 次元ノイズと、その傾き
+static float2 n1d(float x) {
+    float i = floor(x), f = fract(x);
+    float a = hq(i), b = hq(i + 1.0);
+    return float2(mix(a, b, f * f * (3.0 - 2.0 * f)), (b - a) * 6.0 * f * (1.0 - f));
+}
+
+// ===== 放射の光 =====
+// a = 本数, 回り(rad), 帯の太さ, ねじれ / b = 中心xy, 穴, 外へ消える / c = やわらかさ, 色の付け方, 脈打つ, 脈の位相
+fragment float4 g2_sunburst(VO in [[stage_in]], constant MU& u [[buffer(0)]]) {
+    float H = u.size.y;
+    float A = u.size.x / max(H, 1.0);
+    float2 d = (in.uv - u.b.xy) * float2(A, 1.0);
+    float r = max(length(d), 1e-4);
+    float n = max(floor(u.a.x + 0.5), 1.0);
+    float ang = atan2(d.y, d.x) / 6.2831853;
+    float tw = u.a.w * 3.0;
+    float ph = (ang - u.a.y / 6.2831853) * n + tw * r;
+    float id = floor(ph);
+    float idw = id - n * floor(id / n);                    // 帯の番号（つなぎ目でも同じ番号）
+    float w = clamp(u.a.z * (1.0 + u.c.z * 0.8 * sin(u.c.w + idw * 1.3)), 0.02, 0.98);
+    float tr = abs(fract(ph) - 0.5);
+    // 1 画素がどれだけ位相を進めるか（中心の近くほど大きい）
+    float fw = length(float2(n / (6.2831853 * r), tw)) / H;
+    float e = max(fw, u.c.x * 0.25);
+    float on = 1.0 - smoothstep(w * 0.5 - e, w * 0.5 + e, tr);
+    on = mix(on, w, saturate((fw - 0.3) / 0.4));
+    on *= smoothstep(u.b.z * 0.5, u.b.z * 0.5 + 0.004 + 1.5 / H, r);
+    on *= mix(1.0, exp(-r * 2.2), u.b.w);
+    int cm = int(u.c.y + 0.5);
+    float3 col = cm == 0 ? u.color.rgb : (cm == 1 ? u.pal[int(idw) % max(u.palCount, 1)].rgb : hue(idw / n + u.time * 0.03));
+    return float4(col * on, on);
+}
+
+// ===== 波打つ稜線 =====
+// a = 線の数, 山の高さ, 細かさ, 流れ(進んだ量) / b = 真ん中に寄せる, 太さ(px 1080p), 隠す, 遠近 / c = 色の付け方, 光る
+fragment float4 g2_ridge(VO in [[stage_in]], constant MU& u [[buffer(0)]]) {
+    float W = u.size.x, H = u.size.y;
+    float A = W / max(H, 1.0);
+    float x = in.uv.x, py = in.uv.y;
+    int N = clamp(int(u.a.x + 0.5), 2, 80);
+    float top = 0.16, bot = 0.86;
+    float k = H / 1080.0;
+    float env = mix(1.0, exp(-pow((x - 0.5) * 4.0, 2.0)), u.b.x);
+    float denv = mix(0.0, exp(-pow((x - 0.5) * 4.0, 2.0)) * (-2.0 * (x - 0.5) * 16.0), u.b.x);
+    float fq = u.a.z * A;
+    int cm = int(u.c.x + 0.5);
+    float3 acc = 0.0;
+    float alpha = 0.0;
+    // 手前（下）の線から順に見る。手前の山の中に入ったら、奥は見えない
+    for (int kk = 0; kk < 80; kk++) {
+        if (kk >= N) break;
+        int i = N - 1 - kk;
+        float t = float(i) / float(N - 1);
+        float base = top + (bot - top) * mix(t, pow(t, 1.7), u.b.w);
+        float sc = mix(1.0, 0.35 + 0.65 * t, u.b.w);
+        float amp = u.a.y * 0.3 * sc;
+        // 塗りつぶしは、ひとつ手前の線の下の端まで（すき間に地が見えないように）
+        float t2 = min(t + 1.0 / float(N - 1), 1.0);
+        float below = (i == N - 1 ? 0.0 : (bot - top) * (mix(t2, pow(t2, 1.7), u.b.w) - mix(t, pow(t, 1.7), u.b.w))) + 0.01;
+        if (py < base - amp * env * 2.2 - 0.02 || py > base + below) continue;   // 山がここまで届かない線は計算しない
+        float xs = (x - 0.5) * fq + u.a.w + float(i) * 3.71;
+        float2 a1 = n1d(xs), a2 = n1d(xs * 2.3 + 5.0);
+        float nv = a1.x * 0.7 + a2.x * 0.3;
+        float dn = (a1.y * 0.7 + a2.y * 2.3 * 0.3) * fq;      // x（0〜1）での傾き
+        // 3 乗で、ほとんど平らな所から、ときどき山がぐっと立つように
+        float m = nv * nv * nv * 2.2;
+        float y = base - amp * env * m;
+        float dy = -amp * (denv * m + env * 6.6 * nv * nv * dn);
+        float slope = dy * H / W;                               // 画面の傾き（縦 px / 横 px）
+        float dist = abs(py - y) * H / sqrt(1.0 + slope * slope);
+        float wpx = u.b.y * k * mix(1.0, 0.5 + 0.5 * t, u.b.w);
+        float line = 1.0 - smoothstep(wpx * 0.5 - 0.6, wpx * 0.5 + 0.6, dist);
+        float glow = exp(-dist / (8.0 * k)) * u.c.w * 0.5;
+        float br = mix(1.0, 0.35 + 0.65 * t, u.b.w);
+        float3 col = cm == 0 ? u.color.rgb : (cm == 1 ? pal(u, 1.0 - t) : hue(t * 0.8 + x * 0.3 + u.time * 0.03));
+        acc += col * (line + glow) * br;
+        if (u.b.z > 0.5 && py > y) { alpha = 1.0; break; }
+    }
+    return float4(acc, max(alpha, saturate(mx3(acc))));
+}
+
+// ===== 玉ぼけ =====
+// a = 数, 大きさ, ばらつき, 漂う(進んだ量) / b = またたき, ふち, 形, 色の付け方 / c = 明るさ, 奥行き
+static float bokehDist(float2 d, int s) {
+    float2 a = abs(d);
+    if (s == 1) return max(a.x * 0.8660254 + a.y * 0.5, a.y);
+    if (s == 2) return max(max(a.x, a.y), (a.x + a.y) * 0.7071068);
+    return length(d);
+}
+fragment float4 g2_bokeh(VO in [[stage_in]], constant MU& u [[buffer(0)]]) {
+    float H = u.size.y;
+    float A = u.size.x / max(H, 1.0);
+    float2 p0 = float2(in.uv.x * A, in.uv.y);
+    float T = u.a.w;
+    int shape = int(u.b.z + 0.5), cm = int(u.b.w + 0.5);
+    float3 acc = 0.0;
+    int layers = u.c.y > 0.01 ? 2 : 1;
+    for (int L = 0; L < 2; L++) {
+        if (L >= layers) break;
+        float fl = float(L);
+        float cnt = L == 0 ? u.a.x : max(u.a.x * u.c.y * 1.5, 1.0);
+        float rad = u.a.y * (L == 0 ? 1.0 : 0.45);
+        // マスの大きさ：数から決める（玉が隣のマスからはみ出しすぎないよう、大きい玉ではマスも大きく）
+        // 玉は自分のマスの中心から 1 マス以内に収める（ずれ 0.3 マス＋半径 0.7 マスまで）ので、近い 2×2 マスだけ見ればよい
+        float cs = max(sqrt(A * 0.75 / max(cnt, 1.0)), rad / 0.7);
+        float2 p = p0 + float2(T * 0.03 * (1.0 - fl * 0.4), -T * 0.05 * (1.0 - fl * 0.4)) + fl * 17.0;
+        float2 gp = p / cs;
+        float2 g = floor(gp - 0.5);
+        for (int j = 0; j <= 1; j++) for (int i = 0; i <= 1; i++) {
+            float2 id = g + float2(i, j);
+            float hp = h2(id + 3.1 + fl * 7.7);
+            if (hp > 0.75) continue;
+            float2 hj = h22(id + fl * 5.3);
+            float da = T * (0.9 + 0.6 * hj.y) + hj.x * 6.28;     // 玉ごとに小さな円を描いて漂う
+            float2 c = (id + 0.5 + (hj - 0.5) * 0.3 + 0.15 * float2(sin(da), cos(da))) * cs;
+            float r = min(rad * (1.0 - u.a.z * 0.75 * h2(id + 9.4 + fl)), cs * 0.7);
+            float2 dp = p - c;
+            float soft = max(1.2 / H, r * 0.05);
+            if (dot(dp, dp) > (r + soft) * (r + soft) * 1.2) continue;   // 遠い玉は計算しない
+            float dd = bokehDist(dp, shape);
+            float inside = 1.0 - smoothstep(r - soft, r + soft * 0.5, dd);
+            float rz = (dd - r * 0.9) / (r * 0.07 + 1.0 / H);
+            float rim = exp(-rz * rz) * u.b.y;
+            float tw = 1.0 - u.b.x * 0.65 * (0.5 + 0.5 * sin(u.time * (0.8 + 2.0 * hp) + hp * 40.0));
+            float v = (0.35 + 0.65 * rim) * inside * tw * (L == 0 ? 1.0 : 0.45);
+            float hc = h2(id + 12.9 + fl);
+            float3 col = cm == 0 ? u.color.rgb : (cm == 1 ? pal(u, hc) : hue(hc + u.time * 0.02));
+            acc += col * v;
+        }
+    }
+    acc *= u.c.x;
+    return float4(acc, saturate(mx3(acc)));
+}
+
+// ===== うず巻き =====
+// a = 腕の数, 巻き, 回り(回), 太さ / b = 形, 中心xy, やわらかさ / c = 色の付け方, ゆがみ, トンネル
+fragment float4 g2_spiral(VO in [[stage_in]], constant MU& u [[buffer(0)]]) {
+    float H = u.size.y;
+    float A = u.size.x / max(H, 1.0);
+    float2 d = (in.uv - u.b.yz) * float2(A, 1.0);
+    float r = max(length(d), 1e-4);
+    float a01 = atan2(d.y, d.x) / 6.2831853;
+    float arms = max(floor(u.a.x + 0.5), 1.0), wd = u.a.y;
+    int shape = int(u.b.x + 0.5);
+    float ph, ga, gr;
+    if (shape == 0) { ph = arms * a01 + wd * log(r) * 0.5 - u.a.z * arms; ga = arms / (6.2831853 * r); gr = wd * 0.5 / r; }
+    else if (shape == 1) { ph = arms * a01 + wd * r * 2.0 - u.a.z * arms; ga = arms / (6.2831853 * r); gr = wd * 2.0; }
+    else { ph = wd * r * 2.0 - u.a.z; ga = 0.0; gr = wd * 2.0; }
+    ph += u.c.y * 0.35 * sin(r * 10.0 + a01 * 6.2831853 * 3.0 + u.time * 1.5);
+    float fw = length(float2(ga, gr)) / H * (1.0 + u.c.y * 2.0);
+    float w = u.a.w;
+    float tr = abs(fract(ph) - 0.5);
+    float e = max(fw, u.b.w * 0.25);
+    float on = 1.0 - smoothstep(w * 0.5 - e, w * 0.5 + e, tr);
+    on = mix(on, w, saturate((fw - 0.3) / 0.4));
+    float fid = floor(ph);
+    int arm = int(fid - arms * floor(fid / arms));
+    int cm = int(u.c.x + 0.5);
+    float3 rgb; float a;
+    if (cm == 0) { float3 c2 = pal(u, 1.0); rgb = mix(c2, u.pal[0].rgb, on); a = max(on, mx3(c2)); }
+    else {
+        float3 col = cm == 1 ? u.pal[arm % max(u.palCount, 1)].rgb : (cm == 2 ? hue(a01 + u.time * 0.05) : hue(r * 2.0 - u.time * 0.1));
+        rgb = col * on; a = on;
+    }
+    float tun = mix(1.0, smoothstep(0.0, 0.35, r), u.c.z);
+    return float4(rgb * tun, a * tun);
+}
+
+// ===== 細胞（ボロノイ） =====
+// a = 縦の数, 進んだ量, 描き方, ふちの太さ / b = 光る, ばらつき, 色の付け方, 脈打つ
+static float2 vpt(float2 g, float jit, float T) {
+    float2 h = h22(g);
+    float row = g.y - 2.0 * floor(g.y * 0.5);
+    float2 base = float2(0.25 + 0.5 * row, 0.5);
+    return base + jit * (0.42 * sin(T + 6.2831853 * h) + (h - 0.5) * 0.3);
+}
+fragment float4 g2_voronoi(VO in [[stage_in]], constant MU& u [[buffer(0)]]) {
+    float H = u.size.y;
+    float N = max(u.a.x, 1.0);
+    float2 p = in.uv * u.size / H * N * float2(1.0, 1.1547) + 50.0;
+    float2 n = floor(p), f = fract(p);
+    float T = u.a.y, jit = u.b.y;
+    float2 mg = 0.0, mr = 0.0;
+    float md = 8.0;
+    for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++) {
+        float2 g = float2(i, j);
+        float2 r = g + vpt(n + g, jit, T) - f;
+        float dd = dot(r, r);
+        if (dd < md) { md = dd; mr = r; mg = g; }
+    }
+    // ふちまでの距離：となりの点との中点（垂直二等分線）までの距離
+    float bd = 8.0;
+    for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++) {
+        float2 g = mg + float2(i, j);
+        float2 r = g + vpt(n + g, jit, T) - f;
+        float2 dv = r - mr;
+        if (dot(dv, dv) > 1e-5) bd = min(bd, dot(0.5 * (mr + r), normalize(dv)));
+    }
+    float F1 = sqrt(md);
+    float fw = N * 1.15 / H;
+    float2 id = n + mg;
+    float hc = h2(id);
+    int cm = int(u.b.z + 0.5);
+    float3 col = cm == 0 ? u.color.rgb : (cm == 1 ? pal(u, hc) : hue(hc + u.time * 0.02));
+    float pulse = 1.0 - u.b.w * 0.5 * (1.0 + sin(u.time * 2.5 + hc * 6.2831853));
+    int mode = int(u.a.z + 0.5);
+    float w = u.a.w;
+    float3 rgb; float a;
+    if (mode == 0) {
+        float line = 1.0 - smoothstep(w * 0.5 - fw, w * 0.5 + fw, bd);
+        float glow = exp(-bd / 0.08) * u.b.x * 0.7;
+        rgb = col * (line + glow * (1.0 - line)) * pulse; a = saturate(mx3(rgb));
+    } else if (mode == 1) {
+        float inside = smoothstep(w * 0.5 - fw, w * 0.5 + fw, bd);
+        float edge = exp(-max(bd - w * 0.5, 0.0) / 0.05) * u.b.x * 0.5;
+        rgb = col * inside * pulse * (0.75 + edge); a = inside;
+    } else if (mode == 2) {
+        float ball = pow(saturate(1.0 - F1 / 0.75), 1.5);
+        rgb = col * ball * pulse * (1.0 + u.b.x); a = saturate(mx3(rgb));
+    } else {
+        float crack = smoothstep(w * 0.25 - fw, w * 0.25 + fw, bd);
+        rgb = col * crack * pulse; a = 1.0;
+    }
+    return float4(rgb, a);
+}
+
+// ===== 炎 =====
+// a = 高さ, 進んだ量, 細かさ, ゆらぎ / b = 幅, 色の付け方, 火の粉, 煙 / c.x = 向き
+fragment float4 g2_fire(VO in [[stage_in]], constant MU& u [[buffer(0)]], texture2d<float> nt [[texture(0)]]) {
+    float H = u.size.y;
+    float A = u.size.x / max(H, 1.0);
+    int dir = int(u.c.x + 0.5);
+    float x, y, span;
+    if (dir == 0) { y = 1.0 - in.uv.y; x = (in.uv.x - 0.5) * A; span = A; }
+    else if (dir == 1) { y = in.uv.y; x = (in.uv.x - 0.5) * A; span = A; }
+    else if (dir == 2) { y = (1.0 - in.uv.x) * A; x = in.uv.y - 0.5; span = 1.0; }
+    else { y = in.uv.x * A; x = in.uv.y - 0.5; span = 1.0; }
+    float T = u.a.y;
+    float hgt = max(u.a.x, 0.05);
+    float det = u.a.z * 2.5;
+    float fl = u.a.w;
+    float2 q = float2(x, y * 0.6) * det;              // 縦に伸びた炎の形
+    q.x += sin(y * 4.0 - T * 1.3) * fl * 0.25 * det + (n1(y * 2.0 - T * 0.5) - 0.5) * fl * det * 0.6;
+    float n0 = fbmT3(nt, q * 0.5 + float2(3.1, -T * 0.6));
+    float nv = fbmT3(nt, q + float2(n0 * 1.2, -T * 1.2 + n0 * 0.8));
+    float heat = nv * 1.6 - 0.2 - y / hgt * 0.8;
+    // 幅：1 で画面いっぱい。狭いと真ん中のたき火（上へ行くほど細く）
+    float hw = u.b.x >= 0.999 ? 1e4 : u.b.x * span * 0.5 * (1.0 - 0.6 * saturate(y / hgt));
+    heat -= smoothstep(hw * 0.4, hw, abs(x)) * 0.9;
+    float h = saturate(heat);
+    int cm = int(u.b.y + 0.5);
+    float3 rgb;
+    float a = saturate(h * 3.0);
+    if (cm == 0) rgb = float3(smoothstep(0.0, 0.3, h), smoothstep(0.25, 0.7, h) * 0.95, smoothstep(0.65, 1.0, h));
+    else if (cm == 1) rgb = float3(smoothstep(0.6, 1.0, h) * 0.9, smoothstep(0.35, 0.9, h), smoothstep(0.0, 0.35, h));
+    else if (cm == 2) rgb = pal(u, h) * a;
+    else rgb = u.color.rgb * saturate(h * 1.6);
+    rgb = min(rgb, float3(a));
+    // 火の粉
+    if (u.b.z > 0.0) {
+        float cell = 0.035;
+        float2 g = float2(x + sin(y * 5.0 + T) * 0.02, y - T * 0.35) / cell;
+        float2 id = floor(g), gf = fract(g);
+        if (h2(id + 7.7) < 0.1 * u.b.z && abs(x) < hw) {
+            float2 sp = 0.2 + 0.6 * h22(id);
+            float dpx = length(gf - sp) * cell * H;
+            float s = exp(-dpx * dpx / max(2.0 * H / 1080.0, 0.8)) * (1.0 - saturate(y / (hgt * 1.8)));
+            rgb += float3(1.0, 0.6, 0.2) * s; a = max(a, s);
+        }
+    }
+    // 煙（上のほうに薄い灰色）
+    if (u.b.w > 0.0) {
+        float sm = fbmT3(nt, q * 0.6 + float2(9.0, -T * 0.4));
+        float sv = smoothstep(0.4, 0.8, sm) * smoothstep(hgt * 0.4, hgt, y) * (1.0 - smoothstep(hgt * 1.2, hgt * 2.0, y)) * u.b.w
+                 * (1.0 - smoothstep(hw * 0.6, hw * 1.2, abs(x)));
+        rgb += float3(0.2) * sv * (1.0 - a);
+        a = max(a, sv * 0.55);
+    }
+    return float4(rgb, a);
+}
 """
 
 /// 第 2 弾のジェネレーターを描く道具
@@ -425,12 +714,20 @@ final class MoreGen2Renderer {
     /// ノイズの乱数の表（シンセウェイブと同じ作り方。決まった種なので、いつも同じ形）
     private let noiseTable: MTLTexture? = MoreGenRenderer.makeNoiseTable(device: MetalContext.shared.device)
     /// 文字の雨の字の絵（横 8 字 × 縦 8 段。縮めて描くので、小さい絵も用意する）
-    private lazy var rainAtlas: MTLTexture? = Self.makeRainAtlas(device: device)
-    private var atlasReady = false
+    /// 作るのは init の 1 回だけ（render はメインスレッドの見本からも描画スレッドからも呼ばれるので、あとから作らない）
+    private let rainAtlas: MTLTexture?
 
     private init() {
+        // 字の絵と、縮めた絵（ミップマップ）を作って、できあがるまで待つ
+        rainAtlas = Self.makeRainAtlas(device: MetalContext.shared.device)
+        if let atlas = rainAtlas, let cb = MetalContext.shared.queue.makeCommandBuffer(), let blit = cb.makeBlitCommandEncoder() {
+            blit.generateMipmaps(for: atlas)
+            blit.endEncoding()
+            cb.commit()
+            cb.waitUntilCompleted()
+        }
         let lib = try! device.makeLibrary(source: moreGen2Source, options: nil)
-        func r(_ v: String, _ f: String, maxBlend: Bool = false) -> MTLRenderPipelineState {
+        func r(_ v: String, _ f: String, maxBlend: Bool = false, additive: Bool = false) -> MTLRenderPipelineState {
             let d = MTLRenderPipelineDescriptor()
             d.vertexFunction = lib.makeFunction(name: v)
             d.fragmentFunction = lib.makeFunction(name: f)
@@ -443,12 +740,22 @@ final class MoreGen2Renderer {
                 c.sourceRGBBlendFactor = .one; c.destinationRGBBlendFactor = .one
                 c.sourceAlphaBlendFactor = .one; c.destinationAlphaBlendFactor = .one
             }
+            if additive {
+                // 重なった粒は足して明るく（花火）
+                let c = d.colorAttachments[0]!
+                c.isBlendingEnabled = true
+                c.rgbBlendOperation = .add; c.alphaBlendOperation = .add
+                c.sourceRGBBlendFactor = .one; c.destinationRGBBlendFactor = .one
+                c.sourceAlphaBlendFactor = .one; c.destinationAlphaBlendFactor = .one
+            }
             return try! device.makeRenderPipelineState(descriptor: d)
         }
-        for f in ["g2_plasma", "g2_aurora", "g2_nebula", "g2_truchet", "g2_hex", "g2_rain", "g2_moire"] {
+        for f in ["g2_plasma", "g2_aurora", "g2_nebula", "g2_truchet", "g2_hex", "g2_rain", "g2_moire",
+                  "g2_sunburst", "g2_ridge", "g2_bokeh", "g2_spiral", "g2_voronoi", "g2_fire"] {
             pipes[f] = r("g2_full", f)
         }
         pipes["seg"] = r("g2_seg_v", "g2_seg_f", maxBlend: true)
+        pipes["segAdd"] = r("g2_seg_v", "g2_seg_f", additive: true)
     }
 
     private func full(_ dst: MTLTexture, _ name: String, _ u: inout MoreFXUniforms, cb: MTLCommandBuffer, texture: MTLTexture? = nil) {
@@ -498,11 +805,6 @@ final class MoreGen2Renderer {
             full(dst, "g2_hex", &u, cb: cb)
         case .codeRain:
             guard let atlas = rainAtlas else { return }
-            if !atlasReady, let blit = cb.makeBlitCommandEncoder() {
-                blit.generateMipmaps(for: atlas)
-                blit.endEncoding()
-                atlasReady = true
-            }
             u.a = SIMD4(v(0), v(1), v(2), v(3))
             u.b = SIMD4(v(4), v(5), v(6), v(7).rounded())
             full(dst, "g2_rain", &u, cb: cb, texture: atlas)
@@ -513,6 +815,40 @@ final class MoreGen2Renderer {
             full(dst, "g2_moire", &u, cb: cb)
         case .wireframe:
             drawSegs(Self.wireframeSegs(e, v: v, t: t, size: SIMD2(Float(dst.width), Float(dst.height))), into: dst, cb: cb)
+        // ===== 第 3 弾 =====
+        case .sunburst:
+            u.a = SIMD4(v(0), v(1) * deg * t, v(2), v(3))
+            u.b = SIMD4(v(4), v(5), v(6), v(7))
+            u.c = SIMD4(v(8), v(9).rounded(), v(10), t * v(11) * 3)
+            full(dst, "g2_sunburst", &u, cb: cb)
+        case .ridgeLines:
+            u.a = SIMD4(v(0), v(1), v(2), t * v(3))
+            u.b = SIMD4(v(4), v(5), v(6), v(7))
+            u.c = SIMD4(v(8).rounded(), v(9), 0, 0)
+            full(dst, "g2_ridge", &u, cb: cb)
+        case .bokeh:
+            u.a = SIMD4(v(0), v(1), v(2), t * v(3))
+            u.b = SIMD4(v(4), v(5), v(6).rounded(), v(7).rounded())
+            u.c = SIMD4(v(8), v(9), 0, 0)
+            full(dst, "g2_bokeh", &u, cb: cb)
+        case .spiral:
+            u.a = SIMD4(v(0), v(1), v(2) * t / 360, v(3))
+            u.b = SIMD4(v(4).rounded(), v(5), v(6), v(7))
+            u.c = SIMD4(v(8).rounded(), v(9), v(10), 0)
+            full(dst, "g2_spiral", &u, cb: cb)
+        case .voronoi:
+            u.a = SIMD4(v(0), t * v(1), v(2).rounded(), v(3))
+            u.b = SIMD4(v(4), v(5), v(6).rounded(), v(7))
+            full(dst, "g2_voronoi", &u, cb: cb)
+        case .fire:
+            u.a = SIMD4(v(0), t * v(1), v(2), v(3))
+            u.b = SIMD4(v(4), v(5).rounded(), v(6), v(7))
+            u.c = SIMD4(v(8).rounded(), 0, 0, 0)
+            full(dst, "g2_fire", &u, cb: cb, texture: noiseTable)
+        case .lissajous:
+            drawSegs(Self.lissajousSegs(e, v: v, t: t, size: SIMD2(Float(dst.width), Float(dst.height))), into: dst, cb: cb)
+        case .fireworks:
+            drawSegs(Self.fireworkSegs(e, v: v, t: t, size: SIMD2(Float(dst.width), Float(dst.height))), into: dst, cb: cb, pipe: "segAdd")
         default:
             return
         }
@@ -522,14 +858,14 @@ final class MoreGen2Renderer {
 
     struct Seg { var ab: SIMD4<Float>; var col: SIMD4<Float>; var info: SIMD4<Float> }
 
-    private func drawSegs(_ segs: [Seg], into dst: MTLTexture, cb: MTLCommandBuffer) {
+    private func drawSegs(_ segs: [Seg], into dst: MTLTexture, cb: MTLCommandBuffer, pipe: String = "seg") {
         let rpd = MTLRenderPassDescriptor()
         rpd.colorAttachments[0].texture = dst
         rpd.colorAttachments[0].loadAction = .clear
         rpd.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
         rpd.colorAttachments[0].storeAction = .store
         guard let enc = cb.makeRenderCommandEncoder(descriptor: rpd) else { return }
-        if !segs.isEmpty, let p = pipes["seg"] {
+        if !segs.isEmpty, let p = pipes[pipe] {
             enc.setRenderPipelineState(p)
             var size = SIMD2<Float>(Float(dst.width), Float(dst.height))
             guard let buf = device.makeBuffer(bytes: segs, length: MemoryLayout<Seg>.stride * segs.count, options: .storageModeShared) else {
@@ -659,6 +995,189 @@ final class MoreGen2Renderer {
         }
         return segs
     }
+
+    // MARK: - 線と点の色（CPU で作る線分用）
+
+    private static func palColor(_ palette: [RGB], _ x: Float) -> SIMD3<Float> {
+        let p = palette.isEmpty ? [RGB.black, RGB.white] : palette
+        func c(_ r: RGB) -> SIMD3<Float> { SIMD3(Float(r.r), Float(r.g), Float(r.b)) }
+        if p.count == 1 { return c(p[0]) }
+        let f = min(max(x, 0), 1) * Float(p.count - 1)
+        let i = min(Int(f), p.count - 2), w = f - Float(i)
+        return c(p[i]) * (1 - w) + c(p[i + 1]) * w
+    }
+    private static func hueColor(_ h: Float) -> SIMD3<Float> {
+        let x = h - floor(h)
+        func ch(_ o: Float) -> Float { let y = x + o; return min(max(abs((y - floor(y)) * 6 - 3) - 1, 0), 1) }
+        return SIMD3(ch(0), ch(2.0 / 3), ch(1.0 / 3))
+    }
+    /// 決まった乱数（0〜1）。花火の 1 発ごと・粒ごとの値に
+    static func hash(_ a: Int, _ b: Int, _ c: Int = 0) -> Float {
+        var z = UInt64(bitPattern: Int64(a)) &* 0x9E37_79B9_7F4A_7C15 ^ UInt64(bitPattern: Int64(b)) &* 0xBF58_476D_1CE4_E5B9
+            ^ UInt64(bitPattern: Int64(c)) &* 0x94D0_49BB_1331_11EB
+        z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
+        z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
+        z ^= z >> 31
+        return Float(z >> 40) / Float(1 << 24)
+    }
+
+    // MARK: - リサージュ
+
+    /// sin を組み合わせた曲線を、折れ線（1 本 384 区切り）の線分にする
+    static func lissajousSegs(_ e: Effect, v: (Int) -> Float, t: Float, size: SIMD2<Float>) -> [Seg] {
+        let deg = Float.pi / 180
+        let A = size.x / max(size.y, 1), k = size.y / 1080
+        let fx = v(0).rounded(), fy = v(1).rounded()
+        let phase = v(2) * deg * t
+        let drift = v(3) * t * 2 * .pi              // 縦の位相がゆっくりずれて、形が変わる
+        let width = v(4) * k, glow = v(5) * 9 * k
+        let trail = v(6), sz = v(7)
+        let deep = v(8) > 0.5
+        let cm = Int(v(9).rounded())
+        let count = min(max(Int(v(10).rounded()), 1), 4)
+        let col = SIMD3<Float>(Float(e.color.r), Float(e.color.g), Float(e.color.b))
+        let M = 384
+        let full = trail >= 0.999
+        // 残像が短いときは、点が曲線の上を走る（先頭が明るく、後ろは暗く）
+        let head = t * 2 * .pi * 0.3
+        let ry = t * 0.5, rx: Float = 0.45
+        var segs: [Seg] = []
+        segs.reserveCapacity(M * count)
+        for j in 0..<count {
+            let pj = Float(j) * 0.55
+            func point(_ s: Float) -> SIMD2<Float> {
+                var x = sin(fx * s + phase + pj), y = sin(fy * s + drift + pj * 0.5)
+                var f: Float = 1
+                if deep {
+                    let z0 = sin((fx + fy) * 0.5 * s + phase * 0.7 + pj)
+                    let x1 = x * cos(ry) + z0 * sin(ry), z1 = -x * sin(ry) + z0 * cos(ry)
+                    let y1 = y * cos(rx) - z1 * sin(rx), z2 = y * sin(rx) + z1 * cos(rx)
+                    f = 1 / (1 - 0.3 * z2)
+                    x = x1; y = y1
+                }
+                return SIMD2(0.5 + x * f * 0.45 * sz * 1.25 / A, 0.5 - y * f * 0.45 * sz)
+            }
+            let span: Float = full ? 2 * .pi : trail * 2 * .pi
+            let s0: Float = full ? 0 : head - span
+            var prev = point(s0)
+            for i in 1...M {
+                let fr = Float(i) / Float(M)
+                let s = s0 + span * fr
+                let p = point(s)
+                let b: Float = full ? 1 : pow(fr, 1.5)
+                let c: SIMD3<Float> = cm == 0 ? col : (cm == 1 ? hueColor(s / (2 * .pi) + Float(j) * 0.25 + t * 0.05) : palColor(e.palette, (s / (2 * .pi)).truncatingRemainder(dividingBy: 1).magnitude))
+                segs.append(Seg(ab: SIMD4(prev.x, prev.y, p.x, p.y), col: SIMD4(c.x, c.y, c.z, b), info: SIMD4(width, glow, 0, 0)))
+                prev = p
+            }
+        }
+        return segs
+    }
+
+    // MARK: - 花火
+
+    /// 時間だけで決める花火：k 発目の生まれた時刻・場所・色はハッシュで、粒の場所は「生まれてからの時間」で出す
+    static func fireworkSegs(_ e: Effect, v: (Int) -> Float, t: Float, size: SIMD2<Float>) -> [Seg] {
+        let A = size.x / max(size.y, 1), k = size.y / 1080
+        let rate = max(v(0), 0.05), sz = v(1)
+        let n = min(max(Int(v(2).rounded()), 4), 120)
+        let heavy = v(3), tail = v(4), sparkle = v(5)
+        let streak = v(6) > 0.5
+        let cm = Int(v(7).rounded()), glowAmt = v(8)
+        let shape = Int(v(9).rounded())
+        let col = SIMD3<Float>(Float(e.color.r), Float(e.color.g), Float(e.color.b))
+        let life: Float = shape == 2 ? 3.6 : 2.2
+        let drag: Float = shape == 2 ? 1.3 : 2.2
+        let grav: Float = heavy * 0.35 * (shape == 2 ? 1.6 : 1)
+        let dot = (3 + sz * 5) * k, glow = glowAmt * 8 * k
+        var segs: [Seg] = []
+        func uv(_ p: SIMD2<Float>) -> SIMD2<Float> { SIMD2(p.x / A, p.y) }
+        let kmax = Int(floor(t * rate))
+        var alive = 0
+        var kk = kmax
+        // 新しい発から順に、生きているものを 6 発まで
+        while kk >= 0 && alive < 6 {
+            let ki = kk
+            kk -= 1
+            let tk = (Float(ki) + 0.7 * hash(ki, 1)) / rate
+            if t < tk { continue }
+            let rise: Float = 0.8 + 0.4 * hash(ki, 5)
+            if t - tk > rise + life { if Float(kmax - ki) / rate > rise + life + 2 { break } else { continue } }
+            alive += 1
+            let bx = (0.12 + 0.76 * hash(ki, 2)) * A
+            let by: Float = 0.18 + 0.3 * hash(ki, 3)
+            let hc = hash(ki, 4)
+            func color(_ inner: Bool) -> SIMD3<Float> {
+                switch cm {
+                case 0: return hueColor(hc + (inner ? 0.5 : 0))
+                case 1: return palColor(e.palette, inner ? 1 - hc : hc)
+                default: return col
+                }
+            }
+            if t < tk + rise {
+                // 上がっていく玉と筋
+                let pr = (t - tk) / rise
+                let y = 1.02 + (by - 1.02) * (1 - (1 - pr) * (1 - pr))
+                let x = bx + 0.01 * sin(pr * 9 + hc * 6)
+                let c = mix3(color(false), SIMD3(repeating: 1), 0.6)
+                if streak {
+                    let y2 = y + 0.06 * (1 - pr)
+                    segs.append(Seg(ab: SIMD4(uv(SIMD2(x, y)).x, y, uv(SIMD2(x, y2)).x, y2), col: SIMD4(c.x, c.y, c.z, 0.45), info: SIMD4(dot * 0.7, glow * 0.5, 0, 0)))
+                }
+                segs.append(Seg(ab: SIMD4(x / A, y, x / A, y), col: SIMD4(c.x, c.y, c.z, 0.9), info: SIMD4(dot, glow, 0, 0)))
+                continue
+            }
+            let a = t - tk - rise
+            let burst = SIMD2<Float>(bx, by)
+            func pos(_ dir: SIMD2<Float>, _ sp: Float, _ a: Float) -> SIMD2<Float> {
+                let m = (1 - exp(-drag * a)) / drag
+                return burst + dir * sp * m + SIMD2(0, grav * (a - m) / drag)
+            }
+            // しばらく明るいまま広がって、後半で消えていく
+            let fade = (1 - smoothstep01((a / life - 0.35) / 0.65)) * 1.2
+            let flash = 1 - min(a * 4, 1)
+            for i in 0..<n {
+                let ang = 2 * Float.pi * (Float(i) + 0.3 * hash(ki, i, 7)) / Float(n)
+                let dir = SIMD2<Float>(cos(ang), sin(ang))
+                let inner = shape == 3 && i % 2 == 1
+                var sp: Float
+                switch shape {
+                case 1: sp = 1
+                case 2: sp = 0.8 + 0.2 * hash(ki, i, 8)
+                case 3: sp = inner ? 0.55 : 1
+                default:
+                    // 球に飛び散った粒を横から見た形（ふちが濃く、中も埋まる）
+                    let z = hash(ki, i, 8) * 2 - 1
+                    sp = 0.15 + 0.85 * sqrt(1 - z * z)
+                }
+                sp *= sz * 2.2
+                var b = fade + flash * 0.8
+                if a / life > 0.55 && sparkle > 0 {
+                    let on: Float = hash(ki, i, Int(t * 18)) > 0.5 ? 1 : 0
+                    b *= 1 - sparkle * (1 - on)
+                }
+                if b <= 0.01 { continue }
+                let c = mix3(color(inner), SIMD3(repeating: 1), 0.5 * flash)
+                let p = pos(dir, sp, a)
+                segs.append(Seg(ab: SIMD4(p.x / A, p.y, p.x / A, p.y), col: SIMD4(c.x, c.y, c.z, min(b, 1.5)), info: SIMD4(dot, glow, 0, 0)))
+                // 尾：少し前の場所との間を、だんだん薄い線で
+                if tail > 0.01 {
+                    var q = p
+                    for j in 1...3 {
+                        let aj = a - Float(j) * 0.06 * tail * (shape == 2 ? 2 : 1)
+                        if aj <= 0 { break }
+                        let r = pos(dir, sp, aj)
+                        let bj = b * 0.7 * (1 - Float(j) / 4)
+                        segs.append(Seg(ab: SIMD4(q.x / A, q.y, r.x / A, r.y), col: SIMD4(c.x, c.y, c.z, bj), info: SIMD4(dot * 0.7, glow * 0.4, 0, 0)))
+                        q = r
+                    }
+                }
+            }
+        }
+        return segs
+    }
+
+    private static func smoothstep01(_ x: Float) -> Float { let c = min(max(x, 0), 1); return c * c * (3 - 2 * c) }
+    private static func mix3(_ a: SIMD3<Float>, _ b: SIMD3<Float>, _ w: Float) -> SIMD3<Float> { a * (1 - w) + b * w }
 
     // MARK: - 文字の雨の字
 
