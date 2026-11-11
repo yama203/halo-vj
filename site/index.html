@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Halo VJ</title>
-<meta name="description" content="Mac 用の VJ ソフト。シーン、FX パッド、HAP、40 種類のジェネレーター、37 種類のエフェクト、Syphon・NDI・OSC・MIDI・Art-Net、出力のマッピング。無料。">
+<meta name="description" content="Mac 用の VJ ソフト。シーン、FX パッド、HAP、48 種類のジェネレーター、43 種類のエフェクト、Syphon・NDI・OSC・MIDI・Art-Net、出力のマッピング。無料。">
 <meta property="og:title" content="Halo VJ">
 <meta property="og:description" content="Mac 用の VJ ソフト。無料。">
 <meta property="og:type" content="website">
@@ -317,7 +317,7 @@
       <div class="card" style="--c: var(--cyan)">
         <div class="badge"><svg class="ic" aria-hidden="true"><use href="#i-spark"/></svg></div>
         <h3><span lang="ja">ジェネレーターとエフェクト</span><span lang="en">Generators and effects</span></h3>
-        <p><span lang="ja">素材がなくても使えるジェネレーターを 40 種類、エフェクトを 37 種類収録。マスクや調整レイヤーも使えます。</span><span lang="en">40 generators that keep moving without any footage. 37 effects, masks and adjustment layers.</span></p>
+        <p><span lang="ja">素材がなくても使えるジェネレーターを 48 種類、エフェクトを 43 種類収録。マスクや調整レイヤーも使えます。</span><span lang="en">48 generators that keep moving without any footage. 43 effects, masks and adjustment layers.</span></p>
         <div class="tags"><span lang="ja">テキスト・時計</span><span lang="en">Text and clock</span><span lang="ja">カメラ入力</span><span lang="en">Camera input</span><span lang="ja">サイコロ・プリセット</span><span lang="en">Dice and presets</span></div>
       </div>
       <div class="card" style="--c: var(--cyan)">
@@ -336,7 +336,7 @@
         <div class="badge"><svg class="ic" aria-hidden="true"><use href="#i-screen"/></svg></div>
         <h3><span lang="ja">出力</span><span lang="en">Output</span></h3>
         <p><span lang="ja">複数プロジェクターへのマッピング（メッシュ・切り抜き・マスク）、エッジブレンディング、コーナーピン補正、テストパターン、録画に対応しています。</span><span lang="en">Mapping across projectors (mesh, crop and masks), edge blending, corner pin, test patterns and recording.</span></p>
-        <div class="tags"><span lang="ja">マッピング</span><span lang="en">Mapping</span><span lang="ja">録画</span><span lang="en">Recording</span></div>
+        <div class="tags"><span lang="ja">マッピング</span><span lang="en">Mapping</span><span lang="ja">録画</span><span lang="en">Recording</span><span lang="ja">静止画で保存</span><span lang="en">Snapshots</span></div>
       </div>
     </div>
     <div class="flow">
@@ -650,7 +650,15 @@
       ['g-hexGrid', '六角のタイル', 'Hexagon Tiles'],
       ['g-codeRain', '文字の雨', 'Code Rain'],
       ['g-wireframe', '回るワイヤーフレーム', 'Spinning Wireframe'],
-      ['g-moire', 'モアレ', 'Moiré']
+      ['g-moire', 'モアレ', 'Moiré'],
+      ['g-sunburst', '放射の光', 'Sunburst'],
+      ['g-ridgeLines', '波打つ稜線', 'Ridge Lines'],
+      ['g-bokeh', '玉ぼけ', 'Bokeh'],
+      ['g-spiral', 'うず巻き', 'Spiral'],
+      ['g-voronoi', '細胞（ボロノイ）', 'Cells (Voronoi)'],
+      ['g-lissajous', 'リサージュ', 'Lissajous'],
+      ['g-fireworks', '花火', 'Fireworks'],
+      ['g-fire', '炎', 'Fire']
     ];
     var fx = [
       ['e-kaleidoscope', '万華鏡', 'Kaleidoscope', '光の流れ', 'Light Flow'],
@@ -668,7 +676,13 @@
       ['e-keyer', 'キー抜き', 'Keyer', 'フラクタル', 'Fractal'],
       ['e-ledWall', 'LED パネル', 'LED Wall', 'シンセウェイブ', 'Synthwave'],
       ['e-slices', 'スライス', 'Slices', 'レーザーショー', 'Laser Show'],
-      ['e-shake', 'ゆれ', 'Shake', 'シンセウェイブ', 'Synthwave']
+      ['e-shake', 'ゆれ', 'Shake', 'シンセウェイブ', 'Synthwave'],
+      ['e-film', 'フィルム', 'Film', 'シンセウェイブ', 'Synthwave'],
+      ['e-tiltShift', 'ミニチュア風', 'Tilt-Shift', 'シンセウェイブ', 'Synthwave'],
+      ['e-emboss', '浮き彫り', 'Emboss', 'フラクタル', 'Fractal'],
+      ['e-stretch', '引き伸ばし', 'Stretch', 'レーザーショー', 'Laser Show'],
+      ['e-displace', '明るさでずらす', 'Shift by Brightness', 'フラクタル', 'Fractal'],
+      ['e-droste', '入れ子', 'Droste', 'レーザーショー', 'Laser Show']
     ];
     function tile(x, isFx) {
       var base = isFx ? '<small><span lang="ja">' + x[3] + 'に適用</span><span lang="en">on ' + x[4] + '</span></small>' : '';

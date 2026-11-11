@@ -78,10 +78,11 @@ PROFILE=1 tools/convert_to_prores.sh clip1.mov          # ProRes 422 LT（軽量
 - `Layer.swift` … レイヤーの設定（重ね方・不透明度・音量・切り替えフェード）、フェード計算
 - `SettingsView.swift` … 設定ウィンドウ（⌘,）
 - `Effects.swift` … エフェクトの種類と値（足すときは `EffectKind` に追加し、シェーダー `feffect` に処理を書く。一覧には自動で並ぶ）。`EffectBrowser.swift` … エフェクト一覧とドラッグ＆ドロップ。処理は `Metal.swift` の `feffect` シェーダーと `EffectProcessor`（クリップ → レイヤー → コンポジションの順）
-- `MoreKinds.swift` … 追加のエフェクト・ジェネレーターの名前・印・値・説明・分類。描き方は `MoreEffects.swift`／`MoreGenerators.swift`、第 2 弾（ぼかし・レンズ・極座標・タイル・キー抜き・LED パネル・スライス・ゆれ／プラズマ・オーロラ・星雲・トルシェ模様・六角のタイル・文字の雨・回るワイヤーフレーム・モアレ）は `MoreEffects2.swift`／`MoreGenerators2.swift`
+- `MoreKinds.swift` … 追加のエフェクト・ジェネレーターの名前・印・値・説明・分類。描き方は `MoreEffects.swift`／`MoreGenerators.swift`、第 2 弾・第 3 弾（ぼかし・レンズ・極座標・タイル・キー抜き・LED パネル・スライス・ゆれ・フィルム・ミニチュア風・浮き彫り・引き伸ばし・明るさでずらす・入れ子／プラズマ・オーロラ・星雲・トルシェ模様・六角のタイル・文字の雨・回るワイヤーフレーム・モアレ・放射の光・波打つ稜線・玉ぼけ・うず巻き・細胞・リサージュ・花火・炎）は `MoreEffects2.swift`／`MoreGenerators2.swift`
 - `EffectDice.swift` … エフェクトのカードのサイコロ（値をランダムに。⌥ を押しながらで少しだけ。動きを付けた値・不透明度・画質・文字などは変えない）
 - `EffectPresets.swift` … エフェクトのプリセット（値の組を名前で保存。種類ごとで、どのプロジェクトでも使える。`~/Library/Application Support/Halo VJ/effect-presets.json`）
 - `EffectFavorites.swift` … エフェクト・ジェネレーターの「お気に入り」（星）と「最近使った」（8 個まで）。パネルと ⌘E のいちばん上に出る。アプリ共通の設定に保存（テスト・書き出しの起動では保存しない）
+- `Snapshot.swift` … 出力のスナップショット。今の絵（マッピング・ブラックアウトの前の合成）を PNG で録画と同じフォルダに保存し、「クリップにする」なら空いているスロットに静止画のクリップとして置く（メニュー「出力」・⌘⇧P、OSC `/halo/snapshot`・`/halo/snapshot/clip`）
 - `LossyDecode.swift` … 保存したエフェクトの並びを、読めない要素（知らない種類など）だけ飛ばして読む。新しい版で足したエフェクトが混ざっていても、ほかの中身は読める
 - `Animation.swift` / `AnimationViews.swift` … パラメーターのアニメーション（時刻から値を計算するので描画スレッドで毎フレーム求める）、BPM の時計とタップテンポ、その UI
 - 描画は専用スレッド（CVDisplayLink）で vsync ごとに行う。画面操作でメインスレッドが重くても出力は止まらない
