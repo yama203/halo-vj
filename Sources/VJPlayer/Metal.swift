@@ -2444,6 +2444,17 @@ final class RenderLoop {
                 syphonKey = key
             }
         }
+        // 今の絵を 1 枚（スナップショット）：頼まれたコマは、画面が隠れていても合成する（コンポジションの大きさで）
+        let snap = engine.takeSnapshotRequest()
+        var snapKey: Int?, snapSize = (0, 0)
+        if snap != nil {
+            let a = params.compAspect > 0.05 ? params.compAspect : 16.0 / 9
+            let auto = (max(Int((1080 * a).rounded()), 2), 1080)
+            let key = sharedKey(auto.0, auto.1)
+            snapSize = fixedSize ?? shared[key]?.size ?? auto
+            snapKey = key
+            shared[key] = (shared[key]?.size ?? snapSize, true)
+        }
         var sharedTextures: [Int: MTLTexture] = [:]
         sharedCompositors = sharedCompositors.filter { shared[$0.key] != nil }
         padProcessors = padProcessors.filter { shared[$0.key] != nil }
@@ -2504,6 +2515,10 @@ final class RenderLoop {
             let tex = sharedTextures[recKey]
             let fitM = params.format.fitMatrix(screenAspect: Double(rw) / Double(rh))
             Recorder.shared.capture(tex, master: params.compMaster, fit: fitM, now: now)
+        }
+        if let snap, let snapKey {
+            // 全部止まっているときは合成の絵が無いので、黒になる
+            Snapshot.capture(sharedTextures[snapKey], width: snapSize.0, height: snapSize.1, request: snap)
         }
 
         for (id, layer, kind, output) in current {
@@ -2570,6 +2585,9 @@ final class RenderLoop {
     func lastScenePreview() -> MTLTexture? { lock.withLock { _lastScenePreview } }
     /// テスト用：出力の合成を差し替える
     func setLastCompositeForTest(_ t: MTLTexture?) { lock.withLock { _lastComposite = t } }
+    /// テスト用：1 コマ描く（画面が無くて CVDisplayLink が回らないときも、呼んだスレッドでコマを進める。
+    /// start() していないループでだけ使う）
+    func tickForTest() { if link == nil { tick() } }
 
     /// 縦横比を 1/100 に丸めた番号（同じ縦横比の画面は 1 つの合成を使い回す）
     private static func aspectKey(_ w: Int, _ h: Int) -> Int {

@@ -460,6 +460,7 @@ enum SelfTest {
 
         // 18. 録画
         testRecording(check: check, wait: wait)
+        testSnapshot(paths: paths, check: check, wait: wait)
 
         // 19. 音に反応させる
         testAudioReactive(check: check, wait: wait)

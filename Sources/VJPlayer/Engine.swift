@@ -471,6 +471,10 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
     private var previewFrame: FrameHolder?
     private let renderLock = NSLock()
     private var renderState = RenderState()
+    /// 「次のコマで今の絵を 1 枚ほしい」という頼み（スナップショット。renderLock の中で触る）
+    private var snapshotRequest: SnapshotRequest?
+    /// スナップショットを取っている途中か（頼んでから PNG を書き終わるまで。メインスレッド）
+    var snapshotBusy = false
     /// ポスタライズ時間（クリップ）の、最後にフレームを取ったコマ番号（描画スレッドだけが触る）
     private var clipTicks: [ObjectIdentifier: Int64] = [:]
     /// 各レイヤーで表示中のフレーム（renderLock の中で触る）
@@ -1672,6 +1676,33 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
     /// コーナーピン・テストパターン・マスター不透明度・ブラックアウト（描画スレッド用）
     /// 描く回数（1 秒あたり。0 = ディスプレイに合わせる）。描画スレッドから
     func targetFPS() -> Double { renderLock.withLock { renderState.format.fps } }
+
+    /// 次のコマの絵を頼む（すでに頼んでいれば false）
+    func requestSnapshot(_ r: SnapshotRequest) -> Bool {
+        renderLock.withLock {
+            guard snapshotRequest == nil else { return false }
+            snapshotRequest = r
+            return true
+        }
+    }
+
+    /// 頼まれている絵を受け取る（描画スレッドから。取り消すときはメインスレッドから）
+    func takeSnapshotRequest() -> SnapshotRequest? {
+        renderLock.withLock {
+            defer { snapshotRequest = nil }
+            return snapshotRequest
+        }
+    }
+
+    /// まだ描画スレッドが受け取っていない頼みを取り消す（取り消せたら true）
+    func cancelSnapshotRequest(_ id: UUID) -> Bool {
+        renderLock.withLock {
+            guard snapshotRequest?.id == id else { return false }
+            snapshotRequest = nil
+            return true
+        }
+    }
+
     /// OSC の送信用：今の BPM の時計（どのスレッドからでも）
     func beatClockForOSC() -> BeatClock { renderLock.withLock { renderState.beat } }
 

@@ -1765,6 +1765,12 @@
 "変える…" = "Change…";
 "保存しました：%@" = "Saved: %@";
 "ここに保存" = "Save Here";
+"今の絵を静止画で保存" = "Save Current Frame as Image";
+"今の絵をクリップにする" = "Make Clip from Current Frame";
+"今の絵を静止画で保存する" = "Save the current frame as an image";
+"今の絵を静止画で保存して、空いているスロットにクリップとして置く" = "Save the current frame as an image and put it in an empty slot as a clip";
+"今の絵を保存できませんでした" = "Couldn't save the current frame";
+"空いているスロットが無いので、静止画の保存だけしました" = "No empty slot, so the image was only saved";
 
 /* SceneEdit.swift */
 "シーン「%@」を編集中" = "Editing scene “%@”";
