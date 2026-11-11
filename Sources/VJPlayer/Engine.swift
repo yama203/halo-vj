@@ -191,6 +191,8 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
     /// 編集中のシーンが変わったら画面（グリッドなど）も描き直す
     var sceneDraftSink: AnyCancellable?
     var sceneTween: Timer?
+    /// シーンのフェードを今すぐ最後まで進める（フェード中だけある。段の形を変える前などに呼ぶ）
+    var sceneFinish: (() -> Void)?
     /// キュー（クリップだけ）でほかのレイヤーを消している途中：消す段と、元の不透明度
     var cueFadeTimer: Timer?
     var cueFadeLayers: [Int: Double] = [:]
@@ -571,20 +573,26 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
         let l = newLayers.remove(at: r)
         newLayers.insert(l, at: t)
         let old = layers
-        func map(_ i: Int) -> Int? { newLayers.firstIndex { $0 === old[i] } }
+        func map(_ i: Int) -> Int? { old.indices.contains(i) ? newLayers.firstIndex { $0 === old[i] } : nil }
         restructure(layers: newLayers, columns: columns, layerMap: map)
         remapSceneLayers(oldCount: old.count, newCount: layers.count, map)
     }
 
     /// レイヤーを足す・消す・動かしたときに、シーンのレイヤーごとの中身も同じように並べ直す
-    private func remapSceneLayers(oldCount: Int, newCount: Int, _ map: (Int) -> Int?) {
+    private func remapSceneLayers(oldCount: Int, newCount: Int, _ rawMap: (Int) -> Int?) {
+        // 前の段の範囲の外を指す番号（前から残っている古い番号など）は、どこにも移さない
+        func map(_ i: Int) -> Int? { i >= 0 && i < oldCount ? rawMap(i) : nil }
         remapCueLayers(map)
-        // 自動操縦のレイヤーのルールも同じように付け替える（消えたレイヤーのルールはオフに）
+        // 自動操縦のレイヤーのルールも同じように付け替える。
+        // 消えたレイヤーのルールは外す（番号を残すと、オンに戻したとき別の段に効く。元に戻すで戻せる）
         if autopilot.rules.contains(where: { if case .layer = $0.target { true } else { false } }) {
             var ap = autopilot
-            for k in ap.rules.indices {
-                guard case .layer(let r) = ap.rules[k].target else { continue }
-                if let nr = map(r) { ap.rules[k].target = .layer(nr) } else { ap.rules[k].on = false }
+            ap.rules = ap.rules.compactMap { rule in
+                guard case .layer(let r) = rule.target else { return rule }
+                guard let nr = map(r) else { return nil }
+                var out = rule
+                out.target = .layer(nr)
+                return out
             }
             if ap != autopilot { autopilot = ap }
         }
@@ -708,9 +716,12 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
     private func restructure(layers newLayers: [Layer], columns newColumns: Int,
                              layerMap: (Int) -> Int?, columnMap: (Int) -> Int? = { $0 },
                              decks newDecks: [Deck]? = nil, deckMap: (Int) -> Int? = { $0 }) {
-        // シーン・キューのフェードは古い段数のまま動くので、形を変える前に終える（途中のレイヤーを読んで落ちないように）
+        // シーン・キューのフェードは古い段数のまま動くので、形を変える前に最後まで進めて終える
+        // （途中のレイヤーを読んで落ちないように。消えていく段も止め、混ぜられない設定も入れる）
+        if let f = sceneFinish { f() }
         sceneTween?.invalidate()
         sceneTween = nil
+        sceneFinish = nil
         sceneProgress = nil
         finishCueFade()
         for r in layers.indices { finishCrossfade(r) }
@@ -2029,6 +2040,7 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
         masterAudioMuted = state.masterAudioMuted ?? false
         sceneTween?.invalidate()
         sceneTween = nil
+        sceneFinish = nil
         sceneProgress = nil
         scenes = state.scenes ?? []
         heldPads = [:]

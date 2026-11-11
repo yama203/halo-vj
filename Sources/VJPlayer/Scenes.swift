@@ -153,6 +153,7 @@ extension Engine {
         defer { outputEventMute -= 1 }
         sceneTween?.invalidate()
         sceneTween = nil
+        sceneFinish = nil
         finishCueFade()
         activeSceneID = id
         let T = max(fadeOverride ?? sc.fade, 0)
@@ -252,6 +253,7 @@ extension Engine {
         func finish() {
             sceneTween?.invalidate()
             sceneTween = nil
+            sceneFinish = nil
             sceneProgress = nil
             step(1)
             // フェードが終わって消えたレイヤーを止める（出力モニターには出さない。シーンとして出した後なので）
@@ -280,6 +282,7 @@ extension Engine {
         }
         RunLoop.main.add(timer, forMode: .common)
         sceneTween = timer
+        sceneFinish = { finish() }
     }
 
     /// シーンで流すクリップ：段 → スロット番号。目印があれば目印で探し、そのクリップが今ある段で流す

@@ -131,30 +131,57 @@ extension SelfTest {
             e.masterSpeed = 1
         }
 
-        // C4. シーンのフェード中にレイヤーを消しても落ちない
+        // C4・E2. シーンのフェード中に段の形を変えると、フェードを最後まで進めてから変える（落ちない）
         do {
             let e = Engine(persistent: false)
-            for r in e.layers.indices { _ = e.placeGenerator(.solid, at: e.slotIndex(deck: 0, layer: r, column: 0)); e.trigger(e.slotIndex(deck: 0, layer: r, column: 0)) }
+            let n = e.layers.count
+            func at(_ r: Int) -> Int { e.slotIndex(deck: 0, layer: r, column: 0) }
+            for r in 0..<n { _ = e.placeGenerator(.solid, at: at(r)) }
+            // シーン：0 段目は不透明度 0.4・1 段目は流す・2 段目は止める
+            e.trigger(at(0)); e.trigger(at(1))
+            e.layers[0].opacity = 0.4
             let sc = e.addScene()
-            e.stopAll()
-            e.recallScene(sc.id, fade: 1)
+            // 今：0 段目は 1・2 段目も流している
+            e.layers[0].opacity = 1
+            e.trigger(at(2))
+            e.recallScene(sc.id, fade: 5)
+            wait(0.1)
+            let fading = e.sceneTween != nil
+            e.insertLayer(at: 0)   // 段が 1 つずつ下へずれる
+            wait(0.1)
+            check(fading && e.sceneTween == nil && e.sceneFinish == nil && e.sceneProgress == nil
+                  && abs(e.layers[1].opacity - 0.4) < 1e-6 && e.activeByLayer[2] != nil && e.activeByLayer[3] == nil,
+                  "シーン：フェード中に段を足すと、フェードを最後まで進めてから足す（消えていく段は止まり、不透明度はシーンの値）")
+            e.recallScene(sc.id, fade: 5)
             wait(0.1)
             e.removeLayer(e.layers.count - 1)
-            wait(0.2)
-            check(e.sceneTween == nil && e.sceneProgress == nil, "シーン：フェード中にレイヤーを消すと、フェードを止める（落ちない）")
+            wait(0.1)
+            check(e.sceneTween == nil && e.sceneProgress == nil, "シーン：フェード中にレイヤーを消しても落ちない")
             e.stopAll()
         }
 
-        // C5. 自動操縦のレイヤーのルールも、段の増減についてくる（消えた段のルールはオフ）
+        // C5・E1. 自動操縦のレイヤーのルールも、段の増減についてくる（消えた段のルールは外す）
         do {
             let e = Engine(persistent: false)
-            e.autopilot = AutoPilot(rules: [AutoRule(target: .layer(1)), AutoRule(target: .layer(0))])
+            e.autopilot = AutoPilot(rules: [AutoRule(target: .layer(1)), AutoRule(target: .layer(0)), AutoRule(target: .scenes)])
             e.insertLayer(at: 0)
-            let shifted = e.autopilot.rules.map(\.target) == [.layer(2), .layer(1)]
+            let shifted = e.autopilot.rules.map(\.target) == [.layer(2), .layer(1), .scenes]
             e.removeLayer(1)
-            let r = e.autopilot.rules
-            check(shifted && r[0].target == .layer(1) && r[0].on && !r[1].on,
-                  "自動操縦：段を足す・消すと、レイヤーのルールもついてくる（消えた段のルールはオフ）")
+            check(shifted && e.autopilot.rules.map(\.target) == [.layer(1), .scenes] && e.autopilot.rules.allSatisfy(\.on),
+                  "自動操縦：段を足す・消すと、レイヤーのルールもついてくる（消えた段のルールは外れる）")
+            // 最後の段のルール：段を消してから段を動かしても落ちない（古い番号が残らない）
+            let last = e.layers.count - 1
+            e.autopilot = AutoPilot(rules: [AutoRule(target: .layer(last))])
+            e.cues = [Cue(kind: .clip(deck: e.decks[0].id, layer: 99, column: 0))]   // 前からある、範囲の外を指すキュー
+            e.removeLayer(last)
+            e.moveLayer(0, to: 1)
+            check(e.autopilot.rules.isEmpty && e.layers.count == last,
+                  "自動操縦：最後の段を消してから段を動かしても落ちない（範囲の外の番号は付け替えない）")
+            // 真ん中の段のルール：消したらルールも外れて、ほかの段には効かない
+            e.autopilot = AutoPilot(rules: [AutoRule(target: .layer(1))])
+            e.removeLayer(1)
+            check(!e.autopilot.rules.contains { if case .layer = $0.target { true } else { false } },
+                  "自動操縦：真ん中の段を消すと、その段のルールは外れる（別の段を指したまま残らない）")
         }
 
         // C6. シーンの編集中に戻すと、編集中のシーンも読み直す
