@@ -6,7 +6,8 @@ extension EffectKind {
     static let moreEffects: [EffectKind] = [.bloom, .kaleidoscope, .rgbSplit, .pixelate, .edgeNeon, .zoomBlur,
                                             .pixelSort, .datamosh, .ascii, .dither, .voronoiGlass]
     static let moreGenerators: [EffectKind] = [.reactionDiffusion, .laser, .synthwave, .logoParticles, .metaballs,
-                                               .starfield, .fractal, .ripples, .lightning, .growth]
+                                               .starfield, .fractal, .ripples, .lightning, .growth,
+                                               .plasma, .aurora, .nebula, .truchet, .hexGrid, .codeRain, .wireframe, .moire]
     var isMore: Bool { Self.moreEffects.contains(self) || Self.moreGenerators.contains(self) }
 
     var moreLabel: String? {
@@ -32,6 +33,14 @@ extension EffectKind {
         case .ripples: L("水面の波紋")
         case .lightning: L("稲妻・放電")
         case .growth: L("育つ線（回路・枝）")
+        case .plasma: L("プラズマ")
+        case .aurora: L("オーロラ")
+        case .nebula: L("星雲・煙")
+        case .truchet: L("トルシェ模様（つながる曲線）")
+        case .hexGrid: L("六角のタイル")
+        case .codeRain: L("文字の雨")
+        case .wireframe: L("回るワイヤーフレーム")
+        case .moire: L("モアレ（干渉する輪）")
         default: nil
         }
     }
@@ -59,6 +68,14 @@ extension EffectKind {
         case .ripples: "water.waves.and.arrow.down"
         case .lightning: "bolt.horizontal"
         case .growth: "point.3.connected.trianglepath.dotted"
+        case .plasma: "waveform.circle"
+        case .aurora: "wind"
+        case .nebula: "cloud"
+        case .truchet: "square.grid.3x3.topleft.filled"
+        case .hexGrid: "hexagon.fill"
+        case .codeRain: "text.line.first.and.arrowtriangle.forward"
+        case .wireframe: "cube.transparent"
+        case .moire: "circle.hexagongrid"
         default: nil
         }
     }
@@ -79,6 +96,10 @@ extension EffectKind {
         case .metaballs: .shape
         case .laser, .synthwave, .starfield, .ripples, .lightning: .space
         case .logoParticles: .text
+        case .plasma, .truchet, .hexGrid, .moire: .pattern
+        case .aurora, .nebula: .space
+        case .codeRain: .text
+        case .wireframe: .shape
         default: nil
         }
     }
@@ -321,6 +342,101 @@ extension EffectKind {
                 EffectParam(label: L("光"), range: 0...1, defaultValue: 0.5, format: pc),
                 EffectParam(label: L("曲がり"), range: 0...1, defaultValue: 0.5, format: pc),
             ]
+        // ===== ジェネレーター（第 2 弾） =====
+        case .plasma:
+            return [
+                EffectParam(label: L("大きさ"), range: 0.3...6, defaultValue: 1.5, perPoint: 0.01, format: { String(format: "%.2f", $0) }, animRange: 0.8...3),
+                EffectParam(label: L("速さ"), range: 0...4, defaultValue: 1, perPoint: 0.005, animRange: 0.3...2),
+                EffectParam(label: L("ゆがみ"), range: 0...1, defaultValue: 0.4, format: pc, animRange: 0...0.8),
+                EffectParam(label: L("色の付け方"), range: 0...3, defaultValue: 0, choices: [L("虹色"), L("パレット"), L("パレットの帯"), L("白黒")]),
+                EffectParam(label: L("色の回る速さ"), range: -2...2, defaultValue: 0.2, perPoint: 0.005, format: { String(format: "%+.2f", $0) }, animRange: -0.5...0.5),
+                EffectParam(label: L("帯にする（段の数）"), range: 0...12, defaultValue: 0, perPoint: 0.05, step: 1,
+                            format: { $0 < 0.5 ? L("なめらか") : String(format: L("%.0f 段"), $0) }, animRange: 0...8),
+                EffectParam(label: L("コントラスト"), range: 0...1, defaultValue: 0.3, format: pc, animRange: 0...0.8),
+            ]
+        case .aurora:
+            return [
+                EffectParam(label: L("速さ"), range: 0...4, defaultValue: 0.6, perPoint: 0.005, animRange: 0.2...1.5),
+                EffectParam(label: L("高さ（カーテンの長さ）"), range: 0.2...1, defaultValue: 0.6, format: pc, animRange: 0.3...0.9),
+                EffectParam(label: L("うねり"), range: 0...1, defaultValue: 0.5, format: pc, animRange: 0.1...0.9),
+                EffectParam(label: L("すじの細かさ"), range: 0...1, defaultValue: 0.5, format: pc, animRange: 0.2...0.8),
+                EffectParam(label: L("カーテンの枚数"), range: 1...4, defaultValue: 3, perPoint: 0.03, step: 1, format: { String(format: L("%.0f 枚"), $0) }, animRange: 1...4),
+                EffectParam(label: L("明るさ"), range: 0...3, defaultValue: 1.2, perPoint: 0.005, format: pc, animRange: 0.5...2),
+                EffectParam(label: L("星を出す"), range: 0...1, defaultValue: 1, isToggle: true),
+            ]
+        case .nebula:
+            return [
+                EffectParam(label: L("大きさ"), range: 0.2...4, defaultValue: 1, perPoint: 0.005, format: { String(format: "%.2f", $0) }, animRange: 0.6...2),
+                EffectParam(label: L("速さ"), range: 0...2, defaultValue: 0.3, perPoint: 0.003, animRange: 0.1...1),
+                EffectParam(label: L("渦の強さ"), range: 0...2, defaultValue: 1, perPoint: 0.005, format: pc, animRange: 0.3...1.6),
+                EffectParam(label: L("流れる向き"), range: 0...360, defaultValue: 90, perPoint: 0.5, format: deg, animRange: 0...360),
+                EffectParam(label: L("流れる速さ"), range: 0...1, defaultValue: 0.08, format: pc, animRange: 0...0.4),
+                EffectParam(label: L("濃さ（煙の量）"), range: 0...1, defaultValue: 0.45, format: pc, animRange: 0.3...0.8),
+                EffectParam(label: L("コントラスト"), range: 0...1, defaultValue: 0.5, format: pc, animRange: 0.2...0.9),
+                EffectParam(label: L("色の付け方"), range: 0...3, defaultValue: 0, choices: [L("パレット"), L("虹色"), L("炎"), L("氷")]),
+                EffectParam(label: L("星を出す"), range: 0...1, defaultValue: 0, isToggle: true),
+            ]
+        case .truchet:
+            return [
+                EffectParam(label: L("マスの数（縦）"), range: 2...40, defaultValue: 10, perPoint: 0.05, step: 1, format: { String(format: "%.0f", $0) }, animRange: 4...20),
+                EffectParam(label: L("形"), range: 0...2, defaultValue: 0, choices: [L("曲線"), L("斜め線"), L("三角")]),
+                EffectParam(label: L("線の太さ"), range: 0.02...0.5, defaultValue: 0.12, format: pc, animRange: 0.04...0.3),
+                EffectParam(label: L("向きを変える速さ"), range: 0...4, defaultValue: 0.3, perPoint: 0.005, animRange: 0...2),
+                EffectParam(label: L("流れる向き"), range: 0...360, defaultValue: 0, perPoint: 0.5, format: deg, animRange: 0...360),
+                EffectParam(label: L("流れる速さ"), range: 0...2, defaultValue: 0.1, perPoint: 0.003, format: { String(format: L("%.2f マス/秒"), $0) }, animRange: 0...0.8),
+                EffectParam(label: L("光る"), range: 0...1, defaultValue: 0.4, format: pc, animRange: 0...1),
+                EffectParam(label: L("塗り分ける"), range: 0...1, defaultValue: 0, isToggle: true),
+            ]
+        case .hexGrid:
+            return [
+                EffectParam(label: L("大きさ（縦に入る数）"), range: 3...60, defaultValue: 12, perPoint: 0.05, format: { String(format: "%.0f", $0) }, animRange: 6...24),
+                EffectParam(label: L("すき間"), range: 0...0.5, defaultValue: 0.08, format: pc, animRange: 0.02...0.3),
+                EffectParam(label: L("角の丸み"), range: 0...1, defaultValue: 0.15, format: pc, animRange: 0...1),
+                EffectParam(label: L("光り方"), range: 0...3, defaultValue: 0, choices: [L("波"), L("ノイズ"), L("ランダム"), L("流れる")]),
+                EffectParam(label: L("速さ"), range: 0...4, defaultValue: 1, perPoint: 0.005, animRange: 0.3...2.5),
+                EffectParam(label: L("光る量"), range: 0...1, defaultValue: 0.5, format: pc, animRange: 0.2...0.9),
+                EffectParam(label: L("ふち取りだけ"), range: 0...1, defaultValue: 0, isToggle: true),
+                EffectParam(label: L("色の付け方"), range: 0...2, defaultValue: 1, choices: [L("1 色"), L("パレット（明るさで混ぜる）"), L("虹色（マスごと）")]),
+                EffectParam(label: L("回転"), range: 0...360, defaultValue: 0, perPoint: 0.5, format: deg, animRange: 0...60),
+            ]
+        case .codeRain:
+            return [
+                EffectParam(label: L("文字の大きさ（縦に入る行数）"), range: 10...120, defaultValue: 40, perPoint: 0.1, step: 1, format: { String(format: L("%.0f 行"), $0) }, animRange: 20...70),
+                EffectParam(label: L("落ちる速さ"), range: 0...4, defaultValue: 1, perPoint: 0.005, animRange: 0.4...2.5),
+                EffectParam(label: L("尾の長さ"), range: 0.05...1, defaultValue: 0.4, format: pc, animRange: 0.15...0.8),
+                EffectParam(label: L("列の濃さ"), range: 0...1, defaultValue: 0.6, format: pc, animRange: 0.2...1),
+                EffectParam(label: L("文字の変わる速さ"), range: 0...1, defaultValue: 0.3, format: pc, animRange: 0.1...0.8),
+                EffectParam(label: L("先頭の白さ"), range: 0...1, defaultValue: 0.85, format: pc, animRange: 0.3...1),
+                EffectParam(label: L("光る"), range: 0...1, defaultValue: 0.4, format: pc, animRange: 0...1),
+                EffectParam(label: L("向き"), range: 0...3, defaultValue: 0, choices: [L("下へ流れる"), L("上へ流れる"), L("右へ流れる"), L("左へ流れる")]),
+            ]
+        case .wireframe:
+            return [
+                EffectParam(label: L("形"), range: 0...6, defaultValue: 0,
+                            choices: [L("立方体"), L("正四面体"), L("正八面体"), L("正二十面体"), L("球"), L("トーラス"), L("ピラミッド")]),
+                EffectParam(label: L("大きさ"), range: 0.1...1.5, defaultValue: 0.8, format: pc, animRange: 0.5...1.2),
+                EffectParam(label: L("回る速さ X"), range: -180...180, defaultValue: 20, perPoint: 0.5, format: degs, animRange: -90...90),
+                EffectParam(label: L("回る速さ Y"), range: -180...180, defaultValue: 35, perPoint: 0.5, format: degs, animRange: -90...90),
+                EffectParam(label: L("回る速さ Z"), range: -180...180, defaultValue: 0, perPoint: 0.5, format: degs, animRange: -90...90),
+                EffectParam(label: L("線の太さ"), range: 0.5...12, defaultValue: 2.5, perPoint: 0.02, format: px, animRange: 1...6),
+                EffectParam(label: L("光る"), range: 0...1, defaultValue: 0.5, format: pc, animRange: 0...1),
+                EffectParam(label: L("奥を暗く"), range: 0...1, defaultValue: 0.5, format: pc, animRange: 0...1),
+                EffectParam(label: L("遠近"), range: 0...1, defaultValue: 0.5, format: pc, animRange: 0...1),
+                EffectParam(label: L("色の付け方"), range: 0...2, defaultValue: 0, choices: [L("1 色"), L("虹色（辺ごと）"), L("奥行きでパレット")]),
+                EffectParam(label: L("数（入れ子）"), range: 1...5, defaultValue: 1, perPoint: 0.03, step: 1, format: { String(format: "%.0f", $0) }, animRange: 1...4),
+            ]
+        case .moire:
+            return [
+                EffectParam(label: L("形"), range: 0...3, defaultValue: 0, choices: [L("輪と輪"), L("線と線"), L("輪と線"), L("放射と放射")]),
+                EffectParam(label: L("細かさ"), range: 5...200, defaultValue: 40, perPoint: 0.2, format: { String(format: "%.0f", $0) }, animRange: 30...120),
+                EffectParam(label: L("中心の離れ"), range: 0...1, defaultValue: 0.3, format: pc, animRange: 0.05...0.6),
+                EffectParam(label: L("回る速さ"), range: -90...90, defaultValue: 15, perPoint: 0.3, format: degs, animRange: -45...45),
+                EffectParam(label: L("太さ（線と地の割合）"), range: 0.1...0.9, defaultValue: 0.5, format: pc, animRange: 0.2...0.8),
+                EffectParam(label: L("組の数"), range: 2...3, defaultValue: 2, perPoint: 0.02, step: 1, format: { String(format: "%.0f", $0) }, animRange: 2...3),
+                EffectParam(label: L("ふくらむ速さ"), range: -4...4, defaultValue: 0.5, perPoint: 0.005, format: { String(format: "%+.2f", $0) }, animRange: -2...2),
+                EffectParam(label: L("重ね方"), range: 0...1, defaultValue: 0, choices: [L("重なりを消す（XOR）"), L("足す")]),
+                EffectParam(label: L("やわらかさ"), range: 0...1, defaultValue: 0.2, format: pc, animRange: 0...0.8),
+            ]
         default:
             return nil
         }
@@ -349,6 +465,14 @@ extension EffectKind {
         case .ripples: L("滴が落ちて、波紋が広がって重なる。拍で落とす・音で落とす・ときどき落とす")
         case .lightning: L("枝分かれする稲妻が走る。拍や音のアタックで走らせる。まわりは透明")
         case .growth: L("回路図・木の枝・菌糸のような線が、画面いっぱいに伸びていき、古い線はだんだん消える。まわりは透明")
+        case .plasma: L("昔のデモのような、なめらかにうねる色の面。ゆがみで形が有機的になり、帯にすると色が段になる")
+        case .aurora: L("夜空に垂れる光のカーテン。縦のすじが、ゆっくり横にうねる。色はパレット（下の色 → 上の色）。まわりは透明")
+        case .nebula: L("ゆっくり湧いて渦を巻く煙・星雲。濃さで煙の量、渦の強さでうねり方が変わる。薄い所は透明")
+        case .truchet: L("マスごとに向きの違う曲線がつながって、迷路のような模様になる。ときどきマスがくるっと回る。まわりは透明")
+        case .hexGrid: L("蜂の巣のタイルが、波・ノイズ・ランダム・流れで 1 枚ずつ光る。消えているタイルは透明")
+        case .codeRain: L("縦に流れ落ちる文字の列。先頭が明るく、尾が消えていく。まわりは透明")
+        case .wireframe: L("立方体や二十面体などの辺だけを光る線で描いて、ゆっくり回す。入れ子にして重ねられる。まわりは透明")
+        case .moire: L("少しずつずれた輪や線が重なって、干渉の模様（モアレ）が動く。まわりは透明")
         default: nil
         }
     }
@@ -369,6 +493,10 @@ extension EffectKind {
         case .ripples: return c(6) == 0
         case .lightning: return c(8) == 0
         case .growth: return c(6) == 0
+        case .truchet: return true
+        case .hexGrid: return c(7) == 0
+        case .codeRain: return true
+        case .wireframe: return c(9) == 0
         default: return false
         }
     }
@@ -388,6 +516,12 @@ extension EffectKind {
         case .ripples: return c(6) == 1
         case .lightning: return c(8) == 1
         case .growth: return c(6) == 1
+        case .plasma: return c(3) == 1 || c(3) == 2
+        case .aurora, .moire: return true
+        case .nebula: return c(7) == 0
+        case .truchet: return c(7) == 1
+        case .hexGrid: return c(7) == 1
+        case .wireframe: return c(9) == 2
         default: return false
         }
     }
@@ -402,6 +536,10 @@ extension EffectKind {
         case .growth: RGB(r: 0.3, g: 1.0, b: 0.8)
         case .metaballs: RGB(r: 1.0, g: 0.45, b: 0.2)
         case .reactionDiffusion: RGB(r: 0.95, g: 0.95, b: 1.0)
+        case .truchet: RGB(r: 0.25, g: 0.95, b: 1.0)
+        case .hexGrid: RGB(r: 1.0, g: 0.7, b: 0.2)
+        case .codeRain: RGB(r: 0.2, g: 1.0, b: 0.4)
+        case .wireframe: RGB(r: 0.3, g: 0.9, b: 1.0)
         default: nil
         }
     }
@@ -414,6 +552,12 @@ extension EffectKind {
         case .metaballs: [PalettePreset.hex(0xFF3D00), PalettePreset.hex(0xFF00A8), PalettePreset.hex(0x7A00FF)]
         case .laser, .starfield, .ripples, .logoParticles, .dither:
             [PalettePreset.hex(0x00F0FF), PalettePreset.hex(0xFF00C8), PalettePreset.hex(0xFFE600)]
+        case .plasma: [PalettePreset.hex(0x0B0033), PalettePreset.hex(0x6A00FF), PalettePreset.hex(0xFF00C8), PalettePreset.hex(0xFFD400)]
+        case .aurora: [PalettePreset.hex(0x1CFF7A), PalettePreset.hex(0x9B30FF)]
+        case .nebula: [PalettePreset.hex(0x1B1F8F), PalettePreset.hex(0xC2309A), PalettePreset.hex(0xFF7A9A), PalettePreset.hex(0x9FE8FF)]
+        case .truchet: [PalettePreset.hex(0x3A0CA3), PalettePreset.hex(0xF72585)]
+        case .hexGrid, .moire: [PalettePreset.hex(0x00F0FF), PalettePreset.hex(0xFF00C8)]
+        case .wireframe: [PalettePreset.hex(0xFF00C8), PalettePreset.hex(0x00F0FF)]
         default: nil
         }
     }
