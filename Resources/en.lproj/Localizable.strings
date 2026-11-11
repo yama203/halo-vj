@@ -424,6 +424,14 @@
 /* EffectBrowser.swift */
 "ジェネレーターを探す" = "Search generators";
 "エフェクトを探す" = "Search effects";
+"お気に入り" = "Favorites";
+"最近使った" = "Recently Used";
+"お気に入りに入れる" = "Add to Favorites";
+"お気に入りから外す" = "Remove from Favorites";
+/* Engine.swift */
+"前回の状態を読み込めませんでした" = "Couldn’t load the previous state";
+"空の状態で始めます。読めなかったファイルは次の場所に残してあります：\n%@" = "Starting empty. The file that couldn’t be read was kept here:\n%@";
+/* EffectBrowser.swift */
 "動画の代わりに置く絵。クリップの枠へドラッグ、ダブルクリックで選択中のレイヤー（%@）の空いている所へ。空きの枠の右クリックからも置ける" = "Images placed instead of videos. Drag onto a clip slot, or double-click to place in an empty slot of the selected layer (%@). You can also place one from the right-click menu of an empty slot";
 "付けたい所へドラッグ（クリップ・レイヤー欄・出力モニター・エフェクト欄）。ダブルクリックで今のタブ（%@）へ" = "Drag to where you want it (clip, layer column, output monitor, effect list). Double-click to add to the current tab (%@)";
 

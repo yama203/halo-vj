@@ -367,6 +367,7 @@ struct EffectReorderDrop<H: ObservableObject & EffectHolder>: ViewModifier {
                            let mid = UUID(uuidString: String(s.dropFirst(EffectUIState.movePrefix.count))) {
                             holder.moveEffect(mid, to: index)
                         } else if let k = EffectKind.fromDragString(s), !k.isGenerator {
+                            EffectFavorites.shared.note(k)
                             let e = holder.insertEffect(k, at: index)
                             EffectUIState.shared.expanded.insert(e.id)
                         }

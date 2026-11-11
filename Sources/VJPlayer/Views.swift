@@ -1130,7 +1130,9 @@ struct SlotCell: View {
                     ForEach(GeneratorCategory.allCases) { cat in
                         Section(cat.label) {
                             ForEach(cat.kinds) { k in
-                                Button(k.label) { if engine.placeGenerator(k, at: index) { engine.selectClip(index) } }
+                                Button(k.label) {
+                                    if engine.placeGenerator(k, at: index) { EffectFavorites.shared.note(k); engine.selectClip(index) }
+                                }
                             }
                         }
                     }
