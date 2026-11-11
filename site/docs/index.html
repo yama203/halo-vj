@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="ja" data-lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>使い方 — Halo VJ</title>
+<meta name="description" content="Halo VJ の使い方">
+<meta name="color-scheme" content="dark">
+<link rel="icon" href="../assets/favicon.png">
+<style>
+  /* 紹介ページ（../index.html）と同じ色 */
+  :root {
+    --bg: #16161a;
+    --panel: #1e1e23;
+    --line: #2e2e35;
+    --text: #dddce3;
+    --muted: #8f8e9b;
+    --link: #8ec7e6;
+    --sidebar: 240px;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Noto Sans JP", "Segoe UI", sans-serif;
+    font-size: 15px;
+    line-height: 1.85;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--link); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  html[data-lang="ja"] [lang="en"], html[data-lang="en"] [lang="ja"] { display: none !important; }
+
+  header { border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--bg); z-index: 5; }
+  .bar { display: flex; align-items: center; gap: 20px; height: 52px; padding: 0 20px; font-size: 14px; }
+  .brand { display: flex; align-items: center; gap: 8px; color: var(--text); font-weight: 600; }
+  .brand:hover { text-decoration: none; }
+  .brand img { width: 24px; height: 24px; }
+  .bar nav { margin-left: auto; display: flex; align-items: center; gap: 18px; }
+  .bar nav a { color: var(--muted); }
+  .bar nav a:hover, .bar nav a.here { color: var(--text); text-decoration: none; }
+  .lang { display: flex; gap: 6px; color: var(--muted); }
+  .lang button { background: none; border: 0; padding: 0; font: inherit; color: var(--muted); cursor: pointer; }
+  .lang button[aria-pressed="true"] { color: var(--text); }
+
+  .layout { display: grid; grid-template-columns: var(--sidebar) minmax(0, 1fr); max-width: 1120px; margin: 0 auto; }
+  aside {
+    border-right: 1px solid var(--line);
+    padding: 24px 16px 40px 20px;
+    position: sticky; top: 52px; align-self: start;
+    max-height: calc(100vh - 52px); overflow-y: auto;
+    font-size: 14px;
+  }
+  aside .group { color: var(--muted); font-size: 12px; margin: 18px 0 4px; }
+  aside .group:first-child { margin-top: 0; }
+  aside ul { list-style: none; margin: 0; padding: 0; }
+  aside li a { display: block; padding: 3px 8px; margin: 0 -8px; border-radius: 4px; color: var(--text); }
+  aside li a:hover { background: var(--panel); text-decoration: none; }
+  aside li a.current { background: var(--panel); color: var(--link); }
+  .menu-toggle { display: none; }
+
+  main { padding: 28px 40px 64px; min-width: 0; }
+  .notice { font-size: 13px; color: var(--muted); border: 1px solid var(--line); border-radius: 6px; padding: 8px 12px; margin-bottom: 20px; }
+  article h1 { font-size: 26px; font-weight: 600; margin: 0 0 16px; }
+  article h2 { font-size: 19px; font-weight: 600; margin: 36px 0 10px; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
+  article h3 { font-size: 16px; font-weight: 600; margin: 24px 0 6px; }
+  article h2 a.anchor, article h3 a.anchor { color: var(--muted); margin-left: 6px; opacity: 0; font-weight: 400; }
+  article h2:hover a.anchor, article h3:hover a.anchor { opacity: 1; }
+  article p { margin: 0 0 12px; }
+  article ul, article ol { margin: 0 0 12px; padding-left: 1.4em; }
+  article li { margin: 2px 0; }
+  article code {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.88em;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px;
+  }
+  article pre { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; overflow-x: auto; }
+  article pre code { border: 0; padding: 0; background: none; }
+  article table { border-collapse: collapse; width: 100%; margin: 0 0 14px; font-size: 14px; display: block; overflow-x: auto; }
+  article th, article td { border: 1px solid var(--line); padding: 6px 10px; text-align: left; vertical-align: top; }
+  article th { background: var(--panel); font-weight: 600; white-space: nowrap; }
+  article img { max-width: 100%; height: auto; border: 1px solid var(--line); border-radius: 6px; }
+  article blockquote { margin: 0 0 12px; padding: 4px 14px; border-left: 3px solid var(--line); color: var(--muted); }
+
+  .pager { display: flex; justify-content: space-between; gap: 12px; margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--line); font-size: 14px; }
+  .pager a { display: block; max-width: 48%; }
+  .pager .label { display: block; font-size: 12px; color: var(--muted); }
+  .pager .next { margin-left: auto; text-align: right; }
+
+  @media (max-width: 760px) {
+    .bar nav .hide-sm { display: none; }
+    .layout { display: block; }
+    aside { position: static; max-height: none; border-right: 0; border-bottom: 1px solid var(--line); padding: 0 16px; }
+    .menu-toggle {
+      display: block; width: 100%; text-align: left; background: none; border: 0; color: var(--text);
+      font: inherit; padding: 12px 0; cursor: pointer;
+    }
+    aside nav { display: none; padding-bottom: 16px; }
+    aside.open nav { display: block; }
+    main { padding: 20px 16px 48px; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="bar">
+    <a class="brand" href="../"><img src="../assets/icon-256.png" alt="">Halo VJ</a>
+    <nav>
+      <a class="hide-sm" href="https://github.com/yama203/halo-vj/releases/latest"><span lang="ja">ダウンロード</span><span lang="en">Download</span></a>
+      <a class="hide-sm here" href="./"><span lang="ja">使い方</span><span lang="en">Documentation</span></a>
+      <a class="hide-sm" href="https://github.com/yama203/halo-vj">GitHub</a>
+      <span class="lang" role="group" aria-label="Language">
+        <button type="button" data-set-lang="ja" aria-pressed="true">日本語</button>/<button type="button" data-set-lang="en" aria-pressed="false">English</button>
+      </span>
+    </nav>
+  </div>
+</header>
+
+<div class="layout">
+  <aside id="sidebar">
+    <button class="menu-toggle" type="button" aria-expanded="false">
+      <span lang="ja">目次</span><span lang="en">Contents</span> ▾
+    </button>
+    <nav id="toc" aria-label="目次"></nav>
+  </aside>
+  <main>
+    <p class="notice" lang="en">The manual is in Japanese for now. The app itself can be switched to English in Settings (⌘,).</p>
+    <article id="content"><p>…</p></article>
+    <div class="pager" id="pager"></div>
+  </main>
+</div>
+
+<!-- Markdown を HTML にする（marked） -->
+<script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+<script>
+  // 説明書：toc.json の順に ja/<id>.md を読んで出す。URL は ?p=<id>#見出し
+  (function () {
+    var root = document.documentElement;
+
+    // 言語（紹介ページと同じ保存先）。説明書の中身は今は日本語だけ
+    function setLang(l) {
+      root.setAttribute('data-lang', l);
+      root.setAttribute('lang', l);
+      document.querySelectorAll('[data-set-lang]').forEach(function (b) {
+        b.setAttribute('aria-pressed', String(b.getAttribute('data-set-lang') === l));
+      });
+      try { localStorage.setItem('halo-lang', l); } catch (e) {}
+    }
+    var saved = null;
+    try { saved = localStorage.getItem('halo-lang'); } catch (e) {}
+    setLang(saved || ((navigator.language || 'ja').toLowerCase().indexOf('ja') === 0 ? 'ja' : 'en'));
+    document.querySelectorAll('[data-set-lang]').forEach(function (b) {
+      b.addEventListener('click', function () { setLang(b.getAttribute('data-set-lang')); });
+    });
+
+    // 小さな画面：目次を開く・閉じる
+    var sidebar = document.getElementById('sidebar');
+    var toggle = sidebar.querySelector('.menu-toggle');
+    toggle.addEventListener('click', function () {
+      var open = sidebar.classList.toggle('open');
+      toggle.setAttribute('aria-expanded', String(open));
+    });
+
+    var pages = [];
+    var toc = document.getElementById('toc');
+    var content = document.getElementById('content');
+    var pager = document.getElementById('pager');
+
+    function esc(s) { return s.replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+    function pageURL(id) { return '?p=' + encodeURIComponent(id); }
+    function currentId() {
+      var p = new URLSearchParams(location.search).get('p');
+      return pages.some(function (x) { return x.id === p; }) ? p : (pages[0] && pages[0].id);
+    }
+
+    function buildToc(groups) {
+      var html = '';
+      groups.forEach(function (g) {
+        html += '<div class="group">' + esc(g.group) + '</div><ul>';
+        g.pages.forEach(function (p) {
+          pages.push(p);
+          html += '<li><a href="' + pageURL(p.id) + '" data-id="' + esc(p.id) + '">' + esc(p.title) + '</a></li>';
+        });
+        html += '</ul>';
+      });
+      toc.innerHTML = html;
+      toc.addEventListener('click', function (e) {
+        var a = e.target.closest('a[data-id]');
+        if (!a || e.metaKey || e.ctrlKey || e.shiftKey) return;
+        e.preventDefault();
+        go(a.getAttribute('data-id'), '');
+        sidebar.classList.remove('open');
+        toggle.setAttribute('aria-expanded', 'false');
+      });
+    }
+
+    // ページの中の別ページへのリンク（other.md や other.md#見出し）を ?p= に直す
+    function fixLinks() {
+      content.querySelectorAll('a[href]').forEach(function (a) {
+        var m = a.getAttribute('href').match(/^([a-z0-9-]+)\.md(#.*)?$/);
+        if (m) a.setAttribute('href', pageURL(m[1]) + (m[2] || ''));
+      });
+    }
+
+    // 見出しに id とリンクを付ける（日本語の見出しはそのまま id に）
+    function anchorHeadings() {
+      var used = {};
+      content.querySelectorAll('h2, h3').forEach(function (h) {
+        var id = h.textContent.trim().replace(/\s+/g, '-');
+        if (used[id]) { used[id]++; id += '-' + used[id]; } else { used[id] = 1; }
+        h.id = id;
+        var a = document.createElement('a');
+        a.className = 'anchor'; a.href = '#' + encodeURIComponent(id); a.textContent = '#';
+        h.appendChild(a);
+      });
+    }
+
+    function render(id, hash) {
+      var i = pages.findIndex(function (p) { return p.id === id; });
+      toc.querySelectorAll('a').forEach(function (a) { a.classList.toggle('current', a.getAttribute('data-id') === id); });
+      fetch('ja/' + id + '.md')
+        .then(function (r) { if (!r.ok) throw new Error(r.status); return r.text(); })
+        .then(function (md) {
+          content.innerHTML = marked.parse(md);
+          fixLinks();
+          anchorHeadings();
+          var h1 = content.querySelector('h1');
+          document.title = (h1 ? h1.textContent : pages[i].title) + ' — Halo VJ';
+          var prev = pages[i - 1], next = pages[i + 1];
+          pager.innerHTML =
+            (prev ? '<a class="prev" href="' + pageURL(prev.id) + '" data-id="' + esc(prev.id) + '"><span class="label">← 前へ</span>' + esc(prev.title) + '</a>' : '') +
+            (next ? '<a class="next" href="' + pageURL(next.id) + '" data-id="' + esc(next.id) + '"><span class="label">次へ →</span>' + esc(next.title) + '</a>' : '');
+          var target = hash ? document.getElementById(decodeURIComponent(hash.slice(1))) : null;
+          if (target) target.scrollIntoView(); else window.scrollTo(0, 0);
+        })
+        .catch(function () { content.innerHTML = '<p>ページを読み込めませんでした。</p>'; pager.innerHTML = ''; });
+    }
+
+    function go(id, hash) {
+      history.pushState({ id: id }, '', pageURL(id) + (hash || ''));
+      render(id, hash);
+    }
+
+    pager.addEventListener('click', function (e) {
+      var a = e.target.closest('a[data-id]');
+      if (!a || e.metaKey || e.ctrlKey || e.shiftKey) return;
+      e.preventDefault();
+      go(a.getAttribute('data-id'), '');
+    });
+    content.addEventListener('click', function (e) {
+      var a = e.target.closest('a[href^="?p="]');
+      if (!a || e.metaKey || e.ctrlKey || e.shiftKey) return;
+      e.preventDefault();
+      var u = new URL(a.href, location.href);
+      go(u.searchParams.get('p'), u.hash);
+    });
+    window.addEventListener('popstate', function () { render(currentId(), location.hash); });
+
+    fetch('toc.json')
+      .then(function (r) { return r.json(); })
+      .then(function (groups) { buildToc(groups); render(currentId(), location.hash); })
+      .catch(function () { content.innerHTML = '<p>目次を読み込めませんでした。</p>'; });
+  })();
+</script>
+</body>
+</html>

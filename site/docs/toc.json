@@ -1,0 +1,66 @@
+[
+  {"group": "はじめに", "pages": [
+    {"id": "install", "title": "インストール・アップデート"},
+    {"id": "interface", "title": "画面の見方"}
+  ]},
+  {"group": "クリップ", "pages": [
+    {"id": "clips-load", "title": "クリップを読み込む"},
+    {"id": "clips-play", "title": "再生・停止・ブラックアウト"},
+    {"id": "clips-arrange", "title": "移動・複製・選択"},
+    {"id": "clips-range", "title": "再生範囲・速度・ジャンプ"}
+  ]},
+  {"group": "レイヤーとデッキ", "pages": [
+    {"id": "layers", "title": "レイヤー"},
+    {"id": "blend-modes", "title": "重ね方"},
+    {"id": "adjustment-layers", "title": "調整レイヤー"},
+    {"id": "decks", "title": "デッキ・グリッドの表示"}
+  ]},
+  {"group": "パラメーター", "pages": [
+    {"id": "parameters", "title": "パラメーターパネル"},
+    {"id": "animation", "title": "値の動かし方"},
+    {"id": "audio-input", "title": "音の入力・BPM"}
+  ]},
+  {"group": "エフェクトとジェネレーター", "pages": [
+    {"id": "effects", "title": "エフェクトの足し方・並べ替え"},
+    {"id": "effects-list", "title": "エフェクトの一覧"},
+    {"id": "effects-analog", "title": "アナログ機材のエフェクト"},
+    {"id": "effects-glitch", "title": "光・形・グリッチのエフェクト"},
+    {"id": "generators", "title": "ジェネレーター"},
+    {"id": "generators-lines", "title": "線・粒・光のジェネレーター"},
+    {"id": "generators-nature", "title": "生き物・自然のジェネレーター"},
+    {"id": "generators-more", "title": "追加のジェネレーター"},
+    {"id": "generators-text", "title": "文字・時計のジェネレーター"}
+  ]},
+  {"group": "本番の操作", "pages": [
+    {"id": "scenes", "title": "シーン"},
+    {"id": "cues", "title": "キュー"},
+    {"id": "fx-pads", "title": "FX パッド"},
+    {"id": "autopilot", "title": "自動操縦"},
+    {"id": "live", "title": "ライブパネル・テンポ"}
+  ]},
+  {"group": "出力", "pages": [
+    {"id": "output", "title": "出力先・解像度・四隅"},
+    {"id": "mapping", "title": "出力のマッピング"},
+    {"id": "recording", "title": "録画"},
+    {"id": "lighting", "title": "照明（Art-Net / DMX）"}
+  ]},
+  {"group": "連携", "pages": [
+    {"id": "syphon", "title": "Syphon"},
+    {"id": "ndi", "title": "NDI"},
+    {"id": "camera", "title": "カメラ"},
+    {"id": "osc", "title": "OSC"},
+    {"id": "midi", "title": "MIDI コントローラー・キー"}
+  ]},
+  {"group": "プロジェクト", "pages": [
+    {"id": "project", "title": "プロジェクト"},
+    {"id": "undo", "title": "元に戻す"}
+  ]},
+  {"group": "画面のレイアウト", "pages": [
+    {"id": "layout", "title": "ワークスペース・パネル"},
+    {"id": "free-layout", "title": "自由レイアウト（試験中）"}
+  ]},
+  {"group": "資料", "pages": [
+    {"id": "shortcuts", "title": "キーボードショートカット一覧"},
+    {"id": "settings", "title": "設定"}
+  ]}
+]
