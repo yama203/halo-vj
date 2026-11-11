@@ -70,6 +70,17 @@ enum Main {
             CardPreview.writePicker(query: args[i + 1], generators: args.count > i + 3 && args[i + 3] == "gen", path: args[i + 2])
             exit(0)
         }
+        if let i = args.firstIndex(of: "--browser-preview"), args.count > i + 1 {
+            // 開発用：「エフェクト」「ジェネレーター」パネルを書き出す  VJPlayer --browser-preview out.png [gen] [幅 高さ]
+            //   お気に入り・最近使ったは VJ_FAVORITES・VJ_RECENTS（カンマ区切りの名前）で入れられる（保存はしない）
+            _ = NSApplication.shared
+            NSApp.setActivationPolicy(.prohibited)
+            let rest = Array(args.dropFirst(i + 2))
+            let nums = rest.compactMap(Double.init)
+            CardPreview.writeBrowser(generators: rest.contains("gen"), width: nums.first ?? 420,
+                                     height: nums.count > 1 ? nums[1] : 640, path: args[i + 1])
+            exit(0)
+        }
         if let i = args.firstIndex(of: "--valuefield-preview"), args.count > i + 1 {
             // 開発用：位置・大きさ・角度・不透明度の数値欄を並べて書き出す  VJPlayer --valuefield-preview out.png
             _ = NSApplication.shared
@@ -506,10 +517,22 @@ enum CardPreview {
         try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
     }
 
+    /// 開発用：「エフェクト」「ジェネレーター」パネルを画像に（保存しない別のエンジンで）
+    static func writeBrowser(generators: Bool, width: Double, height: Double, path: String) {
+        let root = EffectBrowser(generators: generators)
+            .padding(10)
+            .frame(width: width, height: height, alignment: .top)
+            .background(Color(white: 0.12))
+            .environment(\.colorScheme, .dark)
+            .environmentObject(Engine(persistent: false))
+        snapshot(NSHostingView(rootView: root), size: NSSize(width: width, height: height), path: path)
+    }
+
     /// 開発用：エフェクトを探す窓を画像に（query で絞り込んだところ。gen = ジェネレーターも）
     static func writePicker(query: String, generators: Bool, path: String) {
         // 見本の絵を先に描いておく（描画ループは動いていないので、ここで進める）
-        if let k = EffectPicker.results(query, includeGenerators: generators).first {
+        let fav = EffectFavorites.shared
+        if let k = EffectPicker.results(query, includeGenerators: generators, favorites: fav.favorites, recents: fav.recents).first {
             KindPreview.shared.adoptForSheet(k, KindPreview.shared.renderForSheet(k, secs: 2))
         }
         let root = EffectPickerPreview(query: query, generators: generators)

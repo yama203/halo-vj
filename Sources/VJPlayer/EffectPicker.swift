@@ -14,6 +14,7 @@ struct EffectPicker: View {
     @State var query = ""
     @State private var highlight = 0
     @FocusState private var focused: Bool
+    @ObservedObject private var fav = EffectFavorites.shared
 
     /// 出す順の分類（見出し・中身）
     static func sections(includeGenerators: Bool) -> [(String, [EffectKind])] {
@@ -35,18 +36,39 @@ struct EffectPicker: View {
         }
     }
 
-    /// 当たったもの（名前に当たるものを先に）
-    static func results(_ query: String, includeGenerators: Bool) -> [EffectKind] {
-        let all = sections(includeGenerators: includeGenerators).flatMap(\.1).filter { matches($0, query) }
+    /// 何も打っていないときの並び。いちばん上に「お気に入り」、次に「最近使った」、そのあと分類ごと
+    /// （上の 2 つの中身は下の分類にも出る。この窓に出ない種類は入れない）
+    static func emptySections(includeGenerators: Bool, favorites: [EffectKind], recents: [EffectKind]) -> [(String, [EffectKind])] {
+        let base = sections(includeGenerators: includeGenerators)
+        let shown = Set(base.flatMap(\.1))
+        var out: [(String, [EffectKind])] = []
+        let f = favorites.filter(shown.contains)
+        if !f.isEmpty { out.append((L("お気に入り"), f)) }
+        let r = recents.filter(shown.contains)
+        if !r.isEmpty { out.append((L("最近使った"), r)) }
+        return out + base
+    }
+
+    /// 当たったもの（名前に当たるものを先に。同じ当たり方の中ではお気に入りを先に）。
+    /// 何も打っていないときは emptySections の順（お気に入り・最近使ったは 2 回出る）
+    static func results(_ query: String, includeGenerators: Bool,
+                        favorites: [EffectKind] = [], recents: [EffectKind] = []) -> [EffectKind] {
         let q = query.trimmingCharacters(in: .whitespaces)
-        guard !q.isEmpty else { return all }
+        guard !q.isEmpty else {
+            return emptySections(includeGenerators: includeGenerators, favorites: favorites, recents: recents).flatMap(\.1)
+        }
+        let all = sections(includeGenerators: includeGenerators).flatMap(\.1).filter { matches($0, query) }
         let kata = q.applyingTransform(.hiraganaToKatakana, reverse: false) ?? q
         let byName = all.filter { $0.label.localizedCaseInsensitiveContains(q) || $0.label.localizedCaseInsensitiveContains(kata)
             || $0.rawValue.localizedCaseInsensitiveContains(q) }
-        return byName + all.filter { !byName.contains($0) }
+        let fav = Set(favorites)
+        func favFirst(_ ks: [EffectKind]) -> [EffectKind] { ks.filter(fav.contains) + ks.filter { !fav.contains($0) } }
+        return favFirst(byName) + favFirst(all.filter { !byName.contains($0) })
     }
 
-    private var results: [EffectKind] { Self.results(query, includeGenerators: includeGenerators) }
+    private var results: [EffectKind] {
+        Self.results(query, includeGenerators: includeGenerators, favorites: fav.favorites, recents: fav.recents)
+    }
 
     var body: some View {
         let list = results
@@ -100,19 +122,22 @@ struct EffectPicker: View {
                         if list.isEmpty {
                             Text(L("見つかりません")).font(.system(size: 12)).foregroundStyle(.secondary).padding(8)
                         } else if query.trimmingCharacters(in: .whitespaces).isEmpty {
-                            // 何も打っていないときは分類ごとに
-                            ForEach(Self.sections(includeGenerators: includeGenerators), id: \.0) { title, kinds in
-                                Text(title).font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
+                            // 何も打っていないときは分類ごとに（上にお気に入り・最近使った）
+                            let secs = Self.emptySections(includeGenerators: includeGenerators,
+                                                          favorites: fav.favorites, recents: fav.recents)
+                            let starts = secs.indices.map { i in secs[..<i].reduce(0) { $0 + $1.1.count } }
+                            ForEach(Array(secs.enumerated()), id: \.offset) { si, sec in
+                                Text(sec.0).font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
                                     .padding(.top, 6).padding(.leading, 6)
-                                ForEach(kinds) { k in row(k, index: list.firstIndex(of: k) ?? 0) }
+                                ForEach(Array(sec.1.enumerated()), id: \.offset) { j, k in row(k, index: starts[si] + j) }
                             }
                         } else {
-                            ForEach(Array(list.enumerated()), id: \.element) { i, k in row(k, index: i) }
+                            ForEach(Array(list.enumerated()), id: \.offset) { i, k in row(k, index: i) }
                         }
                     }
                 }
                 .onChange(of: highlight) { _, h in
-                    if list.indices.contains(h) { withAnimation(.easeOut(duration: 0.1)) { proxy.scrollTo(list[h]) } }
+                    if list.indices.contains(h) { withAnimation(.easeOut(duration: 0.1)) { proxy.scrollTo(h) } }
                 }
             }
             Text(L("↑↓ で選んで Enter・クリックで足す・Esc で閉じる"))
@@ -131,6 +156,19 @@ struct EffectPicker: View {
                 Text(k.help).font(.system(size: 10)).foregroundStyle(on ? Color.white.opacity(0.8) : .secondary).lineLimit(1)
             }
             Spacer(minLength: 0)
+            // 右端の星：お気に入りなら出たまま、選んでいる行では押して入れられる
+            let isFav = fav.isFavorite(k)
+            if isFav || on {
+                Button { fav.toggle(k) } label: {
+                    Image(systemName: isFav ? "star.fill" : "star")
+                        .font(.system(size: 10))
+                        .foregroundStyle(isFav ? Color.yellow : Color.white.opacity(0.7))
+                        .frame(width: 18, height: 18)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(isFav ? L("お気に入りから外す") : L("お気に入りに入れる"))
+            }
         }
         .padding(.horizontal, 6)
         .frame(height: 38)
@@ -138,7 +176,8 @@ struct EffectPicker: View {
         .contentShape(Rectangle())
         .onHover { if $0 { highlight = index } }
         .onTapGesture { choose(k) }
-        .id(k)
+        .contextMenu { FavoriteMenuItem(kind: k) }
+        .id(index)
     }
 
     private func move(_ d: Int, count: Int) {
@@ -147,6 +186,7 @@ struct EffectPicker: View {
     }
 
     private func choose(_ k: EffectKind) {
+        EffectFavorites.shared.note(k)
         pick(k)
         close()
     }

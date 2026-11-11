@@ -9,6 +9,7 @@ struct EffectBrowser: View {
     /// true ならジェネレーターの一覧（クリップの枠に置くもの）
     var generators = false
     @State private var query = ""
+    @ObservedObject private var fav = EffectFavorites.shared
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -36,6 +37,26 @@ struct EffectBrowser: View {
 
             ScrollView(.vertical) {
                 VStack(alignment: .leading, spacing: 10) {
+                    // いちばん上に「お気に入り」と「最近使った」（探しているときは出さない。下の分類の中にもある）
+                    if query.trimmingCharacters(in: .whitespaces).isEmpty {
+                        let favs = fav.favorites.filter(belongsHere)
+                        if !favs.isEmpty {
+                            SectionTitle(L("お気に入り"), icon: "star.fill", tint: .yellow)
+                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 190), spacing: 8)], spacing: 8) {
+                                ForEach(favs) { k in tile(k) }
+                            }
+                        }
+                        let recents = fav.recents.filter(belongsHere)
+                        if !recents.isEmpty {
+                            SectionTitle(L("最近使った"), icon: "clock")
+                                            // 1 行ぶん（多いときは横にスクロール）
+                            ScrollView(.horizontal) {
+                                HStack(spacing: 8) {
+                                    ForEach(recents) { k in tile(k).frame(width: 190) }
+                                }
+                            }
+                        }
+                    }
                     if generators {
                     // エフェクトと同じく、分類ごとに見出しを付けて並べる
                     ForEach(GeneratorCategory.allCases) { cat in
@@ -43,24 +64,18 @@ struct EffectBrowser: View {
                         if !gens.isEmpty {
                             SectionTitle(cat.label)
                             LazyVGrid(columns: [GridItem(.adaptive(minimum: 190), spacing: 8)], spacing: 8) {
-                                ForEach(gens) { k in
-                                    EffectTile(kind: k, tint: .teal) {
-                                        if !engine.placeGeneratorInSelectedLayer(k) { NSSound.beep() }
-                                    }
-                                }
+                                ForEach(gens) { k in tile(k) }
                             }
                         }
                     }
                     }
                     if !generators {
                     ForEach(EffectCategory.allCases) { cat in
-                        let items = EffectKind.allCases.filter { $0.category == cat && !$0.isBlend && !$0.isGenerator && $0 != .transitionMask && matches($0) }
+                        let items = EffectKind.allCases.filter { $0.category == cat && $0.inEffectList && matches($0) }
                         if !items.isEmpty {
                             SectionTitle(cat.label)
                             LazyVGrid(columns: [GridItem(.adaptive(minimum: 190), spacing: 8)], spacing: 8) {
-                                ForEach(items) { k in
-                                    EffectTile(kind: k) { add(k) }
-                                }
+                                ForEach(items) { k in tile(k) }
                             }
                         }
                     }
@@ -82,8 +97,19 @@ struct EffectBrowser: View {
 
     private var targetName: String { engine.currentTabName }
 
+    /// このパネルに出す種類か（エフェクトのパネルにはエフェクトだけ、ジェネレーターのパネルにはジェネレーターだけ）
+    private func belongsHere(_ k: EffectKind) -> Bool {
+        generators ? GeneratorCategory.allCases.contains { $0.kinds.contains(k) } : k.inEffectList
+    }
+
+    private func tile(_ k: EffectKind) -> some View {
+        EffectTile(kind: k, tint: generators ? .teal : .purple) { add(k) }
+    }
+
+    /// ダブルクリック：エフェクトは今のタブへ、ジェネレーターは選択中のレイヤーの空き枠へ
     private func add(_ k: EffectKind) {
-        if !engine.addEffectToCurrentTab(k) { NSSound.beep() }
+        let ok = generators ? engine.placeGeneratorInSelectedLayer(k) : engine.addEffectToCurrentTab(k)
+        if ok { EffectFavorites.shared.note(k) } else { NSSound.beep() }
     }
 }
 
@@ -93,6 +119,7 @@ struct EffectTile: View {
     var tint = Color.purple
     let onDoubleClick: () -> Void
     @State private var hovering = false
+    @ObservedObject private var fav = EffectFavorites.shared
 
     var body: some View {
         HStack(spacing: 8) {
@@ -107,10 +134,29 @@ struct EffectTile: View {
             Spacer(minLength: 0)
         }
         .padding(8)
+        // 右上の星のぶん、名前を少し手前で切る
+        .padding(.trailing, 10)
         .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: 6).fill(Color.white.opacity(hovering ? 0.10 : 0.05)))
         .overlay(RoundedRectangle(cornerRadius: 6).stroke(tint.opacity(hovering ? 0.6 : 0.25)))
         .contentShape(Rectangle())
+        .overlay(alignment: .topTrailing) {
+            // お気に入りの星：入っていれば出たまま、入っていなければマウスを乗せたときだけ
+            let on = fav.isFavorite(kind)
+            if on || hovering {
+                Button { fav.toggle(kind) } label: {
+                    Image(systemName: on ? "star.fill" : "star")
+                        .font(.system(size: 10))
+                        .foregroundStyle(on ? Color.yellow : Color.secondary)
+                        .frame(width: 18, height: 18)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .padding(3)
+                .help(on ? L("お気に入りから外す") : L("お気に入りに入れる"))
+            }
+        }
+        .contextMenu { FavoriteMenuItem(kind: kind) }
         .onHover { inside in
             hovering = inside
             // カーソルを合わせると、そばに動く見本を出す（説明もそこに出すので、ふつうのヒントは出さない）
@@ -121,6 +167,20 @@ struct EffectTile: View {
         .onDrag {
             KindPreviewPanel.shared.hide()
             return NSItemProvider(object: kind.dragString as NSString)
+        }
+    }
+}
+
+/// 右クリックの「お気に入りに入れる／お気に入りから外す」
+struct FavoriteMenuItem: View {
+    let kind: EffectKind
+    @ObservedObject private var fav = EffectFavorites.shared
+
+    var body: some View {
+        if fav.isFavorite(kind) {
+            Button { fav.toggle(kind) } label: { Label(L("お気に入りから外す"), systemImage: "star.slash") }
+        } else {
+            Button { fav.toggle(kind) } label: { Label(L("お気に入りに入れる"), systemImage: "star") }
         }
     }
 }
@@ -137,7 +197,7 @@ enum EffectDrop {
         _ = p.loadObject(ofClass: NSString.self) { obj, _ in
             guard let s = obj as? String, let k = EffectKind.fromDragString(s) else { return }
             if k.isGenerator && !allowGenerators { DispatchQueue.main.async { NSSound.beep() }; return }
-            DispatchQueue.main.async { action(k) }
+            DispatchQueue.main.async { EffectFavorites.shared.note(k); action(k) }
         }
         return true
     }
@@ -172,7 +232,7 @@ struct AddEffectMenuItems: View {
     /// 分類と、その中のエフェクト（空の分類は入れない）
     static var groups: [(EffectCategory, [EffectKind])] {
         EffectCategory.allCases.compactMap { cat in
-            let items = EffectKind.allCases.filter { $0.category == cat && !$0.isBlend && !$0.isGenerator && $0 != .transitionMask }
+            let items = EffectKind.allCases.filter { $0.category == cat && $0.inEffectList }
             return items.isEmpty ? nil : (cat, items)
         }
     }
@@ -181,7 +241,7 @@ struct AddEffectMenuItems: View {
         ForEach(Self.groups, id: \.0) { cat, items in
             Section(cat.label) {
                 ForEach(items) { k in
-                    Button { action(k) } label: { Label(k.label, systemImage: k.icon) }
+                    Button { EffectFavorites.shared.note(k); action(k) } label: { Label(k.label, systemImage: k.icon) }
                 }
             }
         }

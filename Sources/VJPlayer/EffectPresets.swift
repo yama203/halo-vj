@@ -34,9 +34,14 @@ final class EffectPresets: ObservableObject {
             return URL(fileURLWithPath: p).deletingLastPathComponent().appendingPathComponent("effect-presets.json")
         }
         // 開発用の書き出し・セルフテストでは、利用者のファイルを読み書きしない
-        let args = CommandLine.arguments.dropFirst()
-        if args.contains(where: { $0 == "--selftest" || $0 == "--od-bench" || $0.hasSuffix("-preview") }) { return nil }
+        if isDevRun { return nil }
         return AppInfo.supportDirectory.appendingPathComponent("effect-presets.json")
+    }
+
+    /// 開発用の書き出し・セルフテストの起動か（このときは利用者のファイル・設定を読み書きしない。お気に入りも同じ判定）
+    static var isDevRun: Bool {
+        let args = CommandLine.arguments.dropFirst()
+        return args.contains { $0 == "--selftest" || $0 == "--od-bench" || $0 == "--kind-sheet" || $0.hasSuffix("-preview") }
     }
 
     /// ファイルを読む（無い・壊れているときは nil。壊れたファイルは、次に保存するまでそのまま）

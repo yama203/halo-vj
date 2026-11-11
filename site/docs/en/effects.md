@@ -33,6 +33,16 @@ An added card opens expanded.
 - The `⌘E` window also shows generators. Effects go to the current tab (composition, layer or clip); generators go to an empty slot in the selected layer.
 - A preview of the selected item appears on the right.
 
+## Favorites and recently used
+
+Put the effects and generators you use often in your favorites to find them quickly.
+
+- Hover over an item in the "Effects" or "Generators" panel to show a star at its top right. Click it to add the item to your favorites (click again to remove it). You can also use "Add to Favorites" and "Remove from Favorites" in the right-click menu. Favorite items always show a small star.
+- The top of the panel shows "Favorites" (in the order you added them) and, below it, "Recently Used" (up to 8, newest first). You can drag or double-click them like any other item. They are hidden while you search.
+- In the search window, "Favorites" and "Recently Used" also appear at the top when nothing is typed. While you search, favorites come first among equally good matches. You can also toggle them with the star at the right end of a row or the right-click menu.
+- "Recently Used" lists what you added from the panel, the search window or a menu (not undo, scene recall or opening a project).
+- Favorites and recently used items are saved as app-wide settings and are the same in every project.
+
 ## Previews
 
 Hover over an item in the "Effects" or "Generators" panel list to show a small window with a moving preview and a description.
