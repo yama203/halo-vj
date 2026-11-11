@@ -278,6 +278,7 @@ enum SelfTest {
         testAutopilot(check: check)
         testAutopilotUndo(check: check, wait: wait)
         testOutputEvents(check: check, wait: wait)
+        testKinds2FX(check: check)
         testMoreKinds(check: check)
         testReactionDiffusion(check: check)
         testDecks(check: check, wait: wait)

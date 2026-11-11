@@ -4,7 +4,8 @@ import Foundation
 
 extension EffectKind {
     static let moreEffects: [EffectKind] = [.bloom, .kaleidoscope, .rgbSplit, .pixelate, .edgeNeon, .zoomBlur,
-                                            .pixelSort, .datamosh, .ascii, .dither, .voronoiGlass]
+                                            .pixelSort, .datamosh, .ascii, .dither, .voronoiGlass,
+                                            .blur, .lens, .polar, .tile, .keyer, .ledWall, .slices, .shake]
     static let moreGenerators: [EffectKind] = [.reactionDiffusion, .laser, .synthwave, .logoParticles, .metaballs,
                                                .starfield, .fractal, .ripples, .lightning, .growth]
     var isMore: Bool { Self.moreEffects.contains(self) || Self.moreGenerators.contains(self) }
@@ -22,6 +23,14 @@ extension EffectKind {
         case .ascii: L("文字モザイク（ASCII）")
         case .dither: L("ディザ（1 ビット・ゲーム機風）")
         case .voronoiGlass: L("ガラス片")
+        case .blur: L("ぼかし")
+        case .lens: L("レンズ（魚眼・渦・ふくらみ）")
+        case .polar: L("極座標（輪にする・ほどく）")
+        case .tile: L("タイル（並べる・流す）")
+        case .keyer: L("キー抜き（明るさ・色で透明に）")
+        case .ledWall: L("LED パネル")
+        case .slices: L("スライス（帯ごとにずらす）")
+        case .shake: L("ゆれ（カメラの揺れ・ズームの脈）")
         case .reactionDiffusion: L("反応拡散（育つ模様）")
         case .laser: L("レーザーショー")
         case .synthwave: L("シンセウェイブの地形")
@@ -49,6 +58,14 @@ extension EffectKind {
         case .ascii: "character"
         case .dither: "circle.grid.cross"
         case .voronoiGlass: "seal"
+        case .blur: "drop.halffull"
+        case .lens: "camera.aperture"
+        case .polar: "circle.dashed"
+        case .tile: "square.grid.2x2"
+        case .keyer: "wand.and.stars.inverse"
+        case .ledWall: "lightbulb.led.wide"
+        case .slices: "rectangle.split.1x2"
+        case .shake: "iphone.radiowaves.left.and.right"
         case .reactionDiffusion: "allergens"
         case .laser: "rays"
         case .synthwave: "mountain.2"
@@ -68,6 +85,10 @@ extension EffectKind {
         case .bloom, .edgeNeon, .zoomBlur: .light
         case .kaleidoscope, .voronoiGlass: .shape
         case .rgbSplit, .pixelate, .pixelSort, .datamosh, .ascii, .dither: .glitch
+        case .blur: .light
+        case .lens, .polar, .tile, .shake: .shape
+        case .keyer: .color
+        case .ledWall, .slices: .glitch
         case _ where Self.moreGenerators.contains(self): .generator
         default: nil
         }
@@ -192,6 +213,93 @@ extension EffectKind {
                 EffectParam(label: L("屈折"), range: 0...1, defaultValue: 0.4, format: pc),
                 EffectParam(label: L("色ずれ"), range: 0...1, defaultValue: 0.3, format: pc),
                 EffectParam(label: L("縁の明るさ"), range: 0...1, defaultValue: 0.9, format: pc),
+            ]
+        case .blur:
+            return [
+                EffectParam(label: L("量"), range: 0...200, defaultValue: 12, perPoint: 0.2, format: px, animRange: 0...40),
+                EffectParam(label: L("種類"), range: 0...2, defaultValue: 0, choices: [L("ふつう"), L("横だけ"), L("縦だけ")]),
+                EffectParam(label: L("明るい所を残す"), range: 0...1, defaultValue: 0, format: pc, animRange: 0...0.8),
+                EffectParam(label: L("端"), range: 0...1, defaultValue: 0, choices: [L("のばす"), L("透明")]),
+            ]
+        case .lens:
+            return [
+                EffectParam(label: L("種類"), range: 0...4, defaultValue: 0,
+                            choices: [L("魚眼（ふくらむ）"), L("へこむ（糸巻き）"), L("渦"), L("虫めがね"), L("波打つレンズ")]),
+                EffectParam(label: L("強さ"), range: 0...1, defaultValue: 0.5, format: pc, animRange: 0...0.8),
+                EffectParam(label: L("大きさ"), range: 0.1...1.5, defaultValue: 0.6, format: pc, animRange: 0.3...1),
+                EffectParam(label: L("中心の左右"), range: 0...1, defaultValue: 0.5, format: pc, animRange: 0.3...0.7),
+                EffectParam(label: L("中心の上下"), range: 0...1, defaultValue: 0.5, format: pc, animRange: 0.3...0.7),
+                EffectParam(label: L("色のにじみ"), range: 0...1, defaultValue: 0.2, format: pc, animRange: 0...0.6),
+                EffectParam(label: L("端"), range: 0...2, defaultValue: 0, choices: [L("のばす"), L("折り返す"), L("透明")]),
+            ]
+        case .polar:
+            return [
+                EffectParam(label: L("向き"), range: 0...1, defaultValue: 0, choices: [L("輪にする"), L("ほどく")]),
+                EffectParam(label: L("回す"), range: 0...360, defaultValue: 0, perPoint: 0.5, format: deg, animRange: 0...360),
+                EffectParam(label: L("回る速さ"), range: -180...180, defaultValue: 0, perPoint: 0.5, format: degs, animRange: -45...45),
+                EffectParam(label: L("巻く回数"), range: 1...8, defaultValue: 1, perPoint: 0.03, step: 1, format: { String(format: L("%.0f 回"), $0) }, animRange: 1...4),
+                EffectParam(label: L("半径のずれ"), range: -1...1, defaultValue: 0, perPoint: 0.003, format: { String(format: "%+.2f", $0) }, animRange: -0.5...0.5),
+                EffectParam(label: L("半径の流れる速さ"), range: -2...2, defaultValue: 0, perPoint: 0.004,
+                            format: { String(format: "%+.2f", $0) }, animRange: -0.5...0.5),
+                EffectParam(label: L("中心の左右"), range: 0...1, defaultValue: 0.5, format: pc, animRange: 0.3...0.7),
+                EffectParam(label: L("中心の上下"), range: 0...1, defaultValue: 0.5, format: pc, animRange: 0.3...0.7),
+                EffectParam(label: L("つなぎ目を鏡に"), range: 0...1, defaultValue: 1, isToggle: true),
+                EffectParam(label: L("内と外を入れ替える"), range: 0...1, defaultValue: 0, isToggle: true),
+            ]
+        case .tile:
+            let n: (Double) -> String = { String(format: "%.2f", $0) }
+            return [
+                EffectParam(label: L("横の数"), range: 1...16, defaultValue: 3, perPoint: 0.01, format: n, animRange: 1...6),
+                EffectParam(label: L("縦の数"), range: 1...16, defaultValue: 3, perPoint: 0.01, format: n, animRange: 1...6),
+                EffectParam(label: L("そろえる（縦の数＝横の数）"), range: 0...1, defaultValue: 1, isToggle: true),
+                EffectParam(label: L("鏡にする"), range: 0...3, defaultValue: 0, choices: [L("しない"), L("横"), L("縦"), L("両方")]),
+                EffectParam(label: L("段のずれ"), range: 0...1, defaultValue: 0, format: pc, animRange: 0...0.5),
+                EffectParam(label: L("流れる速さ（横）"), range: -2...2, defaultValue: 0, perPoint: 0.004, format: { String(format: L("%+.2f 枚/秒"), $0) }, animRange: -0.5...0.5),
+                EffectParam(label: L("流れる速さ（縦）"), range: -2...2, defaultValue: 0, perPoint: 0.004, format: { String(format: L("%+.2f 枚/秒"), $0) }, animRange: -0.5...0.5),
+                EffectParam(label: L("すき間"), range: 0...0.3, defaultValue: 0, format: pc, animRange: 0...0.15),
+                EffectParam(label: L("1 枚ずつ回す"), range: 0...360, defaultValue: 0, perPoint: 0.5, format: deg, animRange: 0...360),
+            ]
+        case .keyer:
+            return [
+                EffectParam(label: L("何で抜く"), range: 0...2, defaultValue: 0, choices: [L("暗い所"), L("明るい所"), L("色")]),
+                EffectParam(label: L("しきい値"), range: 0...1, defaultValue: 0.25, format: pc, animRange: 0...0.6),
+                EffectParam(label: L("やわらかさ"), range: 0...0.5, defaultValue: 0.1, format: pc, animRange: 0.02...0.3),
+                EffectParam(label: L("色の広さ"), range: 0...1, defaultValue: 0.35, format: pc, animRange: 0.15...0.6),
+                EffectParam(label: L("色かぶりを取る"), range: 0...1, defaultValue: 0.5, format: pc, animRange: 0...1),
+                EffectParam(label: L("逆にする"), range: 0...1, defaultValue: 0, isToggle: true),
+                EffectParam(label: L("抜いた形を見る"), range: 0...1, defaultValue: 0, isToggle: true),
+            ]
+        case .ledWall:
+            return [
+                EffectParam(label: L("マスの大きさ"), range: 4...80, defaultValue: 14, perPoint: 0.1, format: px, animRange: 8...40),
+                EffectParam(label: L("形"), range: 0...2, defaultValue: 0, choices: [L("丸い粒"), L("RGB の縦 3 本"), L("四角")]),
+                EffectParam(label: L("粒の大きさ"), range: 0.3...1, defaultValue: 0.8, format: pc, animRange: 0.5...1),
+                EffectParam(label: L("明るさ"), range: 0.5...4, defaultValue: 1.6, perPoint: 0.005, format: pc, animRange: 1...2.5),
+                EffectParam(label: L("にじみ"), range: 0...1, defaultValue: 0.3, format: pc, animRange: 0...0.8),
+                EffectParam(label: L("パネルの継ぎ目"), range: 0...1, defaultValue: 0, format: pc, animRange: 0...0.6),
+                EffectParam(label: L("すき間を透明に"), range: 0...1, defaultValue: 0, isToggle: true),
+            ]
+        case .slices:
+            return [
+                EffectParam(label: L("向き"), range: 0...1, defaultValue: 0, choices: [L("横の帯"), L("縦の帯")]),
+                EffectParam(label: L("帯の数"), range: 2...80, defaultValue: 12, perPoint: 0.05, step: 1, format: { String(format: "%.0f", $0) }, animRange: 4...40),
+                EffectParam(label: L("ずれ"), range: 0...1, defaultValue: 0.15, format: pc, animRange: 0...0.4),
+                EffectParam(label: L("ずらす形"), range: 0...3, defaultValue: 0, choices: [L("ランダム"), L("互い違い"), L("波"), L("階段")]),
+                EffectParam(label: L("変わる速さ"), range: 0...8, defaultValue: 2, perPoint: 0.01, format: { String(format: L("%.1f 回/秒"), $0) }, animRange: 0...6),
+                EffectParam(label: L("なめらかに"), range: 0...1, defaultValue: 0.3, format: pc, animRange: 0...1),
+                EffectParam(label: L("帯の幅をばらばらに"), range: 0...1, defaultValue: 0.5, format: pc, animRange: 0...1),
+                EffectParam(label: L("色もずらす"), range: 0...1, defaultValue: 0.2, format: pc, animRange: 0...0.6),
+                EffectParam(label: L("端"), range: 0...2, defaultValue: 0, choices: [L("折り返す"), L("のばす"), L("透明")]),
+            ]
+        case .shake:
+            return [
+                EffectParam(label: L("ゆれ"), range: 0...200, defaultValue: 20, perPoint: 0.2, format: px, animRange: 0...60),
+                EffectParam(label: L("速さ"), range: 0.2...30, defaultValue: 6, perPoint: 0.03, format: { String(format: L("%.1f 回/秒"), $0) }, animRange: 2...12),
+                EffectParam(label: L("種類"), range: 0...3, defaultValue: 0, choices: [L("なめらか"), L("がたがた"), L("横だけ"), L("縦だけ")]),
+                EffectParam(label: L("回る"), range: 0...20, defaultValue: 1, perPoint: 0.05, format: { String(format: "%.1f°", $0) }, animRange: 0...5),
+                EffectParam(label: L("ズームの脈"), range: 0...0.5, defaultValue: 0, format: pc, animRange: 0...0.15),
+                EffectParam(label: L("ぶれ"), range: 0...1, defaultValue: 0.3, format: pc, animRange: 0...0.8),
+                EffectParam(label: L("端"), range: 0...3, defaultValue: 3, choices: [L("のばす"), L("折り返す"), L("透明"), L("少し拡大して隠す")]),
             ]
         // ===== ジェネレーター =====
         case .reactionDiffusion:
@@ -339,6 +447,14 @@ extension EffectKind {
         case .ascii: L("絵を文字に置き換える（明るい所ほど字が詰まる）。記号・ブロック・0 と 1・カタカナ")
         case .dither: L("色を 2〜8 色に減らして、点々で明るさを出す。白黒・昔のゲーム機の緑・4 色の昔のパソコン・元の色・パレット")
         case .voronoiGlass: L("細胞の形のガラス片に割れて、片ごとに少しずつずれる。縁の線を太くするとステンドグラス風")
+        case .blur: L("ふつうのぼかし。横だけ・縦だけにもできる。明るい所を残すと、輪郭のやわらかいソフトフォーカスになる")
+        case .lens: L("真ん中からの距離で絵をゆがめる。魚眼・へこむ・渦・虫めがね・波打つレンズ。色のにじみで、赤と青が少しずれる")
+        case .polar: L("絵を輪に巻いたり（横が角度、縦が半径）、輪をまっすぐにほどいたりする。半径を流すとトンネルになる")
+        case .tile: L("絵を小さくして並べる。段ごとにずらしたり、鏡にしたり、流したりできる")
+        case .keyer: L("暗い所・明るい所・選んだ色を透明にして、下のレイヤーを見せる。抜いた形を見るで、白（残る）と黒（抜ける）で確かめられる")
+        case .ledWall: L("絵を LED の粒の壁にする。近くで見ると粒、離れると絵に見える。丸い粒・RGB の縦 3 本・四角")
+        case .slices: L("絵を帯に切って、帯ごとに横（か縦）へずらす。拍で動かすと気持ちいい")
+        case .shake: L("絵全体を揺らす。手持ちカメラの揺れ・地震・ズームの脈。ゆれを 0 にすると止まる。ゆれを音や拍で動かすと、キックで画面が揺れる")
         case .reactionDiffusion: L("2 つの薬が広がりながら反応して、珊瑚や迷路、斑点、指紋のような模様がじわじわ育つ。流れに乗って模様がずっと渦を巻いて動き、変わり続けるで場所ごとに育ち方が少しずつ変わって、ときどき消えてまた育つ。枯れるを上げると、育ってから寿命ほどたった所が暗くなって枯れ、空いた所へまたまわりから育って入ってくる（生まれては死ぬ波）。音のアタックで大きく乱れ、低音で速く育ち、音の大きさで光る（まわりは透明）")
         case .laser: L("ステージのレーザーのような光の線。扇形に振れたり回ったり。もやで光の筋が見える（まわりは透明）")
         case .synthwave: L("80 年代風。光る格子の地面とワイヤーフレームの山を飛んでいく。夕日付き。色はパレット")
@@ -360,6 +476,7 @@ extension EffectKind {
         case .bloom: return e.value(3) > 0.001
         case .edgeNeon: return c(2) == 1
         case .ascii: return c(2) == 1
+        case .keyer: return c(0) == 2
         case .reactionDiffusion: return c(4) == 0
         case .laser: return c(8) == 0
         case .synthwave: return c(8) == 1
@@ -399,6 +516,7 @@ extension EffectKind {
         case .lightning: RGB(r: 0.75, g: 0.85, b: 1.0)
         case .ripples: RGB(r: 0.35, g: 0.75, b: 1.0)
         case .edgeNeon: RGB(r: 1.0, g: 0.2, b: 0.8)
+        case .keyer: RGB(r: 0, g: 1, b: 0)
         case .growth: RGB(r: 0.3, g: 1.0, b: 0.8)
         case .metaballs: RGB(r: 1.0, g: 0.45, b: 0.2)
         case .reactionDiffusion: RGB(r: 0.95, g: 0.95, b: 1.0)
