@@ -281,6 +281,7 @@ enum SelfTest {
         testMoreKinds(check: check)
         testReactionDiffusion(check: check)
         testDecks(check: check, wait: wait)
+        testKinds2Gen(check: check)
         testPads(check: check)
         testMultiSelect(check: check)
         testMoveLayer(check: check)
