@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>使い方 — Halo VJ</title>
+<title>Halo VJ</title>
 <meta name="description" content="Halo VJ の使い方">
 <meta name="color-scheme" content="dark">
 <link rel="icon" href="../assets/favicon.png">
@@ -125,7 +125,7 @@
     <nav id="toc" aria-label="目次"></nav>
   </aside>
   <main>
-    <p class="notice" lang="en">The manual is in Japanese for now. The app itself can be switched to English in Settings (⌘,).</p>
+    <p class="notice" id="fallback" hidden>This page is not translated yet, so it is shown in Japanese.</p>
     <article id="content"><p>…</p></article>
     <div class="pager" id="pager"></div>
   </main>
@@ -134,18 +134,22 @@
 <!-- Markdown を HTML にする（marked） -->
 <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
 <script>
-  // 説明書：toc.json の順に ja/<id>.md を読んで出す。URL は ?p=<id>#見出し
+  // 説明書：toc.json の順に <言語>/<id>.md を読んで出す（英語のページが無ければ日本語）。URL は ?p=<id>#見出し
   (function () {
     var root = document.documentElement;
 
-    // 言語（紹介ページと同じ保存先）。説明書の中身は今は日本語だけ
+    // 言語（紹介ページと同じ保存先）
+    var lang = 'ja';
+    var tocGroups = null;
     function setLang(l) {
+      lang = l;
       root.setAttribute('data-lang', l);
       root.setAttribute('lang', l);
       document.querySelectorAll('[data-set-lang]').forEach(function (b) {
         b.setAttribute('aria-pressed', String(b.getAttribute('data-set-lang') === l));
       });
       try { localStorage.setItem('halo-lang', l); } catch (e) {}
+      if (tocGroups) { buildToc(tocGroups); render(currentId(), location.hash); }
     }
     var saved = null;
     try { saved = localStorage.getItem('halo-lang'); } catch (e) {}
@@ -174,26 +178,31 @@
       return pages.some(function (x) { return x.id === p; }) ? p : (pages[0] && pages[0].id);
     }
 
+    // 目次の名前：英語のときは group_en・title_en（無ければ日本語）
+    function groupName(g) { return lang === 'en' && g.group_en ? g.group_en : g.group; }
+    function title(p) { return lang === 'en' && p.title_en ? p.title_en : p.title; }
+
     function buildToc(groups) {
       var html = '';
+      pages = [];
       groups.forEach(function (g) {
-        html += '<div class="group">' + esc(g.group) + '</div><ul>';
+        html += '<div class="group">' + esc(groupName(g)) + '</div><ul>';
         g.pages.forEach(function (p) {
           pages.push(p);
-          html += '<li><a href="' + pageURL(p.id) + '" data-id="' + esc(p.id) + '">' + esc(p.title) + '</a></li>';
+          html += '<li><a href="' + pageURL(p.id) + '" data-id="' + esc(p.id) + '">' + esc(title(p)) + '</a></li>';
         });
         html += '</ul>';
       });
       toc.innerHTML = html;
-      toc.addEventListener('click', function (e) {
+    }
+    toc.addEventListener('click', function (e) {
         var a = e.target.closest('a[data-id]');
         if (!a || e.metaKey || e.ctrlKey || e.shiftKey) return;
         e.preventDefault();
         go(a.getAttribute('data-id'), '');
         sidebar.classList.remove('open');
         toggle.setAttribute('aria-expanded', 'false');
-      });
-    }
+    });
 
     // ページの中の別ページへのリンク（other.md や other.md#見出し）を ?p= に直す
     function fixLinks() {
@@ -216,25 +225,38 @@
       });
     }
 
+    // 今の言語のページ。無ければ日本語のページ（fallback = true）
+    function load(id) {
+      function get(l) { return fetch(l + '/' + id + '.md').then(function (r) { if (!r.ok) throw new Error(r.status); return r.text(); }); }
+      if (lang === 'ja') return get('ja').then(function (md) { return { md: md, fallback: false }; });
+      return get(lang).then(function (md) { return { md: md, fallback: false }; },
+                            function () { return get('ja').then(function (md) { return { md: md, fallback: true }; }); });
+    }
+
+    var renderSeq = 0;
     function render(id, hash) {
+      var seq = ++renderSeq;
       var i = pages.findIndex(function (p) { return p.id === id; });
       toc.querySelectorAll('a').forEach(function (a) { a.classList.toggle('current', a.getAttribute('data-id') === id); });
-      fetch('ja/' + id + '.md')
-        .then(function (r) { if (!r.ok) throw new Error(r.status); return r.text(); })
-        .then(function (md) {
+      load(id)
+        .then(function (res) {
+          if (seq !== renderSeq) return;  // あとから押したページを優先
+          var md = res.md;
+          document.getElementById('fallback').hidden = !res.fallback;
           content.innerHTML = marked.parse(md);
           fixLinks();
           anchorHeadings();
           var h1 = content.querySelector('h1');
-          document.title = (h1 ? h1.textContent : pages[i].title) + ' — Halo VJ';
+          document.title = (h1 ? h1.textContent.replace(/#$/, '') : title(pages[i])) + ' — Halo VJ';
           var prev = pages[i - 1], next = pages[i + 1];
+          var en = lang === 'en';
           pager.innerHTML =
-            (prev ? '<a class="prev" href="' + pageURL(prev.id) + '" data-id="' + esc(prev.id) + '"><span class="label">← 前へ</span>' + esc(prev.title) + '</a>' : '') +
-            (next ? '<a class="next" href="' + pageURL(next.id) + '" data-id="' + esc(next.id) + '"><span class="label">次へ →</span>' + esc(next.title) + '</a>' : '');
+            (prev ? '<a class="prev" href="' + pageURL(prev.id) + '" data-id="' + esc(prev.id) + '"><span class="label">' + (en ? '← Previous' : '← 前へ') + '</span>' + esc(title(prev)) + '</a>' : '') +
+            (next ? '<a class="next" href="' + pageURL(next.id) + '" data-id="' + esc(next.id) + '"><span class="label">' + (en ? 'Next →' : '次へ →') + '</span>' + esc(title(next)) + '</a>' : '');
           var target = hash ? document.getElementById(decodeURIComponent(hash.slice(1))) : null;
           if (target) target.scrollIntoView(); else window.scrollTo(0, 0);
         })
-        .catch(function () { content.innerHTML = '<p>ページを読み込めませんでした。</p>'; pager.innerHTML = ''; });
+        .catch(function () { content.innerHTML = lang === 'en' ? '<p>Couldn\'t load the page.</p>' : '<p>ページを読み込めませんでした。</p>'; pager.innerHTML = ''; });
     }
 
     function go(id, hash) {
@@ -259,7 +281,7 @@
 
     fetch('toc.json')
       .then(function (r) { return r.json(); })
-      .then(function (groups) { buildToc(groups); render(currentId(), location.hash); })
+      .then(function (groups) { tocGroups = groups; buildToc(groups); render(currentId(), location.hash); })
       .catch(function () { content.innerHTML = '<p>目次を読み込めませんでした。</p>'; });
   })();
 </script>

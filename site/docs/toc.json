@@ -1,66 +1,278 @@
 [
-  {"group": "はじめに", "pages": [
-    {"id": "install", "title": "インストール・アップデート"},
-    {"id": "interface", "title": "画面の見方"}
-  ]},
-  {"group": "クリップ", "pages": [
-    {"id": "clips-load", "title": "クリップを読み込む"},
-    {"id": "clips-play", "title": "再生・停止・ブラックアウト"},
-    {"id": "clips-arrange", "title": "移動・複製・選択"},
-    {"id": "clips-range", "title": "再生範囲・速度・ジャンプ"}
-  ]},
-  {"group": "レイヤーとデッキ", "pages": [
-    {"id": "layers", "title": "レイヤー"},
-    {"id": "blend-modes", "title": "重ね方"},
-    {"id": "adjustment-layers", "title": "調整レイヤー"},
-    {"id": "decks", "title": "デッキ・グリッドの表示"}
-  ]},
-  {"group": "パラメーター", "pages": [
-    {"id": "parameters", "title": "パラメーターパネル"},
-    {"id": "animation", "title": "値の動かし方"},
-    {"id": "audio-input", "title": "音の入力・BPM"}
-  ]},
-  {"group": "エフェクトとジェネレーター", "pages": [
-    {"id": "effects", "title": "エフェクトの足し方・並べ替え"},
-    {"id": "effects-list", "title": "エフェクトの一覧"},
-    {"id": "effects-analog", "title": "アナログ機材のエフェクト"},
-    {"id": "effects-glitch", "title": "光・形・グリッチのエフェクト"},
-    {"id": "generators", "title": "ジェネレーター"},
-    {"id": "generators-lines", "title": "線・粒・光のジェネレーター"},
-    {"id": "generators-nature", "title": "生き物・自然のジェネレーター"},
-    {"id": "generators-more", "title": "追加のジェネレーター"},
-    {"id": "generators-text", "title": "文字・時計のジェネレーター"}
-  ]},
-  {"group": "本番の操作", "pages": [
-    {"id": "scenes", "title": "シーン"},
-    {"id": "cues", "title": "キュー"},
-    {"id": "fx-pads", "title": "FX パッド"},
-    {"id": "autopilot", "title": "自動操縦"},
-    {"id": "live", "title": "ライブパネル・テンポ"}
-  ]},
-  {"group": "出力", "pages": [
-    {"id": "output", "title": "出力先・解像度・四隅"},
-    {"id": "mapping", "title": "出力のマッピング"},
-    {"id": "recording", "title": "録画"},
-    {"id": "lighting", "title": "照明（Art-Net / DMX）"}
-  ]},
-  {"group": "連携", "pages": [
-    {"id": "syphon", "title": "Syphon"},
-    {"id": "ndi", "title": "NDI"},
-    {"id": "camera", "title": "カメラ"},
-    {"id": "osc", "title": "OSC"},
-    {"id": "midi", "title": "MIDI コントローラー・キー"}
-  ]},
-  {"group": "プロジェクト", "pages": [
-    {"id": "project", "title": "プロジェクト"},
-    {"id": "undo", "title": "元に戻す"}
-  ]},
-  {"group": "画面のレイアウト", "pages": [
-    {"id": "layout", "title": "ワークスペース・パネル"},
-    {"id": "free-layout", "title": "自由レイアウト（試験中）"}
-  ]},
-  {"group": "資料", "pages": [
-    {"id": "shortcuts", "title": "キーボードショートカット一覧"},
-    {"id": "settings", "title": "設定"}
-  ]}
+  {
+    "group": "はじめに",
+    "group_en": "Getting Started",
+    "pages": [
+      {
+        "id": "install",
+        "title": "インストール・アップデート",
+        "title_en": "Installing and Updating"
+      },
+      {
+        "id": "interface",
+        "title": "画面の見方",
+        "title_en": "Interface Overview"
+      }
+    ]
+  },
+  {
+    "group": "クリップ",
+    "group_en": "Clips",
+    "pages": [
+      {
+        "id": "clips-load",
+        "title": "クリップを読み込む",
+        "title_en": "Loading Clips"
+      },
+      {
+        "id": "clips-play",
+        "title": "再生・停止・ブラックアウト",
+        "title_en": "Play, Stop and Blackout"
+      },
+      {
+        "id": "clips-arrange",
+        "title": "移動・複製・選択",
+        "title_en": "Moving, Duplicating and Selecting"
+      },
+      {
+        "id": "clips-range",
+        "title": "再生範囲・速度・ジャンプ",
+        "title_en": "Play Range, Speed and Jump"
+      }
+    ]
+  },
+  {
+    "group": "レイヤーとデッキ",
+    "group_en": "Layers and Decks",
+    "pages": [
+      {
+        "id": "layers",
+        "title": "レイヤー",
+        "title_en": "Layers"
+      },
+      {
+        "id": "blend-modes",
+        "title": "重ね方",
+        "title_en": "Blend Modes"
+      },
+      {
+        "id": "adjustment-layers",
+        "title": "調整レイヤー",
+        "title_en": "Adjustment Layers"
+      },
+      {
+        "id": "decks",
+        "title": "デッキ・グリッドの表示",
+        "title_en": "Decks and Grid Display"
+      }
+    ]
+  },
+  {
+    "group": "パラメーター",
+    "group_en": "Parameters",
+    "pages": [
+      {
+        "id": "parameters",
+        "title": "パラメーターパネル",
+        "title_en": "Parameter Panel"
+      },
+      {
+        "id": "animation",
+        "title": "値の動かし方",
+        "title_en": "Animating Values"
+      },
+      {
+        "id": "audio-input",
+        "title": "音の入力・BPM",
+        "title_en": "Audio Input and BPM"
+      }
+    ]
+  },
+  {
+    "group": "エフェクトとジェネレーター",
+    "group_en": "Effects and Generators",
+    "pages": [
+      {
+        "id": "effects",
+        "title": "エフェクトの足し方・並べ替え",
+        "title_en": "Adding and Ordering Effects"
+      },
+      {
+        "id": "effects-list",
+        "title": "エフェクトの一覧",
+        "title_en": "Effect List"
+      },
+      {
+        "id": "effects-analog",
+        "title": "アナログ機材のエフェクト",
+        "title_en": "Analog Gear Effects"
+      },
+      {
+        "id": "effects-glitch",
+        "title": "光・形・グリッチのエフェクト",
+        "title_en": "Light, Shape and Glitch Effects"
+      },
+      {
+        "id": "generators",
+        "title": "ジェネレーター",
+        "title_en": "Generators"
+      },
+      {
+        "id": "generators-lines",
+        "title": "線・粒・光のジェネレーター",
+        "title_en": "Line, Particle and Light Generators"
+      },
+      {
+        "id": "generators-nature",
+        "title": "生き物・自然のジェネレーター",
+        "title_en": "Life and Nature Generators"
+      },
+      {
+        "id": "generators-more",
+        "title": "追加のジェネレーター",
+        "title_en": "More Generators"
+      },
+      {
+        "id": "generators-text",
+        "title": "文字・時計のジェネレーター",
+        "title_en": "Text and Clock Generators"
+      }
+    ]
+  },
+  {
+    "group": "本番の操作",
+    "group_en": "Performing",
+    "pages": [
+      {
+        "id": "scenes",
+        "title": "シーン",
+        "title_en": "Scenes"
+      },
+      {
+        "id": "cues",
+        "title": "キュー",
+        "title_en": "Cues"
+      },
+      {
+        "id": "fx-pads",
+        "title": "FX パッド",
+        "title_en": "FX Pads"
+      },
+      {
+        "id": "autopilot",
+        "title": "自動操縦",
+        "title_en": "Autopilot"
+      },
+      {
+        "id": "live",
+        "title": "ライブパネル・テンポ",
+        "title_en": "Live Panel and Tempo"
+      }
+    ]
+  },
+  {
+    "group": "出力",
+    "group_en": "Output",
+    "pages": [
+      {
+        "id": "output",
+        "title": "出力先・解像度・四隅",
+        "title_en": "Output, Resolution, and Corners"
+      },
+      {
+        "id": "mapping",
+        "title": "出力のマッピング",
+        "title_en": "Output Mapping"
+      },
+      {
+        "id": "recording",
+        "title": "録画",
+        "title_en": "Recording"
+      },
+      {
+        "id": "lighting",
+        "title": "照明（Art-Net / DMX）",
+        "title_en": "Lighting (Art-Net / DMX)"
+      }
+    ]
+  },
+  {
+    "group": "連携",
+    "group_en": "Connections",
+    "pages": [
+      {
+        "id": "syphon",
+        "title": "Syphon",
+        "title_en": "Syphon"
+      },
+      {
+        "id": "ndi",
+        "title": "NDI",
+        "title_en": "NDI"
+      },
+      {
+        "id": "camera",
+        "title": "カメラ",
+        "title_en": "Camera"
+      },
+      {
+        "id": "osc",
+        "title": "OSC",
+        "title_en": "OSC"
+      },
+      {
+        "id": "midi",
+        "title": "MIDI コントローラー・キー",
+        "title_en": "MIDI Controllers and Keys"
+      }
+    ]
+  },
+  {
+    "group": "プロジェクト",
+    "group_en": "Project",
+    "pages": [
+      {
+        "id": "project",
+        "title": "プロジェクト",
+        "title_en": "Projects"
+      },
+      {
+        "id": "undo",
+        "title": "元に戻す",
+        "title_en": "Undo"
+      }
+    ]
+  },
+  {
+    "group": "画面のレイアウト",
+    "group_en": "Layout",
+    "pages": [
+      {
+        "id": "layout",
+        "title": "ワークスペース・パネル",
+        "title_en": "Workspaces and Panels"
+      },
+      {
+        "id": "free-layout",
+        "title": "自由レイアウト（試験中）",
+        "title_en": "Free Layout (Experimental)"
+      }
+    ]
+  },
+  {
+    "group": "資料",
+    "group_en": "Reference",
+    "pages": [
+      {
+        "id": "shortcuts",
+        "title": "キーボードショートカット一覧",
+        "title_en": "Keyboard Shortcuts"
+      },
+      {
+        "id": "settings",
+        "title": "設定",
+        "title_en": "Settings"
+      }
+    ]
+  }
 ]
