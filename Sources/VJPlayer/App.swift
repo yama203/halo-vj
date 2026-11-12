@@ -81,6 +81,26 @@ enum Main {
                                      height: nums.count > 1 ? nums[1] : 640, path: args[i + 1])
             exit(0)
         }
+        if let i = args.firstIndex(of: "--dock-tabs-preview"), args.count > i + 1 {
+            // 開発用：区画（タブ）とシーンの一覧を書き出す  VJPlayer --dock-tabs-preview out.png [grid] [drag 幅]
+            //   保存はしない（見せ方は使い捨ての設定で一覧にする）
+            _ = NSApplication.shared
+            NSApp.setActivationPolicy(.prohibited)
+            let rest = Array(args.dropFirst(i + 2))
+            CardPreview.writeDockTabs(list: !rest.contains("grid"), dragDX: rest.compactMap(Double.init).first, path: args[i + 1])
+            exit(0)
+        }
+        if let i = args.firstIndex(of: "--dock-drag-preview"), args.count > i + 3,
+           let x = Double(args[i + 2]), let y = Double(args[i + 3]) {
+            // 開発用：自由レイアウト（VJ の並べ方）で、パネルを (x, y) までドラッグしている途中を書き出す
+            //   VJPlayer --dock-drag-preview out.png x y [パネル名（なければ scenes）]
+            //   決まった木を使い、利用者のレイアウトには触らない。画面の外（1200×760 の外）は「別ウィンドウに出す」
+            _ = NSApplication.shared
+            NSApp.setActivationPolicy(.prohibited)
+            let p = args.count > i + 4 ? DockPanel(rawValue: args[i + 4]) ?? .scenes : .scenes
+            CardPreview.writeDockDrag(panel: p, at: CGPoint(x: x, y: y), path: args[i + 1])
+            exit(0)
+        }
         if let i = args.firstIndex(of: "--valuefield-preview"), args.count > i + 1 {
             // 開発用：位置・大きさ・角度・不透明度の数値欄を並べて書き出す  VJPlayer --valuefield-preview out.png
             _ = NSApplication.shared
@@ -331,9 +351,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let list = v.split(separator: ",").compactMap { Int($0) }
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { list.forEach { Engine.shared.toggleMultiSelect($0) } }
         }
-        // 画面確認用：VJ_DOCK_DRAG=パネル名（grid など）で、自由レイアウトのタブをドラッグ中の見た目にしておく
-        if let v = ProcessInfo.processInfo.environment["VJ_DOCK_DRAG"], let p = DockPanel(rawValue: v) {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { DockDragState.shared.panel = p }
+        // 画面確認用：VJ_DOCK_DRAG=パネル名,x,y（grid,400,300 など）で、自由レイアウトのタブをそこまでドラッグ中の見た目にしておく
+        if let v = ProcessInfo.processInfo.environment["VJ_DOCK_DRAG"] {
+            let parts = v.split(separator: ",").map(String.init)
+            if let p = parts.first.flatMap(DockPanel.init(rawValue:)) {
+                let n = parts.dropFirst().compactMap(Double.init)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                    DockDragState.shared.preview(p, at: CGPoint(x: n.first ?? 400, y: n.count > 1 ? n[1] : 300), insideWindow: true)
+                }
+            }
         }
         // 画面確認用：VJ_HOLD_PAD=番号（1 から）で起動時にそのパッドを押したままにしておく
         if let v = ProcessInfo.processInfo.environment["VJ_HOLD_PAD"], let n = Int(v) {
@@ -504,7 +530,8 @@ enum CardPreview {
         snapshot(NSHostingView(rootView: root), size: NSSize(width: width, height: height), path: path)
     }
 
-    private static func snapshot(_ view: NSView, size: NSSize, path: String) {
+    /// prepare：1 回描いて形が決まったあとに呼ぶ（ドラッグの途中にするなど）
+    private static func snapshot(_ view: NSView, size: NSSize, path: String, prepare: (() -> Void)? = nil) {
         let win = NSWindow(contentRect: NSRect(x: -10000, y: -10000, width: size.width, height: size.height),
                            styleMask: [.borderless], backing: .buffered, defer: false)
         win.appearance = NSAppearance(named: .darkAqua)
@@ -512,6 +539,11 @@ enum CardPreview {
         view.frame = NSRect(origin: .zero, size: size)
         view.layoutSubtreeIfNeeded()
         RunLoop.current.run(until: Date().addingTimeInterval(0.4))
+        if let prepare {
+            prepare()
+            view.layoutSubtreeIfNeeded()
+            RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+        }
         guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
         view.cacheDisplay(in: view.bounds, to: rep)
         try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
@@ -531,6 +563,59 @@ enum CardPreview {
         guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
         view.cacheDisplay(in: view.bounds, to: rep)
         try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
+    }
+
+    /// 開発用：区画のタブとシーンの一覧を画像に（保存しない別のエンジン・使い捨ての設定で）
+    static func writeDockTabs(list: Bool, dragDX: Double?, path: String) {
+        let engine = Engine(persistent: false)
+        let colors: [(String, NSColor)] = [("Intro", .systemPurple), ("Drop", .systemRed), ("Breakdown", .systemBlue),
+                                           ("Build up", .systemOrange), ("Outro", .systemTeal), ("Strobe", .white)]
+        for (k, (name, c)) in colors.enumerated() {
+            var sc = engine.captureScene(name: name, fade: [0, 1, 2, 0.5, 4, 0][k])
+            let img = NSImage(size: NSSize(width: 192, height: 108), flipped: false) { r in
+                NSGradient(starting: c, ending: .black)?.draw(in: r, angle: Double(k * 50))
+                return true
+            }
+            if let t = img.tiffRepresentation, let rep = NSBitmapImageRep(data: t) { sc.thumbnail = rep.representation(using: .png, properties: [:]) }
+            engine.scenes.append(sc)
+        }
+        engine.activeSceneID = engine.scenes[1].id
+        let store = UserDefaults(suiteName: "halovj.devpreview")!
+        store.set(list, forKey: "sceneListMode")
+        store.set(3, forKey: "sceneColumns")
+        // 決まった木で描く（利用者のレイアウトには触らない）
+        let tree = DockNode.tabs(id: UUID(), panels: [.live, .scenes, .cues, .effects], selected: 1)
+        let drag = DockDragState.preview(tree: tree)
+        let root = DockRootView(previewTree: tree, drag: drag, placeholders: false)
+            .frame(width: 476, height: 436)
+            .background(Color(white: 0.08))
+            .environment(\.colorScheme, .dark)
+            .defaultAppStorage(store)
+            .environmentObject(engine)
+        snapshot(NSHostingView(rootView: root), size: NSSize(width: 476, height: 436), path: path) {
+            // 並べ替えの途中：「シーン」のタブを横に dragDX だけ動かしたところ
+            guard let dx = dragDX, let id = tree.tabsID(containing: .scenes),
+                  let f = drag.geometry.areas[id]?.tabs[.scenes] else { return }
+            drag.preview(.scenes, at: CGPoint(x: f.midX + dx, y: f.midY), insideWindow: true)
+        }
+        store.removePersistentDomain(forName: "halovj.devpreview")
+    }
+
+    /// 開発用：自由レイアウトでパネルをドラッグしている途中を画像に（決まった木。パネルの中身は名前だけ）
+    static func writeDockDrag(panel: DockPanel, at point: CGPoint, path: String) {
+        let size = NSSize(width: 1200, height: 760)
+        let tree = DockNode.clubVJ
+        let drag = DockDragState.preview(tree: tree)
+        let root = DockRootView(previewTree: tree, drag: drag, placeholders: true)
+            .frame(width: size.width, height: size.height)
+            .background(Color(white: 0.08))
+            .environment(\.colorScheme, .dark)
+            .environmentObject(Engine(persistent: false))
+        let inside = CGRect(origin: .zero, size: size).contains(point)
+        snapshot(NSHostingView(rootView: root), size: size, path: path) {
+            drag.preview(panel, at: point, insideWindow: inside)
+        }
+        print("dock-drag-preview: \(panel.rawValue) at \(point) → \(drag.reordering ? "並べ替え" : drag.target.map { "\($0)" } ?? "置けない")")
     }
 
     /// 開発用：「エフェクト」「ジェネレーター」パネルを画像に（保存しない別のエンジンで）

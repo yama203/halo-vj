@@ -52,6 +52,12 @@ Overwrite, name, fade time, delete, deck. A scene remembers the deck it was save
 
 “L / M / S / Min” at the top right changes the size of the scenes (how many per row).
 
+The button to its right switches between thumbnails and a list. The list shows one scene per row, with the number, a small thumbnail, name, deck and fade time easy to read.
+
+- Click a row to switch to that scene.
+- The knob at the right end edits the scene while the output stays as it is.
+- Drag a row onto another row to reorder scenes (you can also drag it into the cue list to add it).
+
 ## Saving
 
 Scenes are saved in the project. The grid contents are shared. A scene stores “which column to play”, so if you move clips, whatever clip is in that place plays.

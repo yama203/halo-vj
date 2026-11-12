@@ -199,9 +199,18 @@ final class LayoutManager: NSObject, ObservableObject, NSWindowDelegate {
 
     // MARK: - 別ウィンドウ
 
-    func detach(_ p: PanelID) {
+    /// 別ウィンドウに出す。at（画面の座標）を渡すと、ウィンドウの上の端をそこに出す（自由レイアウトのタブを外へドラッグしたとき）
+    func detach(_ p: PanelID, at point: NSPoint? = nil) {
         guard !isDetached(p) else { windows[p]?.makeKeyAndOrderFront(nil); return }
-        state.detached.append(p)
+        var s = state
+        if let point {
+            let old = s.frames[p.rawValue].map(NSRectFromString)
+            let size = old.flatMap { $0.width > 50 && $0.height > 30 ? $0.size : nil } ?? p.defaultSize
+            s.frames[p.rawValue] = NSStringFromRect(NSRect(x: point.x - 40, y: point.y - size.height + 10,
+                                                          width: size.width, height: size.height))
+        }
+        s.detached.append(p)
+        state = s
         syncWindows()
     }
 

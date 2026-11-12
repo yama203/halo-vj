@@ -135,6 +135,14 @@ extension Engine {
         if sceneDraft?.sceneID == id { closeSceneEditor() }
     }
 
+    /// シーンの並びを変える：id のシーンを before のシーンの前へ（before が nil なら最後へ）
+    func moveScene(_ id: UUID, before: UUID?) {
+        guard id != before, let from = scenes.firstIndex(where: { $0.id == id }) else { return }
+        let sc = scenes.remove(at: from)
+        let to = before.flatMap { b in scenes.firstIndex { $0.id == b } } ?? scenes.count
+        scenes.insert(sc, at: to)
+    }
+
     func updateScene(_ id: UUID, _ f: (inout VJScene) -> Void) {
         guard let i = scenes.firstIndex(where: { $0.id == id }) else { return }
         f(&scenes[i])
@@ -380,6 +388,8 @@ struct ScenesPanel: View {
     @EnvironmentObject var engine: Engine
     /// 1 行に並べるシーンの数（大きさ）
     @AppStorage("sceneColumns") private var sceneColumns = 3
+    /// 一覧（1 行に 1 つ）で並べるか
+    @AppStorage("sceneListMode") private var listMode = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -403,23 +413,34 @@ struct ScenesPanel: View {
                 .help(L("何も流さない空のシーンを足して、そのまま編集を始める（出力はそのまま）。グリッドでクリップを押して組み立てる"))
             }
             HStack(alignment: .center, spacing: 8) {
-                Text(L("絵で切り替え・名前の帯で編集・右クリックでほか"))
+                Text(listMode ? L("行で切り替え・右のつまみで編集・ドラッグで並べ替え") : L("絵で切り替え・名前の帯で編集・右クリックでほか"))
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .help(L("絵をクリックで切り替え（フェード時間はシーンごと）。下の名前の帯をクリックで、出力はそのままグリッドで編集。右クリックで上書き・名前・フェード時間・デッキ・削除"))
                 Spacer(minLength: 0)
-                Picker("", selection: $sceneColumns) {
-                    Text(L("大")).tag(2)
-                    Text(L("中")).tag(3)
-                    Text(L("小")).tag(4)
-                    Text(L("最小")).tag(6)
+                if !listMode {
+                    Picker("", selection: $sceneColumns) {
+                        Text(L("大")).tag(2)
+                        Text(L("中")).tag(3)
+                        Text(L("小")).tag(4)
+                        Text(L("最小")).tag(6)
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .controlSize(.small)
+                    .fixedSize()
+                    .help(L("シーンの大きさ（1 行に並べる数）"))
+                }
+                Picker("", selection: $listMode) {
+                    Image(systemName: "square.grid.2x2").tag(false)
+                    Image(systemName: "list.bullet").tag(true)
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
                 .controlSize(.small)
                 .fixedSize()
-                .help(L("シーンの大きさ（1 行に並べる数）"))
+                .help(L("シーンの見せ方：絵を並べる / 一覧（1 行に 1 つ。名前・デッキ・フェード時間が見やすい）"))
             }
             if engine.scenes.isEmpty {
                 VStack(spacing: 6) {
@@ -428,6 +449,20 @@ struct ScenesPanel: View {
                         .font(.system(size: 12)).foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if listMode {
+                ScrollView(.vertical) {
+                    LazyVStack(spacing: 3) {
+                        ForEach(Array(engine.scenes.enumerated()), id: \.element.id) { i, s in
+                            SceneRow(scene: s, number: i + 1,
+                                     active: engine.activeSceneID == s.id,
+                                     editing: engine.editingSceneID == s.id,
+                                     progress: engine.activeSceneID == s.id ? engine.sceneProgress : nil)
+                        }
+                        // 最後へ動かす置き場所
+                        SceneListTail()
+                    }
+                    .padding(.bottom, 8)
+                }
             } else {
                 ScrollView(.vertical) {
                     let n = min(max(sceneColumns, 2), 6)
@@ -518,32 +553,41 @@ struct SceneTile: View {
         .clipShape(RoundedRectangle(cornerRadius: 6))
         .overlay(RoundedRectangle(cornerRadius: 6).stroke(active ? Color.teal : Color.gray.opacity(0.3), lineWidth: active ? 2 : 1))
         .onHover { hovering = $0 }
-        .contextMenu {
-            Button(L("編集（出力はそのまま）")) { engine.editScene(scene.id) }
-            Button(L("キューに足す")) { engine.addCue(.scene(scene.id)) }
-            Button(L("今の状態で上書き")) { engine.overwriteScene(scene.id) }
-            Button(L("名前を変える…")) { rename() }
-            if engine.decks.count > 1 {
-                Menu(L("デッキ")) {
-                    ForEach(engine.decks) { d in
-                        Button(((engine.deckIndex(scene.deck) ?? 0) == engine.deckIndex(d.id) ? "✓ " : "") + d.name) {
-                            engine.updateScene(scene.id) { $0.deck = d.id; $0.layerDecks = nil }
-                            if engine.editingSceneID == scene.id { engine.reloadSceneDraft() }
-                        }
+        .contextMenu { SceneMenu(scene: scene).environmentObject(engine) }
+    }
+
+}
+
+/// シーンの右クリックメニュー（絵の並び・一覧で共通）
+struct SceneMenu: View {
+    @EnvironmentObject var engine: Engine
+    let scene: VJScene
+
+    var body: some View {
+        Button(L("編集（出力はそのまま）")) { engine.editScene(scene.id) }
+        Button(L("キューに足す")) { engine.addCue(.scene(scene.id)) }
+        Button(L("今の状態で上書き")) { engine.overwriteScene(scene.id) }
+        Button(L("名前を変える…")) { renameScene() }
+        if engine.decks.count > 1 {
+            Menu(L("デッキ")) {
+                ForEach(engine.decks) { d in
+                    Button(((engine.deckIndex(scene.deck) ?? 0) == engine.deckIndex(d.id) ? "✓ " : "") + d.name) {
+                        engine.updateScene(scene.id) { $0.deck = d.id; $0.layerDecks = nil }
+                        if engine.editingSceneID == scene.id { engine.reloadSceneDraft() }
                     }
                 }
             }
-            Menu(L("フェード時間")) {
-                ForEach(VJScene.fadeChoices, id: \.self) { f in
-                    Button((scene.fade == f ? "✓ " : "") + VJScene.fadeLabel(f)) { engine.updateScene(scene.id) { $0.fade = f } }
-                }
-            }
-            Divider()
-            Button(L("削除"), role: .destructive) { engine.deleteScene(scene.id) }
         }
+        Menu(L("フェード時間")) {
+            ForEach(VJScene.fadeChoices, id: \.self) { f in
+                Button((scene.fade == f ? "✓ " : "") + VJScene.fadeLabel(f)) { engine.updateScene(scene.id) { $0.fade = f } }
+            }
+        }
+        Divider()
+        Button(L("削除"), role: .destructive) { engine.deleteScene(scene.id) }
     }
 
-    private func rename() {
+    private func renameScene() {
         let alert = NSAlert()
         alert.messageText = L("シーンの名前")
         let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 240, height: 24))
@@ -555,5 +599,119 @@ struct SceneTile: View {
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         let name = field.stringValue.trimmingCharacters(in: .whitespaces)
         if !name.isEmpty { engine.updateScene(scene.id) { $0.name = name } }
+    }
+}
+
+/// 一覧で見せるときのシーン 1 行（番号・小さな絵・名前・デッキ・フェード時間）
+struct SceneRow: View {
+    @EnvironmentObject var engine: Engine
+    let scene: VJScene
+    let number: Int
+    let active: Bool
+    let editing: Bool
+    let progress: Double?
+    @State private var hovering = false
+    @State private var dropTarget = false
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text("\(number)")
+                .font(.system(size: 11, weight: .bold).monospacedDigit())
+                .foregroundStyle(.secondary)
+                .frame(width: 22, alignment: .trailing)
+            Group {
+                if let d = scene.thumbnail, let img = NSImage(data: d) {
+                    Image(nsImage: img).resizable().aspectRatio(16.0 / 9.0, contentMode: .fill)
+                } else {
+                    Color.black
+                }
+            }
+            .frame(width: 48, height: 27)
+            .clipShape(RoundedRectangle(cornerRadius: 3))
+            Text(scene.name)
+                .font(.system(size: 12, weight: .semibold))
+                .lineLimit(1)
+            Spacer(minLength: 4)
+            if engine.decks.count > 1, let d = engine.deckIndex(scene.deck) ?? Optional(0) {
+                Text(engine.decks[d].name)
+                    .font(.system(size: 10, weight: .semibold)).lineLimit(1)
+                    .foregroundStyle(.secondary)
+            }
+            Text(VJScene.fadeLabel(scene.fade))
+                .font(.system(size: 10, weight: .semibold).monospacedDigit())
+                .foregroundStyle(scene.fade > 0 ? Color.teal : Color.secondary)
+                .frame(minWidth: 30, alignment: .trailing)
+            Button {
+                if editing { engine.closeSceneEditor() } else { engine.editScene(scene.id) }
+            } label: {
+                Image(systemName: "slider.horizontal.3").font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(editing ? Color.white : Color.secondary)
+                    .frame(width: 24, height: 22)
+                    .background(RoundedRectangle(cornerRadius: 4).fill(editing ? Color.accentColor.opacity(0.9) : Color.clear))
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(editing ? L("クリックで編集を終える")
+                  : L("クリックで「\(scene.name)」を編集（出力はそのまま。グリッドでクリップを選び、プレビューで見ながら直せる）"))
+        }
+        .padding(.horizontal, 6)
+        .frame(height: 33)
+        .background(RoundedRectangle(cornerRadius: 5).fill(active ? Color.teal.opacity(0.25) : Color.white.opacity(hovering ? 0.10 : 0.04)))
+        .overlay(alignment: .bottomLeading) {
+            if let progress {
+                GeometryReader { g in
+                    Rectangle().fill(Color.teal).frame(width: g.size.width * progress)
+                }
+                .frame(height: 2)
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 5))
+        .overlay(RoundedRectangle(cornerRadius: 5).stroke(active ? Color.teal : Color.clear, lineWidth: 1.5))
+        .contentShape(Rectangle())
+        .onHover { hovering = $0 }
+        .onTapGesture { engine.recallScene(scene.id) }
+        // キューの一覧へドラッグして足せる
+        .onDrag { NSItemProvider(object: ("halovj-scene:" + scene.id.uuidString) as NSString) }
+        .help(L("クリックで「\(scene.name)」に切り替え（\(VJScene.fadeLabel(scene.fade))）・ドラッグで並べ替え"))
+        // ほかのシーンをここへ落とすと、この行の前へ動かす
+        .onDrop(of: [.plainText], isTargeted: $dropTarget) { items in
+            guard let item = items.first else { return false }
+            _ = item.loadObject(ofClass: NSString.self) { obj, _ in
+                guard let s = obj as? String, s.hasPrefix("halovj-scene:"),
+                      let id = UUID(uuidString: String(s.dropFirst("halovj-scene:".count))) else { return }
+                DispatchQueue.main.async { engine.moveScene(id, before: scene.id) }
+            }
+            return true
+        }
+        .overlay(alignment: .top) {
+            if dropTarget {
+                Rectangle().fill(Color.accentColor).frame(height: 2).offset(y: -2.5).allowsHitTesting(false)
+            }
+        }
+        .contextMenu { SceneMenu(scene: scene).environmentObject(engine) }
+    }
+}
+
+/// 一覧のいちばん下：ここへシーンを落とすと最後へ動かす
+private struct SceneListTail: View {
+    @EnvironmentObject var engine: Engine
+    @State private var target = false
+
+    var body: some View {
+        Color.clear
+            .frame(height: 24)
+            .overlay(alignment: .top) {
+                if target { Rectangle().fill(Color.accentColor).frame(height: 2) }
+            }
+            .contentShape(Rectangle())
+            .onDrop(of: [.plainText], isTargeted: $target) { items in
+                guard let item = items.first else { return false }
+                _ = item.loadObject(ofClass: NSString.self) { obj, _ in
+                    guard let s = obj as? String, s.hasPrefix("halovj-scene:"),
+                          let id = UUID(uuidString: String(s.dropFirst("halovj-scene:".count))) else { return }
+                    DispatchQueue.main.async { engine.moveScene(id, before: nil) }
+                }
+                return true
+            }
     }
 }

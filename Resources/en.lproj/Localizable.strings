@@ -411,9 +411,13 @@
 "ソース" = "Sources";
 "パネルはすべて別ウィンドウに出しています" = "All panels are in separate windows";
 "「%@」を閉じる" = "Close “%@”";
-"「%@」：タブをドラッグして、ほかの区画の真ん中（タブにする）か端（分けて置く）へ" = "“%@”: drag the tab to the center of another area (to make it a tab) or to an edge (to split)";
 "タブにする" = "Make Tab";
-"ここに分けて置く" = "Split Here";
+"左に置く" = "Place Left";
+"右に置く" = "Place Right";
+"上に置く" = "Place Above";
+"下に置く" = "Place Below";
+"「%@」　ドラッグ：並べ替え・ほかの場所へ動かす / ダブルクリック：広げる" = "“%@”  Drag: reorder or move elsewhere / Double-click: maximize";
+"元の大きさに戻す（タブのダブルクリックでも戻る）" = "Restore size (or double-click a tab)";
 "ここに差し込む" = "Insert Here";
 "左端いっぱい" = "Full Left";
 "右端いっぱい" = "Full Right";
@@ -1792,6 +1796,9 @@
 "シーンの大きさ（1 行に並べる数）" = "Scene size (how many per row)";
 "まだシーンがありません。\n良い組み合わせができたら「今の状態をシーンに保存」" = "No scenes yet.\nWhen you find a good combination, use “Save Current State as Scene”";
 "クリックで「%@」に切り替え（%@）" = "Click to switch to “%@” (%@)";
+"クリックで「%@」に切り替え（%@）・ドラッグで並べ替え" = "Click to switch to “%@” (%@) · drag to reorder";
+"行で切り替え・右のつまみで編集・ドラッグで並べ替え" = "Click a row to switch · edit with the knob on the right · drag to reorder";
+"シーンの見せ方：絵を並べる / 一覧（1 行に 1 つ。名前・デッキ・フェード時間が見やすい）" = "Scene view: thumbnails / list (one per row; easier to read names, decks and fade times)";
 "クリックで編集を終える" = "Click to finish editing";
 "クリックで「%@」を編集（出力はそのまま。グリッドでクリップを選び、プレビューで見ながら直せる）" = "Click to edit “%@” (output stays as is; pick clips in the grid and adjust while watching the preview)";
 "編集（出力はそのまま）" = "Edit (output stays as is)";
