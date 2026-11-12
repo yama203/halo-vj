@@ -30,6 +30,60 @@ struct SectionTitle: View {
     }
 }
 
+/// パラメーターの節（トランスフォーム・ジェネレーター・エフェクトなど）を畳んでいるか。次に開いたときも同じ
+final class SectionFold: ObservableObject {
+    static let shared = SectionFold()
+    private static let key = "foldedSections"
+    /// 開発用の書き出し・セルフテストでは、利用者の設定を読み書きしない
+    private let defaults: UserDefaults? = EffectPresets.isDevRun ? nil : .standard
+    @Published private(set) var folded: Set<String>
+
+    init() { folded = Set(defaults?.stringArray(forKey: Self.key) ?? []) }
+
+    func isFolded(_ key: String) -> Bool { folded.contains(key) }
+    func toggle(_ key: String) {
+        if folded.contains(key) { folded.remove(key) } else { folded.insert(key) }
+        defaults?.set(folded.sorted(), forKey: Self.key)
+    }
+}
+
+/// 畳める節の見出し：クリックで畳む／開く（▸ / ▾ の印つき）
+struct FoldTitle: View {
+    let key: String
+    let text: String
+    var icon: String? = nil
+    var tint: Color? = nil
+    @ObservedObject private var fold = SectionFold.shared
+
+    init(key: String, _ text: String, icon: String? = nil, tint: Color? = nil) {
+        self.key = key; self.text = text; self.icon = icon; self.tint = tint
+    }
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: fold.isFolded(key) ? "chevron.right" : "chevron.down")
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(.secondary)
+                .frame(width: 10)
+            SectionTitle(text, icon: icon, tint: tint)
+        }
+        .contentShape(Rectangle())
+        .onTapGesture { withAnimation(.easeOut(duration: 0.12)) { fold.toggle(key) } }
+        .help(fold.isFolded(key) ? L("クリックで開く") : L("クリックで畳む"))
+    }
+}
+
+/// 畳める節の中身：畳んでいる間は出さない
+struct FoldBody<Content: View>: View {
+    let key: String
+    @ViewBuilder var content: Content
+    @ObservedObject private var fold = SectionFold.shared
+
+    var body: some View {
+        if !fold.isFolded(key) { content }
+    }
+}
+
 extension UI {
     /// ジェネレーター（自分で絵を描く）とエフェクト（絵に手を加える）の色。ぱっと見で見分けられるように
     static let generatorTint = Color(red: 0.25, green: 0.82, blue: 0.80)
@@ -184,7 +238,7 @@ struct OutputMonitor: View {
                 }
             }
             .aspectRatio(engine.outputAspect, contentMode: .fit)
-            .effectDropTarget(cornerRadius: 0) { k in
+            .effectDropTarget(cornerRadius: 0, place: .composition) { k in
                 engine.addEffect(k)
                 engine.inspectorTab = .composition
             }
@@ -747,7 +801,7 @@ struct LayerHeader: View {
                 drag.layerSource = nil
                 drag.layerTarget = nil
             })
-        .effectDropTarget { k in
+        .effectDropTarget(place: .layer(layer.index)) { k in
             layer.addEffect(k)
             engine.selectedLayer = layer.index
             engine.inspectorTab = .layer
@@ -856,6 +910,8 @@ struct SlotCell: View {
     @Environment(\.gridSize) private var gridSize
     @State private var pressed = false
     @State private var dropTargeted = false
+    /// エフェクトを付け替えた直後、少しの間紫に光らせる
+    @State private var moveFlash = false
     @State private var hovering = false
     /// 空きの枠で、右上の＋の上を押した（離したらクリップを読み込む）
     @State private var addPressed = false
@@ -908,6 +964,13 @@ struct SlotCell: View {
                         : (active ? (editing ? Color.orange : Color.green)
                            : (adjustmentRow ? Color.teal.opacity(0.35) : Color.gray.opacity(0.3))),
                         lineWidth: active || dropTargeted || moveTarget || badTarget ? 3 : 1)
+        )
+        .overlay(
+            // エフェクトのカードを重ねている間・付け替えた直後は紫（一覧から落とすときと同じ見た目）
+            RoundedRectangle(cornerRadius: 6)
+                .stroke(Color.purple, lineWidth: 3)
+                .opacity(moveFlash || (dropTargeted && EffectUIState.shared.dragging != nil) ? 1 : 0)
+                .allowsHitTesting(false)
         )
         .overlay {
             // ⇧クリックで選んだクリップ
@@ -1043,14 +1106,20 @@ struct SlotCell: View {
                 }
         )
         // 動画ファイル → 読み込む。エフェクト一覧から → このクリップに付ける（空きスロットには付けない）
-        .onDrop(of: [.fileURL, .plainText], isTargeted: $dropTargeted) { providers in
+        // エフェクトのカードをドラッグしてきた → このクリップへ付け替える（⌥ で写す。選択は変えない。空き枠は断る）
+        .onDrop(of: [.fileURL, .plainText], delegate: EffectDropDelegate(types: [.fileURL, .plainText], targeted: $dropTargeted) { providers, copy in
             if providers.contains(where: { $0.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) }) {
                 // 調整レイヤーには動画・画像は置かない
                 if adjustmentRow { NSSound.beep(); return false }
                 loadDropped(providers)
                 return true
             }
-            return EffectDrop.handle(providers, allowGenerators: !adjustmentRow) { k in
+            return EffectDrop.handle(providers, allowGenerators: !adjustmentRow, copy: copy, move: { id, copy in
+                guard let slot = engine.slots[index] else { NSSound.beep(); return }
+                guard EffectTransfer.drop(id, to: .clip(slot.id), copy: copy, engine: engine) else { return }
+                moveFlash = true
+                withAnimation(.easeOut(duration: 0.4)) { moveFlash = false }
+            }) { k in
                 if adjustmentRow && engine.slots[index] == nil {
                     // 調整レイヤーの空き枠 → そのエフェクトでエフェクトのクリップを作る
                     if !engine.createEffectClip(at: index, with: k) { NSSound.beep() }
@@ -1065,7 +1134,7 @@ struct SlotCell: View {
                 slot.addEffect(k)
                 engine.selectClip(index)
             }
-        }
+        })
         .effectPickerPopover($showPicker, targetLabel: pickerTarget, addPicked)
         .contextMenu {
             if picked {

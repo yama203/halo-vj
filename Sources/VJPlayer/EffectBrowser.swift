@@ -190,38 +190,63 @@ enum EffectDrop {
     static let types: [UTType] = [.plainText]
 
     /// providers にエフェクトが入っていれば、そのエフェクトで action を呼ぶ（メインスレッド）。入っていなければ false
-    /// ジェネレーターはクリップの枠にだけ置ける（allowGenerators）。ほかの所では受け取らない
-    static func handle(_ providers: [NSItemProvider], allowGenerators: Bool = false,
-                       _ action: @escaping (EffectKind) -> Void) -> Bool {
-        guard let p = providers.first(where: { $0.canLoadObject(ofClass: NSString.self) }) else { return false }
-        _ = p.loadObject(ofClass: NSString.self) { obj, _ in
-            guard let s = obj as? String, let k = EffectKind.fromDragString(s) else { return }
-            if k.isGenerator && !allowGenerators { DispatchQueue.main.async { NSSound.beep() }; return }
-            DispatchQueue.main.async { EffectFavorites.shared.note(k); action(k) }
+    /// ジェネレーターはクリップの枠にだけ置ける（allowGenerators）。ほかの所では受け取らない。
+    /// カードをドラッグしてきた（付け替え）なら move を呼ぶ（copy は ⌥ を押していたか）。move が無ければ断る
+    static func handle(_ providers: [NSItemProvider], allowGenerators: Bool = false, copy: Bool = false,
+                       move: ((UUID, Bool) -> Void)? = nil, _ action: @escaping (EffectKind) -> Void) -> Bool {
+        loadString(providers) { s in
+            if let id = EffectTransfer.moveID(s) {
+                if let move { move(id, copy) } else { NSSound.beep() }
+                EffectDragState.shared.end()
+                return
+            }
+            guard let k = EffectKind.fromDragString(s) else { return }
+            if k.isGenerator && !allowGenerators { NSSound.beep(); return }
+            EffectFavorites.shared.note(k)
+            action(k)
         }
-        return true
     }
 }
 
 extension View {
-    /// エフェクトをドロップできる所にする（重なっている間は紫の枠）
-    func effectDropTarget(cornerRadius: CGFloat = 6, _ action: @escaping (EffectKind) -> Void) -> some View {
-        modifier(EffectDropModifier(cornerRadius: cornerRadius, action: action))
+    /// エフェクトをドロップできる所にする（重なっている間は紫の枠）。
+    /// place を渡すと、ほかの場所のカードをドラッグしてきたとき、ここへ付け替える（⌥ で写す）
+    func effectDropTarget(cornerRadius: CGFloat = 6, place: EffectPlace? = nil,
+                          _ action: @escaping (EffectKind) -> Void) -> some View {
+        modifier(EffectDropModifier(cornerRadius: cornerRadius,
+                                    move: place.map { p in { id, copy in EffectTransfer.drop(id, to: p, copy: copy) } },
+                                    action: action))
+    }
+
+    /// 付け替えを自分で受ける形（並びの「＋ エフェクト」の枠など）。move は (id, 写すか) で、付け替えたら true
+    func effectDropTarget(cornerRadius: CGFloat = 6, move: @escaping (UUID, Bool) -> Bool,
+                          _ action: @escaping (EffectKind) -> Void) -> some View {
+        modifier(EffectDropModifier(cornerRadius: cornerRadius, move: move, action: action))
     }
 }
 
 private struct EffectDropModifier: ViewModifier {
     let cornerRadius: CGFloat
+    /// 付け替え（無ければ受けない）
+    let move: ((UUID, Bool) -> Bool)?
     let action: (EffectKind) -> Void
     @State private var targeted = false
+    @State private var flash = false
 
     func body(content: Content) -> some View {
         content
             .overlay(RoundedRectangle(cornerRadius: cornerRadius)
                 .stroke(Color.purple, lineWidth: 3)
-                .opacity(targeted ? 1 : 0)
+                .opacity(targeted || flash ? 1 : 0)
                 .allowsHitTesting(false))
-            .onDrop(of: EffectDrop.types, isTargeted: $targeted) { EffectDrop.handle($0, action) }
+            .onDrop(of: EffectDrop.types, delegate: EffectDropDelegate(targeted: $targeted) { providers, copy in
+                EffectDrop.handle(providers, copy: copy, move: move.map { m in { id, copy in
+                    // 付け替えたら、落とした先を少しの間光らせる
+                    guard m(id, copy) else { return }
+                    flash = true
+                    withAnimation(.easeOut(duration: 0.4)) { flash = false }
+                } }, action)
+            })
     }
 }
 

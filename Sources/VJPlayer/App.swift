@@ -101,6 +101,27 @@ enum Main {
             CardPreview.writeDockDrag(panel: p, at: CGPoint(x: x, y: y), path: args[i + 1])
             exit(0)
         }
+        if let i = args.firstIndex(of: "--fold-preview"), args.count > i + 1 {
+            // 開発用：畳める節（開いたもの・畳んだもの）を並べて書き出す  VJPlayer --fold-preview out.png
+            _ = NSApplication.shared
+            NSApp.setActivationPolicy(.prohibited)
+            SectionFold.shared.toggle("音・再生")
+            SectionFold.shared.toggle("generator")
+            let pct: (Double) -> String = { String(format: "%+.1f%%", $0 * 100) }
+            let v = VStack(alignment: .leading, spacing: 14) {
+                ParamColumn(title: L("トランスフォーム")) {
+                    ValueDrag(label: L("位置 X"), value: .constant(0), range: -2...2, perPoint: 0.01, defaultValue: 0, format: pct)
+                        .frame(height: UI.rowHeight)
+                    ValueDrag(label: L("位置 Y"), value: .constant(0.25), range: -2...2, perPoint: 0.01, defaultValue: 0, format: pct)
+                        .frame(height: UI.rowHeight)
+                }
+                ParamColumn(title: "音・再生") { Text("x") }
+                FoldTitle(key: "generator", L("ジェネレーター：") + EffectKind.solid.label, icon: "sparkles", tint: UI.generatorTint)
+                FoldTitle(key: "effects", L("エフェクト") + "（3）", icon: "camera.filters", tint: UI.effectTint)
+            }.padding(12).frame(width: 320, alignment: .leading)
+            CardPreview.writeView(AnyView(v), path: args[i + 1])
+            exit(0)
+        }
         if let i = args.firstIndex(of: "--valuefield-preview"), args.count > i + 1 {
             // 開発用：位置・大きさ・角度・不透明度の数値欄を並べて書き出す  VJPlayer --valuefield-preview out.png
             _ = NSApplication.shared

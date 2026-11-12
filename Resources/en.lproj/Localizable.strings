@@ -2189,3 +2189,11 @@
 "立ち上がりの強さがこの線を超えた瞬間に振る。下げるほど小さな音でも振る（グラフの線を上下にドラッグしても変わる）" = "Rolls the moment the attack strength crosses this line. Lower values roll on quieter hits (you can also drag the line in the graph up and down)";
 "立ち上がりの強さ（最近 2.5 秒）。オレンジの線を上下にドラッグして、しきい値を変える" = "Attack strength (last 2.5 seconds). Drag the orange line up and down to change the threshold";
 "自動で振る（拍・音）・変え方・つなぎ" = "Roll automatically (beat or audio), change amount, glide";
+"名前の行をドラッグして並べ替え・ほかの場所へ移す（⌥ で写す）。上から順にかかる。▸ で開く／閉じる" = "Drag a name row to reorder or move it elsewhere (⌥ to copy). Applied top to bottom. ▸ to expand / collapse";
+"ドラッグして並べ替え。ほかの場所へ落とすと移す（⌥ で写す）" = "Drag to reorder. Drop elsewhere to move (⌥ to copy)";
+"クリップ「%@」" = "Clip “%@”";
+"ここで止めるとこのタブに切り替わる。落とすと最後に付く" = "Hold here to switch to this tab. Drop to add at the end";
+"移す" = "Move to";
+"写す" = "Copy to";
+"クリックで開く" = "Click to expand";
+"クリックで畳む" = "Click to collapse";

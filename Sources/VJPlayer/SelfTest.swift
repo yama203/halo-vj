@@ -510,6 +510,7 @@ enum SelfTest {
         testDiceAndPresets(check: check)
         testFavorites(check: check)
         testTabsScenes(check: check)
+        testEffectMove(check: check)
 
         let out = AudioOutput.shared.engine.outputNode
         let feeding = AudioOutput.shared.engine.inputConnectionPoint(for: out, inputBus: 0)?.node as? AVAudioMixerNode

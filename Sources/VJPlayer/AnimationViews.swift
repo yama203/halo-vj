@@ -335,14 +335,16 @@ final class EffectUIState: ObservableObject {
     static let movePrefix = "vjeffectmove:"
 }
 
-/// カードの上にドロップ：並べ替え（ドラッグしてきたエフェクト）か、一覧からの追加（その位置に入れる）
+/// カードの上にドロップ：並べ替え（ドラッグしてきたエフェクト）・ほかの並びからの付け替え・一覧からの追加（その位置に入れる）
 struct EffectReorderDrop<H: ObservableObject & EffectHolder>: ViewModifier {
     let index: Int
     let id: UUID
     let holder: H
+    /// この並びの置き場所（FX パッドなど、無ければこの並びの中の並べ替えだけ）
+    var place: EffectPlace?
     @State private var targeted = false
 
-    /// 下から上へ動かすときはカードの上に、上から下へはカードの下に入る
+    /// 下から上へ動かすときはカードの上に、上から下へはカードの下に入る（ほかの並びから来たときは上）
     private var below: Bool {
         guard let d = EffectUIState.shared.dragging, let from = holder.effects.firstIndex(where: { $0.id == d }) else { return false }
         return from < index
@@ -357,34 +359,41 @@ struct EffectReorderDrop<H: ObservableObject & EffectHolder>: ViewModifier {
                     .opacity(targeted && EffectUIState.shared.dragging != id ? 1 : 0)
                     .allowsHitTesting(false)
             }
-            .onDrop(of: EffectDrop.types, isTargeted: $targeted) { providers in
-                guard let p = providers.first(where: { $0.canLoadObject(ofClass: NSString.self) }) else { return false }
-                _ = p.loadObject(ofClass: NSString.self) { obj, _ in
-                    guard let s = obj as? String else { return }
-                    DispatchQueue.main.async {
-                        EffectUIState.shared.dragging = nil
-                        if s.hasPrefix(EffectUIState.movePrefix),
-                           let mid = UUID(uuidString: String(s.dropFirst(EffectUIState.movePrefix.count))) {
-                            holder.moveEffect(mid, to: index)
-                        } else if let k = EffectKind.fromDragString(s), !k.isGenerator {
-                            EffectFavorites.shared.note(k)
-                            let e = holder.insertEffect(k, at: index)
-                            EffectUIState.shared.expanded.insert(e.id)
-                        }
+            .onDrop(of: EffectDrop.types, delegate: EffectDropDelegate(targeted: $targeted) { providers, copy in
+                let below = self.below
+                return EffectDrop.loadString(providers) { s in
+                    if let mid = EffectTransfer.moveID(s) {
+                        // 同じ並びで写すときは、線の出ている側に入れる
+                        let at = copy && below ? index + 1 : index
+                        EffectTransfer.receive(mid, into: holder, place: place, at: at, copy: copy)
+                    } else if let k = EffectKind.fromDragString(s), !k.isGenerator {
+                        EffectFavorites.shared.note(k)
+                        let e = holder.insertEffect(k, at: index)
+                        EffectUIState.shared.expanded.insert(e.id)
                     }
                 }
-                return true
-            }
+            })
     }
 }
 
 struct EffectsSection<H: ObservableObject & EffectHolder>: View {
     @ObservedObject var holder: H
+    /// この並びの置き場所（ほかの場所との付け替え用。FX パッドなどは nil で、並びの中だけ）
+    var place: EffectPlace? = nil
     @ObservedObject private var ui = EffectUIState.shared
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            SectionTitle(L("エフェクト"), icon: "camera.filters", tint: UI.effectTint)
+            FoldTitle(key: "effects", holder.effects.isEmpty ? L("エフェクト") : L("エフェクト") + "（\(holder.effects.count)）",
+                      icon: "camera.filters", tint: UI.effectTint)
+            FoldBody(key: "effects") { list }
+        }
+        .paramsFrame(alignment: .leading)
+    }
+
+    /// 足すボタンと、カードの並び
+    @ViewBuilder private var list: some View {
+        VStack(alignment: .leading, spacing: 8) {
             // ＋ボタンのメニューから選ぶか、右下の「エフェクト」一覧からここへドラッグ
             HStack(spacing: 8) {
                 AddEffectMenu { k in holder.addEffectOpened(k) }
@@ -403,22 +412,27 @@ struct EffectsSection<H: ObservableObject & EffectHolder>: View {
             .background(RoundedRectangle(cornerRadius: 6)
                 .strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [5, 4]))
                 .foregroundStyle(UI.effectTint.opacity(0.5)))
-            .effectDropTarget { k in
+            .effectDropTarget(move: { id, copy in
+                EffectTransfer.receive(id, into: holder, place: place, at: nil, copy: copy)
+            }) { k in
                 let e = holder.insertEffect(k, at: holder.effects.count)
                 ui.expanded.insert(e.id)
             }
             ForEach(Array(holder.effects.enumerated()), id: \.element.id) { i, e in
                 EffectCard(effect: binding(e.id), origin: (holder as? Animatable)?.animOrigin ?? 0, isFirst: i == 0,
                            isLast: i == holder.effects.count - 1,
-                           move: { holder.moveEffect(e.id, by: $0) }, remove: { holder.removeEffect(e.id) })
-                    .modifier(EffectReorderDrop(index: i, id: e.id, holder: holder))
+                           move: { holder.moveEffect(e.id, by: $0) }, remove: { holder.removeEffect(e.id) },
+                           transferMenu: place != nil)
+                    .overlay(EffectFlashMark(id: e.id))
+                    .modifier(EffectReorderDrop(index: i, id: e.id, holder: holder, place: place))
             }
-            if holder.effects.count > 1 {
-                Text(L("名前の行をドラッグして並べ替え（上から順にかかる）。▸ で開く／閉じる"))
+            if !holder.effects.isEmpty && (holder.effects.count > 1 || place != nil) {
+                Text(place != nil
+                     ? L("名前の行をドラッグして並べ替え・ほかの場所へ移す（⌥ で写す）。上から順にかかる。▸ で開く／閉じる")
+                     : L("名前の行をドラッグして並べ替え（上から順にかかる）。▸ で開く／閉じる"))
                     .font(.system(size: 11)).foregroundStyle(.secondary)
             }
         }
-        .paramsFrame(alignment: .leading)
     }
 
     private func binding(_ id: UUID) -> Binding<Effect> {
@@ -442,6 +456,8 @@ struct EffectCard: View {
     var isBlendSettings = false
     /// 見出しの無い形（isBlendSettings）でも、説明文の行に 元に戻す・サイコロ・プリセット を出す（クリップのジェネレーター）
     var showsCardButtons = false
+    /// 名前の行の右クリックに「移す／写す」を出す（置き場所の分かる並びだけ）
+    var transferMenu = false
     /// パラメーター欄の幅（狭いと 1 列に並べる）
     @Environment(\.paramsWidth) private var paramsWidth
     private var narrow: Bool { paramsWidth < UI.paramsWidth - 1 }
@@ -459,7 +475,7 @@ struct EffectCard: View {
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(.secondary)
                         .frame(width: 16)
-                        .help(L("ドラッグして並べ替え"))
+                        .help(transferMenu ? L("ドラッグして並べ替え。ほかの場所へ落とすと移す（⌥ で写す）") : L("ドラッグして並べ替え"))
                 }
                 Toggle("", isOn: $effect.enabled)
                     .toggleStyle(.switch)
@@ -503,9 +519,10 @@ struct EffectCard: View {
             }
             .contentShape(Rectangle())
             .onDrag {
-                EffectUIState.shared.dragging = effect.id
+                EffectDragState.shared.begin(effect.id)
                 return NSItemProvider(object: (EffectUIState.movePrefix + effect.id.uuidString) as NSString)
             }
+            .modifier(EffectTransferMenuModifier(enabled: transferMenu, id: effect.id, kind: effect.kind))
                 // 細いときはボタンを小さくして、名前の場所を空ける
                 HStack(spacing: narrow ? 4 : 8) {
                     resetButton

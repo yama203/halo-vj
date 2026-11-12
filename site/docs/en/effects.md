@@ -70,6 +70,17 @@ Every effect has "Opacity" (how strongly it is applied).
 
 The ↺ button resets values, motion, opacity and colors to the initial state. Generator text, free-shape points and on/off are kept. It is disabled when nothing has changed.
 
+### Move to another place
+
+An effect you added can be moved to another clip, layer or the composition, keeping its values, motion and opacity.
+
+- Drag the card's name row and drop it on a clip in the grid, a layer header, the output preview, between the cards of another list, or on the "+ Effect" box. Places you can drop on light up with a purple frame.
+- Hold `⌥` (Option) when dropping to copy instead and keep the original (the cursor shows a "+").
+- Hold over a tab at the top of the Parameters panel (Composition / Layer / Clip) for a moment to switch to it; then drop between the cards to choose the position. Dropping on the tab adds it at the end of that target.
+- You can also right-click the name row and pick a destination from "Move to" or "Copy to" (all layers, the selected clip and the playing clips).
+- Where the effect cannot go (generators, empty slots and so on), you hear a beep and nothing changes. The selected clip and tab stay as they are.
+- A single `⌘Z` restores both the source and the destination.
+
 ### Order of application
 
 - Clip effects are applied after the clip's transform (position, scale, rotation). If you apply Mirror to a rotated clip, the rotated image is mirrored.

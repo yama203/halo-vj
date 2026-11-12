@@ -424,6 +424,8 @@ struct ParameterPanel: View {
             tabPicker(short: true, clip: clip).fixedSize()
             tabPicker(short: true, clip: clip).frame(minWidth: 0, maxWidth: .infinity)
         }
+        // エフェクトのカードをドラッグしている間だけ、タブの上に受け口を重ねる（止めると切り替わる・落とすとその相手に付く）
+        .overlay { EffectTabDropZones(engine: engine) }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
@@ -578,12 +580,12 @@ struct ParamColumn<Content: View, Accessory: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 4) {
-                SectionTitle(title)
+                FoldTitle(key: title, title)
                 Spacer(minLength: 0)
                 accessory
             }
             .frame(height: 18)
-            content
+            FoldBody(key: title) { content }
         }
         .frame(width: w < UI.paramsWidth - 1 ? w : UI.paramColumnWidth, alignment: .topLeading)
     }
@@ -718,7 +720,7 @@ struct CompositionParams: View {
         }
         .paramsFrame()
         } second: {
-            EffectsSection(holder: engine)
+            EffectsSection(holder: engine, place: .composition)
         }
     }
 }
@@ -785,10 +787,12 @@ struct LayerParams: View {
         }
         if layer.blend.isSpecial {
             VStack(alignment: .leading, spacing: 8) {
-                SectionTitle(L("重ね方：") + layer.blend.label)
-                EffectCard(effect: $layer.blendFX, isFirst: true, isLast: true, move: { _ in }, remove: {
-                    layer.blend = .add
-                }, isBlendSettings: true)
+                FoldTitle(key: "blend", L("重ね方：") + layer.blend.label)
+                FoldBody(key: "blend") {
+                    EffectCard(effect: $layer.blendFX, isFirst: true, isLast: true, move: { _ in }, remove: {
+                        layer.blend = .add
+                    }, isBlendSettings: true)
+                }
             }
             .paramsFrame(alignment: .leading)
             .padding(.top, 14)
@@ -796,7 +800,7 @@ struct LayerParams: View {
         }
         .paramsFrame()
         } second: {
-            EffectsSection(holder: layer)
+            EffectsSection(holder: layer, place: .layer(layer.index))
         }
     }
 }
@@ -850,11 +854,13 @@ struct ClipParams: View {
         if slot.generator != nil {
             // ジェネレーター：再生範囲・速度の代わりに、絵の設定
             VStack(alignment: .leading, spacing: 6) {
-                SectionTitle(L("ジェネレーター：") + (slot.generator?.kind.label ?? ""),
-                             icon: slot.generator?.kind.icon ?? "sparkles", tint: UI.generatorTint)
-                EffectCard(effect: Binding(get: { slot.generator ?? Effect(kind: .solid) }, set: { slot.generator = $0 }),
-                           origin: slot.animOrigin, isFirst: true, isLast: true, move: { _ in }, remove: {},
-                           isBlendSettings: true, showsCardButtons: true)
+                FoldTitle(key: "generator", L("ジェネレーター：") + (slot.generator?.kind.label ?? ""),
+                          icon: slot.generator?.kind.icon ?? "sparkles", tint: UI.generatorTint)
+                FoldBody(key: "generator") {
+                    EffectCard(effect: Binding(get: { slot.generator ?? Effect(kind: .solid) }, set: { slot.generator = $0 }),
+                               origin: slot.animOrigin, isFirst: true, isLast: true, move: { _ in }, remove: {},
+                               isBlendSettings: true, showsCardButtons: true)
+                }
             }
             .paramsFrame(alignment: .leading)
             .padding(.top, 10)
@@ -883,7 +889,7 @@ struct ClipParams: View {
         }
         .paramsFrame()
         } second: {
-            EffectsSection(holder: slot)
+            EffectsSection(holder: slot, place: .clip(slot.id))
         }
     }
 }
@@ -938,7 +944,7 @@ struct EffectClipParams: View {
             }
             .paramsFrame()
         } second: {
-            EffectsSection(holder: slot)
+            EffectsSection(holder: slot, place: .clip(slot.id))
         }
     }
 }
@@ -986,13 +992,21 @@ struct PlayRangeSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                SectionTitle(L("再生範囲"))
+                FoldTitle(key: "playRange", L("再生範囲"))
                 Spacer()
                 if slot.hasInOut {
                     Button(L("範囲をリセット")) { slot.resetInOut() }
                         .controlSize(.regular)
                 }
             }
+            FoldBody(key: "playRange") { rangeBody }
+        }
+        .paramsFrame(alignment: .leading)
+    }
+
+    /// 再生範囲の中身（端のコマ・イン／アウト・終わったときの動き・ジャンプ）
+    @ViewBuilder private var rangeBody: some View {
+        VStack(alignment: .leading, spacing: 6) {
             // 端のコマ（イン点のコマと、アウト点の直前のコマ）。黒などが残っていないか見ながら決められる
             HStack(spacing: 8) {
                 EdgeFrame(slot: slot, isIn: true)
@@ -1051,7 +1065,6 @@ struct PlayRangeSection: View {
             }
             .help(L("BPM の拍の頭で、再生範囲の中のランダムな位置へ飛ぶ（音も一緒に飛ぶ）。テンポは「ライブ」パネルの BPM / TAP で"))
         }
-        .paramsFrame(alignment: .leading)
     }
 
     @Environment(\.paramsWidth) private var w

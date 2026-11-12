@@ -339,7 +339,7 @@ struct SceneCompParams: View {
             }
             .paramsFrame()
         } second: {
-            EffectsSection(holder: draft)
+            EffectsSection(holder: draft, place: .composition)
         }
     }
 }
