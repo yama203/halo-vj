@@ -1,6 +1,6 @@
 # More Generators
 
-Generators added later (Reaction-Diffusion, Fractal, Growth, Metaballs, the light and space ones, Logo Particles, and the second batch: Plasma, Aurora, Nebula / Smoke, Truchet Tiles, Hexagon Tiles, Code Rain, Spinning Wireframe, Moiré, and the third batch: Sunburst, Ridge Lines, Bokeh, Spiral, Cells (Voronoi), Lissajous, Fireworks, Fire). Some have "Look" buttons. All values can be driven by sound, the beat or OSC.
+Generators added later (Reaction-Diffusion, Fractal, Growth, Metaballs, the light and space ones, Logo Particles, and the second batch: Plasma, Aurora, Nebula / Smoke, Truchet Tiles, Hexagon Tiles, Code Rain, Spinning Wireframe, Moiré, and the third batch: Sunburst, Ridge Lines, Bokeh, Spiral, Cells (Voronoi), Lissajous, Fireworks, Fire, and the fourth batch: Ring Particles). Some have "Look" buttons. All values can be driven by sound, the beat or OSC.
 
 ## "Lines / Patterns" category
 
@@ -169,6 +169,20 @@ Flames rising from the bottom. Areas without fire are transparent.
 - Height, Speed, Detail, Jitter, Width (1 fills the screen; narrower makes a campfire in the middle).
 - Coloring: Fire (black → red → orange → yellow → white), Blue Flame, Palette, 1 color. Sparks, Smoke.
 - Direction: flow up, down, left or right.
+
+### Ring Particles
+
+Fine particles crowd along the edge of a large circle, peel away here and there, and keep streaming off in smoky swirls. Each particle disappears at the end of its lifetime and is immediately reborn somewhere on the edge, so the flow never stops. The surroundings are transparent.
+
+- Circle size, Edge Thickness, Center X, Center Y: the shape and position of the circle (relative to the height).
+- Emit Direction (Outward, Inward, Both) and Emit Speed: which way and how fast particles are pushed off the edge when they are born.
+- Cling to Edge: how strongly new particles stick to the edge for a while. Raise it for a thick, bright band; lower it and they peel off at once, like smoke. The spots where they peel off drift slowly along the edge.
+- Turbulence, Swirl Size, Swirl Change Speed: the strength of the flow, the size of the eddies (small for fine wisps, large for slow billows), and how fast the flow pattern changes.
+- Lifespan (varies a little per particle) and Drag.
+- Emit Arc, Emit Arc Angle, Emit Arc Rotation: which part of the circle emits (a sector). Narrow it and rotate it for a spinning nozzle.
+- Particle size, Brightness, Trails, Coloring (1 color, Palette over the lifespan, Rainbow by birth angle), Speed (0 freezes it).
+- Up to 120,000 particles. More particles make the edge denser and brighter, at a small cost (at 1920×1080, about 0.3 ms for 40,000 and 0.6–0.9 ms for 120,000).
+- Drive Emit Speed or Turbulence with the beat or sound to make the particles burst out on every kick.
 
 ## "Text / Logo / Clock" category
 

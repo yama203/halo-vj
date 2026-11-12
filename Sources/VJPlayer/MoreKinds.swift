@@ -10,7 +10,8 @@ extension EffectKind {
     static let moreGenerators: [EffectKind] = [.reactionDiffusion, .laser, .synthwave, .logoParticles, .metaballs,
                                                .starfield, .fractal, .ripples, .lightning, .growth,
                                                .plasma, .aurora, .nebula, .truchet, .hexGrid, .codeRain, .wireframe, .moire,
-                                               .sunburst, .ridgeLines, .bokeh, .spiral, .voronoi, .lissajous, .fireworks, .fire]
+                                               .sunburst, .ridgeLines, .bokeh, .spiral, .voronoi, .lissajous, .fireworks, .fire,
+                                               .ringEmitter]
     var isMore: Bool { Self.moreEffects.contains(self) || Self.moreGenerators.contains(self) }
 
     var moreLabel: String? {
@@ -66,6 +67,7 @@ extension EffectKind {
         case .lissajous: L("リサージュ（オシロの図形）")
         case .fireworks: L("花火")
         case .fire: L("炎")
+        case .ringEmitter: L("輪から湧く粒")
         default: nil
         }
     }
@@ -123,6 +125,7 @@ extension EffectKind {
         case .lissajous: "infinity"
         case .fireworks: "fireworks"
         case .fire: "flame.fill"
+        case .ringEmitter: "circle.dotted.circle"
         default: nil
         }
     }
@@ -158,6 +161,7 @@ extension EffectKind {
         case .sunburst, .lissajous: .shape
         case .ridgeLines, .spiral, .voronoi: .pattern
         case .bokeh, .fireworks, .fire: .space
+        case .ringEmitter: .space
         default: nil
         }
     }
@@ -432,18 +436,26 @@ extension EffectKind {
         // ===== ジェネレーター =====
         case .reactionDiffusion:
             return [
-                EffectParam(label: L("模様"), range: 0...4, defaultValue: 0, choices: [L("珊瑚"), L("迷路"), L("斑点"), L("指紋"), L("分裂")]),
-                EffectParam(label: L("育つ速さ"), range: 1...40, defaultValue: 12, perPoint: 0.1, step: 1, format: { String(format: "%.0f", $0) }),
-                EffectParam(label: L("模様の大きさ"), range: 1...6, defaultValue: 2.5, perPoint: 0.01, format: { String(format: "%.1f", $0) }),
+                // 模様を途中で変えると、育った模様がいったん消えて、しばらく真っ暗になる。サイコロでは変えない
+                EffectParam(label: L("模様"), range: 0...4, defaultValue: 0, choices: [L("珊瑚"), L("迷路"), L("斑点"), L("指紋"), L("分裂")],
+                            noDice: true),
+                EffectParam(label: L("育つ速さ"), range: 1...40, defaultValue: 12, perPoint: 0.1, step: 1, format: { String(format: "%.0f", $0) },
+                            animRange: 8...28),
+                // 大きい模様はなかなか育たない（サイコロ直後に暗いまま）
+                EffectParam(label: L("模様の大きさ"), range: 1...6, defaultValue: 2.5, perPoint: 0.01, format: { String(format: "%.1f", $0) },
+                            animRange: 1.5...4),
                 EffectParam(label: L("音で乱す（アタック・低音）"), range: 0...1, defaultValue: 0.6, format: pc),
                 EffectParam(label: L("色の付け方"), range: 0...1, defaultValue: 1, choices: [L("1 色"), L("パレット")]),
-                EffectParam(label: L("明るさ"), range: 0...2, defaultValue: 1, format: pc),
-                EffectParam(label: L("種のまき方"), range: 0...2, defaultValue: 1, choices: [L("真ん中"), L("ばらばら"), L("帯")]),
+                EffectParam(label: L("明るさ"), range: 0...2, defaultValue: 1, format: pc, animRange: 0.7...1.5),
+                // 種のまき方はやり直したときだけ効く（サイコロでは変えない）
+                EffectParam(label: L("種のまき方"), range: 0...2, defaultValue: 1, choices: [L("真ん中"), L("ばらばら"), L("帯")], noDice: true),
                 EffectParam(label: L("変わり続ける"), range: 0...1, defaultValue: 0.5, format: pc),
                 EffectParam(label: L("音で光る"), range: 0...1, defaultValue: 0.5, format: pc),
                 EffectParam(label: L("流れ（渦に乗って動く）"), range: 0...1, defaultValue: 0.5, format: pc, animRange: 0.2...0.9),
-                EffectParam(label: L("枯れる（育っては死ぬ）"), range: 0...1, defaultValue: 0.5, format: pc),
-                EffectParam(label: L("寿命"), range: 1...30, defaultValue: 6, perPoint: 0.05, format: { String(format: L("%.1f 秒"), $0) }),
+                // 枯れるが強く寿命が短いと、育つ前に消えて真っ暗になる
+                EffectParam(label: L("枯れる（育っては死ぬ）"), range: 0...1, defaultValue: 0.5, format: pc, animRange: 0...0.6),
+                EffectParam(label: L("寿命"), range: 1...30, defaultValue: 6, perPoint: 0.05, format: { String(format: L("%.1f 秒"), $0) },
+                            animRange: 4...20),
                 EffectParam(label: L("穴が開く速さ（変わり続ける）"), range: 0.3...10, defaultValue: 3, perPoint: 0.02, format: { String(format: L("%.1f 秒かけて"), $0) }),
             ]
         case .laser:
@@ -512,8 +524,10 @@ extension EffectKind {
                 EffectParam(label: L("種類"), range: 0...2, defaultValue: 0, choices: [L("マンデルブロ"), L("ジュリア"), L("バーニングシップ")]),
                 EffectParam(label: L("潜る速さ"), range: 0...1, defaultValue: 0.25, format: pc),
                 EffectParam(label: L("回る速さ"), range: -45...45, defaultValue: 3, perPoint: 0.2, format: degs),
-                EffectParam(label: L("細かさ"), range: 32...512, defaultValue: 160, perPoint: 0.5, step: 1, format: { String(format: "%.0f", $0) }),
-                EffectParam(label: L("色の回り"), range: 0...4, defaultValue: 1, perPoint: 0.005, format: pc),
+                // 細かさはくり返しの回数（重さに効く）
+                EffectParam(label: L("細かさ"), range: 32...512, defaultValue: 160, perPoint: 0.5, step: 1, format: { String(format: "%.0f", $0) },
+                            animRange: 96...256),
+                EffectParam(label: L("色の回り"), range: 0...4, defaultValue: 1, perPoint: 0.005, format: pc, animRange: 0.5...2.5),
                 EffectParam(label: L("色の流れ"), range: -2...2, defaultValue: 0.2, perPoint: 0.005, format: { String(format: "%+.2f", $0) }),
                 EffectParam(label: L("ジュリアの形"), range: 0...1, defaultValue: 0.35, format: pc),
                 EffectParam(label: L("ジュリアが変わる速さ"), range: 0...1, defaultValue: 0.05, format: pc),
@@ -534,25 +548,32 @@ extension EffectKind {
             ]
         case .lightning:
             return [
-                EffectParam(label: L("頻度"), range: 0...10, defaultValue: 1, perPoint: 0.01, format: { String(format: L("%.1f /秒"), $0) }),
+                // 頻度と残る時間で、同時に描く稲妻の数（重さ）が決まる
+                EffectParam(label: L("頻度"), range: 0...10, defaultValue: 1, perPoint: 0.01, format: { String(format: L("%.1f /秒"), $0) },
+                            animRange: 0.5...2.5),
                 EffectParam(label: L("拍で走らせる"), range: 0...1, defaultValue: 1, isToggle: true),
                 EffectParam(label: L("枝分かれ"), range: 0...1, defaultValue: 0.5, format: pc),
                 EffectParam(label: L("ぎざぎざ"), range: 0...1, defaultValue: 0.5, format: pc),
                 EffectParam(label: L("太さ"), range: 0.5...8, defaultValue: 2, perPoint: 0.02, format: px),
                 EffectParam(label: L("光の広がり"), range: 0...1, defaultValue: 0.6, format: pc),
                 EffectParam(label: L("向き"), range: 0...3, defaultValue: 0, choices: [L("上から下"), L("横"), L("真ん中から外"), L("どこでも")]),
-                EffectParam(label: L("残る時間"), range: 0.05...1.5, defaultValue: 0.5, perPoint: 0.002, format: { String(format: L("%.2f 秒"), $0) }),
+                EffectParam(label: L("残る時間"), range: 0.05...1.5, defaultValue: 0.5, perPoint: 0.002, format: { String(format: L("%.2f 秒"), $0) },
+                            animRange: 0.15...0.8),
                 EffectParam(label: L("色の付け方"), range: 0...1, defaultValue: 0, choices: [L("1 色"), L("パレット")]),
                 EffectParam(label: L("音（アタック）で走らせる"), range: 0...1, defaultValue: 0, format: pc),
             ]
         case .growth:
             return [
-                EffectParam(label: L("種類"), range: 0...2, defaultValue: 0, choices: [L("回路"), L("枝"), L("菌糸")]),
-                EffectParam(label: L("数"), range: 1...60, defaultValue: 12, perPoint: 0.05, step: 1, format: { String(format: "%.0f", $0) }),
+                // 種類を変えると、描いた線が消えて最初から育て直しになる（菌糸は枝分かれが 3 倍で重い）。サイコロでは変えない
+                EffectParam(label: L("種類"), range: 0...2, defaultValue: 0, choices: [L("回路"), L("枝"), L("菌糸")], noDice: true),
+                // 数は重さに効く（60 で 5 倍）
+                EffectParam(label: L("数"), range: 1...60, defaultValue: 12, perPoint: 0.05, step: 1, format: { String(format: "%.0f", $0) },
+                            animRange: 6...24),
                 EffectParam(label: L("伸びる速さ"), range: 0.1...4, defaultValue: 1, perPoint: 0.004),
-                EffectParam(label: L("枝分かれ"), range: 0...1, defaultValue: 0.3, format: pc),
+                // 枝分かれが多い・太いと線の数と塗る量が増えて重くなる
+                EffectParam(label: L("枝分かれ"), range: 0...1, defaultValue: 0.3, format: pc, animRange: 0.1...0.6),
                 EffectParam(label: L("消えていく速さ"), range: 0...1, defaultValue: 0.15, format: pc),
-                EffectParam(label: L("太さ"), range: 0.5...6, defaultValue: 1.5, perPoint: 0.02, format: px),
+                EffectParam(label: L("太さ"), range: 0.5...6, defaultValue: 1.5, perPoint: 0.02, format: px, animRange: 0.8...3),
                 EffectParam(label: L("色の付け方"), range: 0...2, defaultValue: 1, choices: [L("1 色"), L("パレット"), L("虹色")]),
                 EffectParam(label: L("光"), range: 0...1, defaultValue: 0.5, format: pc),
                 EffectParam(label: L("曲がり"), range: 0...1, defaultValue: 0.5, format: pc),
@@ -736,7 +757,7 @@ extension EffectKind {
             ]
         case .fireworks:
             return [
-                EffectParam(label: L("上がる数"), range: 0.2...6, defaultValue: 2.5, perPoint: 0.01, format: { String(format: L("%.1f 発/秒"), $0) }, animRange: 0.5...3),
+                EffectParam(label: L("上がる数"), range: 0.2...6, defaultValue: 2.5, perPoint: 0.01, format: { String(format: L("%.1f 発/秒"), $0) }, animRange: 0.8...3),
                 EffectParam(label: L("大きさ"), range: 0.1...0.8, defaultValue: 0.4, format: pc, animRange: 0.2...0.6),
                 EffectParam(label: L("粒の数"), range: 16...120, defaultValue: 60, perPoint: 0.2, step: 1, format: { String(format: "%.0f", $0) }, animRange: 30...100),
                 EffectParam(label: L("重さ"), range: 0...2, defaultValue: 0.6, perPoint: 0.004, format: pc, animRange: 0.2...1.2),
@@ -744,7 +765,7 @@ extension EffectKind {
                 EffectParam(label: L("きらめき"), range: 0...1, defaultValue: 0.5, format: pc, animRange: 0...1),
                 EffectParam(label: L("上がる筋を出す"), range: 0...1, defaultValue: 1, isToggle: true),
                 EffectParam(label: L("色の付け方"), range: 0...2, defaultValue: 0, choices: [L("虹色（発ごと）"), L("パレット（発ごと）"), L("1 色")]),
-                EffectParam(label: L("光る"), range: 0...2, defaultValue: 1, perPoint: 0.004, format: pc, animRange: 0.3...1.5),
+                EffectParam(label: L("光る"), range: 0...2, defaultValue: 1, perPoint: 0.004, format: pc, animRange: 0.6...1.5),
                 EffectParam(label: L("形"), range: 0...3, defaultValue: 0, choices: [L("丸"), L("輪"), L("しだれ"), L("二重")]),
             ]
         case .fire:
@@ -758,6 +779,34 @@ extension EffectKind {
                 EffectParam(label: L("火の粉"), range: 0...1, defaultValue: 0.4, format: pc, animRange: 0...1),
                 EffectParam(label: L("煙"), range: 0...1, defaultValue: 0.2, format: pc, animRange: 0...0.8),
                 EffectParam(label: L("向き"), range: 0...3, defaultValue: 0, choices: [L("上へ流れる"), L("下へ流れる"), L("左へ流れる"), L("右へ流れる")]),
+            ]
+        // ===== ジェネレーター（第 4 弾） =====
+        case .ringEmitter:
+            // 値の番号は RingEmitterSim.render と合わせる
+            return [
+                EffectParam(label: L("粒の数"), range: 1000...120_000, defaultValue: 40_000, perPoint: 100, step: 1000,
+                            format: { String(format: "%.0f", $0) }, animRange: 10_000...60_000, noDice: true),
+                EffectParam(label: L("円の大きさ"), range: 0.05...1.2, defaultValue: 0.42, format: pc, animRange: 0.3...0.5),
+                EffectParam(label: L("縁の太さ"), range: 0...0.1, defaultValue: 0.015, perPoint: 0.0002, format: { String(format: "%.1f%%", $0 * 100) },
+                            animRange: 0.005...0.04),
+                EffectParam(label: L("中心の左右"), range: 0...1, defaultValue: 0.5, format: pc, animRange: 0.3...0.7),
+                EffectParam(label: L("中心の上下"), range: 0...1, defaultValue: 0.5, format: pc, animRange: 0.3...0.7),
+                EffectParam(label: L("出る向き"), range: 0...2, defaultValue: 0, choices: [L("外へ"), L("内へ"), L("両方")]),
+                EffectParam(label: L("出る勢い"), range: 0...1, defaultValue: 0.08, perPoint: 0.001, format: pc, animRange: 0...0.3),
+                EffectParam(label: L("縁にとどまる"), range: 0...1, defaultValue: 0.6, format: pc, animRange: 0.2...0.9),
+                EffectParam(label: L("乱れの強さ"), range: 0...2, defaultValue: 0.35, perPoint: 0.003, format: pc, animRange: 0.1...1),
+                EffectParam(label: L("渦の大きさ"), range: 0.02...1, defaultValue: 0.18, perPoint: 0.002, format: pc, animRange: 0.08...0.4),
+                EffectParam(label: L("渦の変わる速さ"), range: 0...2, defaultValue: 0.25, perPoint: 0.003, format: pc, animRange: 0.1...0.8),
+                EffectParam(label: L("寿命"), range: 0.3...12, defaultValue: 4, perPoint: 0.02, format: { String(format: L("%.1f 秒"), $0) }, animRange: 2...6),
+                EffectParam(label: L("空気抵抗"), range: 0...1, defaultValue: 0.3, format: pc, animRange: 0.1...0.6),
+                EffectParam(label: L("出る範囲"), range: 0...360, defaultValue: 360, perPoint: 0.5, format: deg, animRange: 30...360),
+                EffectParam(label: L("出る範囲の向き"), range: 0...360, defaultValue: 0, perPoint: 0.5, format: deg, animRange: 0...360),
+                EffectParam(label: L("出る範囲が回る速さ"), range: -180...180, defaultValue: 0, perPoint: 0.5, format: degs, animRange: -60...60),
+                EffectParam(label: L("粒の大きさ"), range: 0.5...8, defaultValue: 2.4, perPoint: 0.01, format: px, animRange: 1.5...4),
+                EffectParam(label: L("明るさ"), range: 0...4, defaultValue: 1.2, perPoint: 0.005, format: pc, animRange: 0.6...2, noDice: true),
+                EffectParam(label: L("残像"), range: 0...0.98, defaultValue: 0, format: pc, animRange: 0...0.8),
+                EffectParam(label: L("色の付け方"), range: 0...2, defaultValue: 0, choices: [L("1 色"), L("パレット（寿命に沿って）"), L("虹色（角度）")]),
+                EffectParam(label: L("速さ"), range: 0...3, defaultValue: 1, perPoint: 0.005, format: { String(format: "%.2fx", $0) }, animRange: 0.5...1.5),
             ]
         default:
             return nil
@@ -817,6 +866,7 @@ extension EffectKind {
         case .lissajous: L("オシロスコープのような、sin を組み合わせた光る曲線。周波数で形が変わり、位相が回って動く。まわりは透明")
         case .fireworks: L("夜空に花火が次々に上がって開き、粒が落ちながら消えていく。まわりは透明")
         case .fire: L("下から立ちのぼる炎。幅を狭くすると真ん中のたき火になる。火の粉と煙も出せる。炎でない所は透明")
+        case .ringEmitter: L("円の縁から粒が生まれて、渦を巻くように揺らぎながら流れ出し続ける。縁にとどまる・乱れの強さ・渦の大きさで、煙のようにも、星くずのようにも（まわりは透明）")
         default: nil
         }
     }
@@ -849,6 +899,7 @@ extension EffectKind {
         case .voronoi: return c(6) == 0
         case .fireworks: return c(7) == 2
         case .fire: return c(5) == 3
+        case .ringEmitter: return c(19) == 0
         default: return false
         }
     }
@@ -882,6 +933,7 @@ extension EffectKind {
         case .lissajous: return c(9) == 2
         case .fireworks: return c(7) == 1
         case .fire: return c(5) == 2
+        case .ringEmitter: return c(19) == 1
         default: return false
         }
     }
@@ -909,6 +961,7 @@ extension EffectKind {
         case .lissajous: RGB(r: 0.3, g: 1.0, b: 0.5)
         case .fireworks: RGB(r: 1.0, g: 0.8, b: 0.4)
         case .fire: RGB(r: 1.0, g: 0.5, b: 0.15)
+        case .ringEmitter: RGB(r: 1.0, g: 0.88, b: 0.94)
         default: nil
         }
     }
@@ -935,6 +988,7 @@ extension EffectKind {
         case .lissajous: [PalettePreset.hex(0x00F0FF), PalettePreset.hex(0xFF00C8)]
         case .fireworks: [PalettePreset.hex(0xFF3D00), PalettePreset.hex(0xFFE600), PalettePreset.hex(0x00F0FF), PalettePreset.hex(0xFF00C8)]
         case .fire: [PalettePreset.hex(0x000000), PalettePreset.hex(0x7A00FF), PalettePreset.hex(0xFF00C8), PalettePreset.hex(0xFFFFFF)]
+        case .ringEmitter: [PalettePreset.hex(0xFFFFFF), PalettePreset.hex(0xFF9AD0), PalettePreset.hex(0x7A5CFF)]
         default: nil
         }
     }

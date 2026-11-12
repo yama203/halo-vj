@@ -52,12 +52,27 @@ Added effects are listed in the effects section of the panel. → [Adding and Re
 
 ### Dice (randomize values)
 
-Click the dice button in the header of an effect or generator to randomize its values. One ⌘Z undoes it.
+Click the dice button in the header of an effect or generator to randomize its values. One ⌘Z undoes it. For a clip's generator (shown without a header), Reset, Dice, and Presets sit to the right of the description.
 
 - Hold ⌥ while clicking to change values “just a little” (within ±15% of the range around the current value). Choices are left as they are.
-- Not changed: on/off values, values with an animation, opacity, quality, text and font, position and size (such as mask position or center), and input selection.
+- Not changed: on/off values, values with an animation, opacity, quality, text and font, position and size (such as mask position or center), and input selection. Values that affect performance (such as particle counts) or that would make the picture vanish for a while (such as the Reaction-Diffusion pattern) are also left alone or only changed within a moderate range.
 - Colors change only in hue (white, black, and gray stay as they are).
 - Not available for Camera, Syphon, NDI, Text, and Clock.
+
+#### Rolling automatically with the beat or the audio
+
+Click the ▾ to the right of the dice button to open the dice panel (the same purple frame as the value animation panel).
+
+- **Roll Now**: rolls once right away.
+- **Roll automatically [Off | Beat | Audio]**: the selected one is filled in blue. While rolling automatically, the dice in the header turns orange, and a mark appears next to the name even when the card is closed.
+  - **Beat**: choose the interval with the 1/4 to 16 beat buttons. The dots below show the progress until the next roll (it rolls on the beat after all dots light up).
+  - **Audio**: rolls on attacks such as kicks. The graph shows the attack strength over the last 2.5 seconds; a roll happens the moment it crosses the dashed orange line (the threshold), marked with a dot. Drag the line up or down, or use the Threshold field. Lower values roll on quieter hits. Rolls are at least 0.12 seconds apart. Nothing is rolled when “Audio Input” at the top is off (the panel says so; → [Audio Input](audio-input.md)).
+- **Change [Big | Just a Little]**: Just a Little works like ⌥, for both manual and automatic rolls. When rolling on the beat, starting with Just a Little is recommended (big jumps in shape and color every time can feel restless).
+- **Glide**: instead of switching at once, the values move smoothly over the chosen number of beats (1/4 to 2). Choices and on/off values do not glide; they switch halfway.
+- The dot and text at the bottom show the current state: orange while rolling automatically (briefly brighter at each roll), an empty circle when off.
+- Only what is on screen is rolled (playing clips, layers, the composition, and held pads). Clips that are not playing do not change.
+- Automatic rolls are not added to ⌘Z (changing the settings and manual rolls can each be undone).
+- The automatic settings are saved in presets too.
 
 ### Presets
 

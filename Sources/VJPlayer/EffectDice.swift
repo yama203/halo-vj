@@ -1,4 +1,5 @@
 import Foundation
+import QuartzCore
 import AppKit
 import SwiftUI
 
@@ -102,18 +103,58 @@ struct SeededRandom: RandomNumberGenerator {
     }
 }
 
-/// カードの見出しのサイコロのボタン。⌥ を押しながらだと「少しだけ」
+/// カードのサイコロのボタン。押すと 1 回振る（⌥ を押しながら・「少しだけ」の設定なら少しだけ）。
+/// 横の ▾ で、自動で振る・変え方・つなぎのパネル（DicePanel）を開く
 struct EffectDiceButton: View {
     @Binding var effect: Effect
+    @State private var open = false
 
     var body: some View {
-        Button {
-            let slight = NSEvent.modifierFlags.contains(.option)
-            EffectCardStep.change(&effect) { $0.diced(slight: slight) }
-        } label: {
-            Image(systemName: "dice").frame(width: 18)
+        let on = effect.autoDice?.isOn == true
+        HStack(spacing: 0) {
+            Button {
+                let slight = NSEvent.modifierFlags.contains(.option) || effect.autoDice?.slight == true
+                EffectCardStep.roll(&effect, slight: slight)
+            } label: {
+                Image(systemName: on ? "dice.fill" : "dice")
+                    .foregroundStyle(on ? Color.orange : Color.primary)
+                    .frame(width: 18)
+            }
+            // メニューの形のボタン・見出しの .onDrag の中では .help の説明が出ないことがあるので、自前の小さな説明を出す
+            .hoverTip(effect.diceHelp)
+            .accessibilityLabel(L("サイコロ"))
+            Button { open.toggle() } label: {
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(open ? Color.primary : Color.secondary)
+                    .frame(width: 14, height: 20)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(L("自動で振る（拍・音）・変え方・つなぎ"))
+            .popover(isPresented: $open, arrowEdge: .bottom) {
+                DicePanel(effect: $effect)
+                    .frame(width: 320)
+                    .padding(10)
+            }
         }
-        .help(L("値をランダムに（⌥：少しだけ）"))
+        .fixedSize()
+    }
+
+    /// 自動の設定を変える（元に戻すの 1 歩）。しない・ほかも最初のままなら nil にする
+    static func setAuto(_ effect: Binding<Effect>, engine: Engine = .shared, _ f: @escaping (inout AutoDice) -> Void) {
+        var e = effect.wrappedValue
+        EffectCardStep.change(&e, engine: engine) { Self.settingAuto($0, f) }
+        if e != effect.wrappedValue { effect.wrappedValue = e }
+    }
+
+    /// 自動の設定を変えたもの（純粋な計算。テスト用にも）
+    static func settingAuto(_ e: Effect, _ f: (inout AutoDice) -> Void) -> Effect {
+        var e = e
+        var a = e.autoDice ?? AutoDice(mode: .off)
+        f(&a)
+        e.autoDice = a.isPlain ? nil : a
+        return e
     }
 }
 
@@ -124,5 +165,114 @@ enum EffectCardStep {
         engine.commitUndoStep()
         let e = f(effect)
         if e != effect { effect = e }
+    }
+
+    /// 手でサイコロを 1 回振る（元に戻すの 1 歩。つなぎの設定があれば、今の BPM でつなぐ）
+    static func roll(_ effect: inout Effect, slight: Bool, engine: Engine = .shared) {
+        let g = effect.autoDice?.glideSeconds(bpm: engine.bpm) ?? 0
+        let now = CACurrentMediaTime()
+        change(&effect, engine: engine) { e in
+            var rng = SystemRandomNumberGenerator()
+            return e.rolled(using: &rng, slight: slight, glideSeconds: g, at: now)
+        }
+    }
+}
+
+/// カーソルを合わせて少し待つと、そばに小さな説明を出す（KindPreviewPanel と同じ出し方）。
+/// SwiftUI の .help は、メニュー（Menu）のボタンなど AppKit の部品では出ないことがあるので、その代わり
+final class HoverTipPanel {
+    static let shared = HoverTipPanel()
+    private var panel: NSPanel?
+    private var pending: DispatchWorkItem?
+    private var showingID: UUID?
+    private var clickMonitor: Any?
+    /// 今出している（出そうとしている）説明。テストで中身を確かめる
+    private(set) var text: String?
+
+    func hover(_ id: UUID, _ text: String) {
+        pending?.cancel()
+        self.text = text
+        let w = DispatchWorkItem { [weak self] in self?.present(id, text) }
+        pending = w
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7, execute: w)
+    }
+
+    func leave(_ id: UUID) {
+        pending?.cancel()
+        guard showingID == id || showingID == nil else { return }
+        hide()
+    }
+
+    func hide() {
+        pending?.cancel()
+        showingID = nil
+        text = nil
+        panel?.orderOut(nil)
+        if let m = clickMonitor { NSEvent.removeMonitor(m) }
+        clickMonitor = nil
+    }
+
+    private func present(_ id: UUID, _ text: String) {
+        showingID = id
+        let view = Text(text).font(.system(size: 11)).foregroundStyle(.primary)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: 300, alignment: .leading)
+            .padding(.horizontal, 8).padding(.vertical, 5)
+            .background(RoundedRectangle(cornerRadius: 5).fill(Color(white: 0.18))
+                .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.white.opacity(0.15))))
+            .environment(\.colorScheme, .dark)
+        let p = panel ?? {
+            let p = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 200, height: 40),
+                            styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+            p.isFloatingPanel = true
+            p.level = .popUpMenu
+            p.ignoresMouseEvents = true
+            p.hasShadow = true
+            p.isReleasedWhenClosed = false
+            p.hidesOnDeactivate = true
+            p.backgroundColor = .clear
+            p.isOpaque = false
+            return p
+        }()
+        let host = NSHostingView(rootView: AnyView(view))
+        host.layoutSubtreeIfNeeded()
+        let size = host.fittingSize
+        p.contentView = host
+        // カーソルの下に。画面からはみ出すなら内側へ
+        let m = NSEvent.mouseLocation
+        let screen = NSScreen.screens.first { $0.frame.contains(m) }?.visibleFrame ?? NSScreen.main?.visibleFrame ?? .zero
+        var o = NSPoint(x: m.x - size.width / 2, y: m.y - 22 - size.height)
+        if o.y < screen.minY { o.y = m.y + 18 }
+        o.x = max(screen.minX, min(o.x, screen.maxX - size.width))
+        p.setFrame(NSRect(origin: o, size: size), display: true)
+        panel = p
+        p.orderFrontRegardless()
+        // 押したら（メニューを開いたら）消す
+        if clickMonitor == nil {
+            clickMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .keyDown]) { [weak self] e in
+                self?.hide()
+                return e
+            }
+        }
+    }
+}
+
+extension View {
+    /// カーソルを合わせて少し待つと、そばに小さな説明を出す（.help が出ない部品の代わり）
+    func hoverTip(_ text: String) -> some View {
+        modifier(HoverTipModifier(text: text))
+    }
+}
+
+private struct HoverTipModifier: ViewModifier {
+    let text: String
+    @State private var id = UUID()
+    func body(content: Content) -> some View {
+        content
+            .onHover { inside in
+                if inside { HoverTipPanel.shared.hover(id, text) } else { HoverTipPanel.shared.leave(id) }
+            }
+            .onDisappear { HoverTipPanel.shared.leave(id) }
+            .accessibilityHint(text)
     }
 }

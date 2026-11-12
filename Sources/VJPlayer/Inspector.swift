@@ -854,7 +854,7 @@ struct ClipParams: View {
                              icon: slot.generator?.kind.icon ?? "sparkles", tint: UI.generatorTint)
                 EffectCard(effect: Binding(get: { slot.generator ?? Effect(kind: .solid) }, set: { slot.generator = $0 }),
                            origin: slot.animOrigin, isFirst: true, isLast: true, move: { _ in }, remove: {},
-                           isBlendSettings: true)
+                           isBlendSettings: true, showsCardButtons: true)
             }
             .paramsFrame(alignment: .leading)
             .padding(.top, 10)

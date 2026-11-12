@@ -440,6 +440,8 @@ struct EffectCard: View {
     let remove: () -> Void
     /// 重ね方（特殊合成）の設定として出す：オン/オフ・並べ替え・削除は出さない
     var isBlendSettings = false
+    /// 見出しの無い形（isBlendSettings）でも、説明文の行に 元に戻す・サイコロ・プリセット を出す（クリップのジェネレーター）
+    var showsCardButtons = false
     /// パラメーター欄の幅（狭いと 1 列に並べる）
     @Environment(\.paramsWidth) private var paramsWidth
     private var narrow: Bool { paramsWidth < UI.paramsWidth - 1 }
@@ -449,7 +451,9 @@ struct EffectCard: View {
         VStack(alignment: .leading, spacing: 8) {
             if !isBlendSettings {
             HStack(spacing: narrow ? 5 : 8) {
-                // 細いときは名前を優先してつまみの印を省く（行のどこをドラッグしても並べ替えられる）
+            // 並べ替えのドラッグは、右のボタンを除いた所で受ける（.onDrag の中に入れたボタンは、ホバーの説明（.help）が出ないことがあるため）
+            HStack(spacing: narrow ? 5 : 8) {
+                // 細いときは名前を優先してつまみの印を省く（ボタン以外の行のどこをドラッグしても並べ替えられる）
                 if !narrow {
                     Image(systemName: "line.3.horizontal")
                         .font(.system(size: 12, weight: .semibold))
@@ -490,11 +494,18 @@ struct EffectCard: View {
                             .foregroundStyle(.purple)
                             .help(L("動かしている値がある"))
                     }
+                    autoDiceMark
                     Spacer(minLength: 0)
                 }
                 .contentShape(Rectangle())
                 .onTapGesture { toggleOpen() }
                 .help(effect.kind.help + L("（クリックで開く／閉じる）"))
+            }
+            .contentShape(Rectangle())
+            .onDrag {
+                EffectUIState.shared.dragging = effect.id
+                return NSItemProvider(object: (EffectUIState.movePrefix + effect.id.uuidString) as NSString)
+            }
                 // 細いときはボタンを小さくして、名前の場所を空ける
                 HStack(spacing: narrow ? 4 : 8) {
                     resetButton
@@ -507,16 +518,22 @@ struct EffectCard: View {
             }
             .controlSize(.regular)
             .frame(height: 26)
-            .onDrag {
-                EffectUIState.shared.dragging = effect.id
-                return NSItemProvider(object: (EffectUIState.movePrefix + effect.id.uuidString) as NSString)
-            }
             } else {
                 HStack(alignment: .top, spacing: 8) {
                     Text(effect.kind.help).font(.system(size: 11)).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                     Spacer(minLength: 0)
-                    resetButton
+                    if showsCardButtons {
+                        // クリップのジェネレーター：見出しが無いので、ここに 元に戻す・サイコロ・プリセット
+                        HStack(spacing: narrow ? 4 : 8) {
+                            resetButton
+                            if effect.kind.hasDice { EffectDiceButton(effect: $effect) }
+                            EffectPresetMenu(effect: $effect)
+                        }
+                        .controlSize(narrow ? .small : .regular)
+                    } else {
+                        resetButton
+                    }
                 }
             }
             if open || isBlendSettings {
@@ -708,6 +725,15 @@ struct EffectCard: View {
             if i == 3 { return effect.value(1) >= 0.5 }
         }
         return !(effect.kind == .colorize && i == 1 && effect.value(0) > 0.5)
+    }
+
+    /// 自動でサイコロを振っている印（カードを閉じていても分かるように）
+    @ViewBuilder private var autoDiceMark: some View {
+        if let a = effect.autoDice, a.isOn, effect.kind.hasDice {
+            Image(systemName: "dice.fill").font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.orange)
+                .help(a.summary)
+        }
     }
 
     /// 値・動き・不透明度・色を最初の状態に戻す

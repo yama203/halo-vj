@@ -122,6 +122,13 @@ enum Main {
                                    mode: args.count > i + 3 ? args[i + 3] : "corners")
             exit(0)
         }
+        if let i = args.firstIndex(of: "--dice-panel-preview"), args.count > i + 2 {
+            // 開発用：サイコロのパネルを書き出す  VJPlayer --dice-panel-preview off|beats|attack|audiooff out.png
+            _ = NSApplication.shared
+            NSApp.setActivationPolicy(.prohibited)
+            CardPreview.writeDicePanel(state: args[i + 1], path: args[i + 2])
+            exit(0)
+        }
         if let i = args.firstIndex(of: "--card-preview"), args.count > i + 2, let k = EffectKind(rawValue: args[i + 1]) {
             // 開発用：エフェクトの設定パネルを 1 枚の画像に書き出す（画面には出さない）
             //   VJPlayer --card-preview strobe out.png
@@ -457,8 +464,14 @@ enum CardPreview {
         var body: some View {
             VStack(alignment: .leading, spacing: 10) {
                 EffectCard(effect: $other, isFirst: true, isLast: false, move: { _ in }, remove: {})
-                EffectCard(effect: $effect, isFirst: false, isLast: true, move: { _ in }, remove: {})
-                    .onAppear { EffectUIState.shared.expanded.insert(effect.id) }
+                if effect.kind.isGenerator {
+                    // クリップのジェネレーターと同じ形（見出しが無く、説明文の行に 元に戻す・サイコロ・プリセット）
+                    EffectCard(effect: $effect, isFirst: true, isLast: true, move: { _ in }, remove: {},
+                               isBlendSettings: true, showsCardButtons: true)
+                } else {
+                    EffectCard(effect: $effect, isFirst: false, isLast: true, move: { _ in }, remove: {})
+                        .onAppear { EffectUIState.shared.expanded.insert(effect.id) }
+                }
                 ParamColumns {
                     BlendChoice(blend: $blend)
                         .frame(width: min(UI.paramColumnWidth, Self.cardWidth))
@@ -561,7 +574,13 @@ enum CardPreview {
         if let i = kind.params.firstIndex(where: { $0.animatable }) {
             var a = e.anim(i); a.mode = .beat; e.setAnim(i, a)
         }
-        let view = NSHostingView(rootView: Host(effect: e))
+        // VJ_CARD_AUTODICE=1：サイコロを自動で振っている所（4 拍ごと・少しだけ）。上の見本のカードも
+        var other = Effect(kind: .mirror)
+        if ProcessInfo.processInfo.environment["VJ_CARD_AUTODICE"] == "1" {
+            e.autoDice = AutoDice(mode: .beats, every: 4, slight: true)
+            other.autoDice = AutoDice(mode: .attack)
+        }
+        let view = NSHostingView(rootView: Host(effect: e, other: other))
         let size = view.fittingSize
         let win = NSWindow(contentRect: NSRect(x: -10000, y: -10000, width: size.width, height: size.height),
                            styleMask: [.borderless], backing: .buffered, defer: false)

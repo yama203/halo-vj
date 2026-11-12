@@ -1207,6 +1207,10 @@ enum MoreGenerators {
         case .logoParticles:
             guard let (s, dt) = life.state(key, now: now, origin: o, warm: 2, make: { LogoParticleSim() }) else { return }
             s.render(e, into: dst, dt: dt, now: now, stack: stack, cb: cb)
+        case .ringEmitter:
+            // はじめの空回しは RingEmitterSim がする（寿命ぶん）。ここでは経過時間で進めない
+            guard let (s, dt) = life.state(key, now: now, origin: o, warm: 0, make: { RingEmitterSim() }) else { return }
+            s.render(e, into: dst, dt: dt, now: now, stack: stack, cb: cb)
         default:
             break
         }

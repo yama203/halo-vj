@@ -1,7 +1,6 @@
 /* Halo VJ の英語の訳。見出しは画面の日本語（ソースの L("…")）。抜けは tools/i18n_check.py で確かめる */
 
 /* EffectDice.swift・EffectPresets.swift（サイコロ・プリセット） */
-"値をランダムに（⌥：少しだけ）" = "Randomize values (⌥: just a little)";
 "プリセット %@" = "Preset %@";
 "まだプリセットはありません" = "No presets yet";
 "今の値を保存…" = "Save Current Values…";
@@ -2134,3 +2133,52 @@
 "オシロスコープのような、sin を組み合わせた光る曲線。周波数で形が変わり、位相が回って動く。まわりは透明" = "Glowing curves made from combined sine waves, like an oscilloscope. The frequencies set the shape and the rotating phase animates it. The surroundings are transparent";
 "夜空に花火が次々に上がって開き、粒が落ちながら消えていく。まわりは透明" = "Fireworks launch one after another and burst, with sparks falling as they fade. The surroundings are transparent";
 "下から立ちのぼる炎。幅を狭くすると真ん中のたき火になる。火の粉と煙も出せる。炎でない所は透明" = "Flames rising from the bottom. Narrow the width for a campfire in the middle. Sparks and smoke can be added. Areas without fire are transparent";
+
+/* ジェネレーター 第 4 弾：輪から湧く粒 */
+"輪から湧く粒" = "Ring Particles";
+"縁の太さ" = "Edge Thickness";
+"出る向き" = "Emit Direction";
+"外へ" = "Outward";
+"内へ" = "Inward";
+"出る勢い" = "Emit Speed";
+"縁にとどまる" = "Cling to Edge";
+"乱れの強さ" = "Turbulence";
+"渦の大きさ" = "Swirl Size";
+"渦の変わる速さ" = "Swirl Change Speed";
+"空気抵抗" = "Drag";
+"出る範囲" = "Emit Arc";
+"出る範囲の向き" = "Emit Arc Angle";
+"出る範囲が回る速さ" = "Emit Arc Rotation";
+"パレット（寿命に沿って）" = "Palette (Over Lifetime)";
+"円の縁から粒が生まれて、渦を巻くように揺らぎながら流れ出し続ける。縁にとどまる・乱れの強さ・渦の大きさで、煙のようにも、星くずのようにも（まわりは透明）" = "Particles are born on the edge of a circle and keep streaming away, swirling as they go. Cling to Edge, Turbulence and Swirl Size turn it into smoke or stardust. The surroundings are transparent";
+
+/* サイコロ 第 2 弾：ジェネレーターにも・自動で振る・つなぎ */
+"%@ごと" = "every %@";
+"少しだけ" = "just a little";
+"つなぎ %@" = "glide %@";
+"自動：" = "Auto: ";
+"値をランダムに変える（⌥ を押しながら：少しだけ）。右の ▾ で、拍や音に合わせて自動で振る" = "Randomize the values (hold ⌥: just a little). Use the ▾ on the right to roll automatically with the beat or the audio";
+"（押すと少しだけ変わる）" = "(Clicking changes the values just a little)";
+"サイコロ" = "Dice";
+"自動で振る" = "Roll Automatically";
+"音のアタックで（しきい値 %@%%）" = "on audio attacks (threshold %@%%)";
+"オフ（「今すぐ振る」か、見出しのサイコロを押したときだけ）" = "Off (rolls only with “Roll Now” or the dice in the header)";
+"%@ごとに振っています" = "Rolling every %@";
+"音のアタックで振っています（しきい値 %@%%）" = "Rolling on audio attacks (threshold %@%%)";
+"音の入力がオフなので、振っていません" = "Not rolling: the audio input is off";
+"今すぐ振る" = "Roll Now";
+"その場で 1 回振る（下の「変え方」で。⌥ を押しながらだと少しだけ）" = "Roll once right now (using “Change” below; hold ⌥ for just a little)";
+"自動では振らない" = "Don't roll automatically";
+"決めた拍ごとに振る" = "Roll every chosen number of beats";
+"キックのような、音の立ち上がりで振る" = "Roll on audio attacks such as kicks";
+"変え方" = "Change";
+"大きく" = "Big";
+"今の値の近くで少しだけ動かす（形・色の選択肢は変えない）" = "Move values just a little around the current ones (shape and color choices stay)";
+"値の範囲の中で、大きく変える" = "Change values freely within their ranges";
+"つなぎ" = "Glide";
+"振ったとき、何拍かけて前の値から新しい値へなめらかに移るか" = "How many beats the values take to move smoothly from the old to the new ones after a roll";
+"次に振るまでの進み具合（BPM の拍に合わせて進む）" = "Progress until the next roll (follows the BPM beat)";
+"音の入力がオフです（上のバーの「音の入力」でオンに）" = "The audio input is off (turn it on with “Audio Input” in the top bar)";
+"立ち上がりの強さがこの線を超えた瞬間に振る。下げるほど小さな音でも振る（グラフの線を上下にドラッグしても変わる）" = "Rolls the moment the attack strength crosses this line. Lower values roll on quieter hits (you can also drag the line in the graph up and down)";
+"立ち上がりの強さ（最近 2.5 秒）。オレンジの線を上下にドラッグして、しきい値を変える" = "Attack strength (last 2.5 seconds). Drag the orange line up and down to change the threshold";
+"自動で振る（拍・音）・変え方・つなぎ" = "Roll automatically (beat or audio), change amount, glide";

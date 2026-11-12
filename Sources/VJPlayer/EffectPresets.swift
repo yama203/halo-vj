@@ -11,7 +11,7 @@ import SwiftUI
 struct EffectPreset: Codable, Identifiable, Equatable {
     var id = UUID()
     var name: String
-    /// 覚えた中身（使うのは値・色・パレット・動きだけ）
+    /// 覚えた中身（使うのは値・色・パレット・動き・サイコロの自動の設定だけ）
     var effect: Effect
 }
 
@@ -84,6 +84,8 @@ final class EffectPresets: ObservableObject {
         e.color = effect.color
         e.palette = effect.palette
         e.anims = effect.anims.filter { $0.key != Effect.mixKey }
+        // サイコロの自動の設定も（値の組と一緒に、動き方も呼び出せるように）
+        e.autoDice = effect.autoDice
         if let i = all.firstIndex(where: { $0.effect.kind == kind && $0.name == name }) {
             all[i].effect = e
             write()
@@ -126,6 +128,8 @@ final class EffectPresets: ObservableObject {
             anims[k] = a
         }
         e.anims = anims
+        e.autoDice = src.autoDice
+        e.diceGlide = DiceGlide()
         return e
     }
 }

@@ -55,6 +55,18 @@ extension Engine {
         if !h.canUndo { h.update() }
     }
 
+    /// 自動で変える（自動のサイコロ）：元に戻すの歩にしない。
+    /// 利用者の変更が落ち着く前（待っている歩がある）なら、その歩に混ぜる（自動の分だけを別の歩にはしない）
+    func changeWithoutUndo(_ f: () -> Void) {
+        let h = undoHistory
+        let hadPending = h.pending != nil
+        f()
+        guard !hadPending else { return }
+        h.pending?.cancel(); h.pending = nil
+        h.committed = undoSnapshot()
+        h.update()
+    }
+
     /// 待っている変更を、今すぐ 1 歩として覚える
     @discardableResult
     func commitUndoStep() -> Bool {

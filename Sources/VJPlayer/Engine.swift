@@ -338,6 +338,8 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
         }
     }
     lazy var autoRunner = AutopilotRunner(engine: self)
+    /// サイコロを拍・音で自動に振る見張り（AutoDice.swift）
+    lazy var autoDice = AutoDiceDriver(engine: self)
     /// 出力が切り替わった知らせ（出力モニターを光らせる）
     @Published var outputEvent: OutputEvent?
     /// まとめる前の変化（同じ瞬間のもの）
@@ -1250,6 +1252,8 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
         state.padStacks = heldPadStacks()
         renderLock.withLock { renderState = state }
         syncScenePreview()
+        // 出ているものが変わったかもしれない：自動のサイコロの見張りを動かす・止める
+        autoDice.wake()
     }
 
     /// シーン編集のプレビューの中身を作り直す（シーンを編集中で、下のパネルがシーンのタブのときだけ再生する）

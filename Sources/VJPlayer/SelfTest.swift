@@ -283,6 +283,8 @@ enum SelfTest {
         testReactionDiffusion(check: check)
         testDecks(check: check, wait: wait)
         testKinds2Gen(check: check)
+        testRingEmitter(check: check)
+        testDice2(check: check)
         testPads(check: check)
         testMultiSelect(check: check)
         testMoveLayer(check: check)
@@ -5076,6 +5078,23 @@ enum SelfTest {
         let fxp = EffectProcessor(); fxp.storageMode = .shared
         var out = blank
         var ms = 0.0
+        // 前のコマを覚えるもの：VJ_PREVIEW_STEP=1 で、0 秒から 1/60 秒ずつ（本番と同じように）時刻まで進めてから書き出す。
+        //   VJ_PREVIEW_SEQ=フォルダ で、進める途中のコマを 2 コマおき（30 コマ/秒）に連番の PNG で書き出す（動画にして動きを見る）
+        let env = ProcessInfo.processInfo.environment
+        if kind.isStateful, env["VJ_PREVIEW_STEP"] == "1" || env["VJ_PREVIEW_SEQ"] != nil {
+            let seq = env["VJ_PREVIEW_SEQ"]
+            let frames = Int(time * 60)
+            var written = 0
+            for f in 0..<frames {
+                let cb = ctx.queue.makeCommandBuffer()!
+                out = fxp.apply(EffectStack(effects: [e]), to: blank, key: "g", cb: cb, now: Double(f) / 60)
+                cb.commit(); cb.waitUntilCompleted()
+                if let seq, f % 2 == 0 {
+                    writePNG(out, W: W, H: H, path: (seq as NSString).appendingPathComponent(String(format: "f%05d.png", written)))
+                    written += 1
+                }
+            }
+        }
         // GPU の時間は、ほかのアプリとの取り合いでぶれるので、20 回のうちいちばん速いもの
         ms = .infinity
         for k in 0..<22 {
@@ -5092,6 +5111,12 @@ enum SelfTest {
             cb.commit(); cb.waitUntilCompleted()
             if k >= 2 { ms = min(ms, (cb.gpuEndTime - cb.gpuStartTime) * 1000) }
         }
+        writePNG(out, W: W, H: H, path: path)
+        print(String(format: "書き出しました: %@（GPU %.2f ms / %d×%d）", path, ms, W, H))
+    }
+
+    /// 開発用：絵を PNG に（透明な所は、ごく暗い灰色の上に）
+    private static func writePNG(_ out: MTLTexture, W: Int, H: Int, path: String) {
         var px = [UInt8](repeating: 0, count: W * H * 4)
         out.getBytes(&px, bytesPerRow: W * 4, from: MTLRegionMake2D(0, 0, W, H), mipmapLevel: 0)
         for i in stride(from: 0, to: px.count, by: 4) {
@@ -5104,7 +5129,6 @@ enum SelfTest {
                                    hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: W * 4, bitsPerPixel: 32)!
         px.withUnsafeBufferPointer { memcpy(rep.bitmapData!, $0.baseAddress!, px.count) }
         try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
-        print(String(format: "書き出しました: %@（GPU %.2f ms / %d×%d）", path, ms, W, H))
     }
 
     /// 開発用：オーバードライブ加算の GPU 時間を測る（1 コマあたり ms）

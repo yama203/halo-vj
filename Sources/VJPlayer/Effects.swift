@@ -24,6 +24,8 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
     case plasma, aurora, nebula, truchet, hexGrid, codeRain, wireframe, moire
     /// 追加のジェネレーター 第 3 弾（MoreKinds.swift・MoreGenerators2.swift）
     case sunburst, ridgeLines, bokeh, spiral, voronoi, lissajous, fireworks, fire
+    /// 追加のジェネレーター 第 4 弾（MoreKinds.swift・RingEmitter.swift）
+    case ringEmitter
     /// 特殊合成（レイヤーの重ね方）の値。エフェクト一覧には出さない
     /// 切り替えの形（レイヤーの切り替え方で、新しいクリップに内部でかける。一覧には出さない）
     case transitionMask
@@ -48,6 +50,7 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
                                            .laser, .synthwave, .starfield, .ripples, .lightning, .logoParticles,
                                            .plasma, .aurora, .nebula, .truchet, .hexGrid, .codeRain, .wireframe, .moire,
                                            .sunburst, .ridgeLines, .bokeh, .spiral, .voronoi, .lissajous, .fireworks, .fire,
+                                           .ringEmitter,
                                            .syphonIn, .ndiIn, .camera, .stripes, .grid, .noise, .shapes, .phyllotaxis, .text, .clock]
     /// 文字を描くジェネレーター（テキスト・時計。描き方は同じ）
     var isText: Bool { self == .text || self == .clock }
@@ -75,6 +78,7 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
         case .bloom, .kaleidoscope, .rgbSplit, .pixelate, .edgeNeon, .zoomBlur, .pixelSort, .datamosh, .ascii, .dither, .voronoiGlass, .reactionDiffusion, .laser, .synthwave, .logoParticles, .metaballs, .starfield, .fractal, .ripples, .lightning, .growth: ""
         case .plasma, .aurora, .nebula, .truchet, .hexGrid, .codeRain, .wireframe, .moire: ""
         case .sunburst, .ridgeLines, .bokeh, .spiral, .voronoi, .lissajous, .fireworks, .fire: ""
+        case .ringEmitter: ""
         case .mirror: L("ミラー")
         case .colorize: L("カラーライズ")
         case .levels: L("レベル")
@@ -136,6 +140,7 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
         case .bloom, .kaleidoscope, .rgbSplit, .pixelate, .edgeNeon, .zoomBlur, .pixelSort, .datamosh, .ascii, .dither, .voronoiGlass, .reactionDiffusion, .laser, .synthwave, .logoParticles, .metaballs, .starfield, .fractal, .ripples, .lightning, .growth: .generator
         case .plasma, .aurora, .nebula, .truchet, .hexGrid, .codeRain, .wireframe, .moire: .generator
         case .sunburst, .ridgeLines, .bokeh, .spiral, .voronoi, .lissajous, .fireworks, .fire: .generator
+        case .ringEmitter: .generator
         case .mirror, .warp, .fluid: .shape
         case .colorize, .levels, .posterize, .invert: .color
         case .posterizeTime, .timeWarp, .strobe, .echo: .time
@@ -155,6 +160,7 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
         case .bloom, .kaleidoscope, .rgbSplit, .pixelate, .edgeNeon, .zoomBlur, .pixelSort, .datamosh, .ascii, .dither, .voronoiGlass, .reactionDiffusion, .laser, .synthwave, .logoParticles, .metaballs, .starfield, .fractal, .ripples, .lightning, .growth: ""
         case .plasma, .aurora, .nebula, .truchet, .hexGrid, .codeRain, .wireframe, .moire: ""
         case .sunburst, .ridgeLines, .bokeh, .spiral, .voronoi, .lissajous, .fireworks, .fire: ""
+        case .ringEmitter: ""
         case .mirror: "rectangle.split.2x1"
         case .colorize: "paintpalette"
         case .levels: "slider.horizontal.3"
@@ -226,6 +232,7 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
         case .bloom, .kaleidoscope, .rgbSplit, .pixelate, .edgeNeon, .zoomBlur, .pixelSort, .datamosh, .ascii, .dither, .voronoiGlass, .reactionDiffusion, .laser, .synthwave, .logoParticles, .metaballs, .starfield, .fractal, .ripples, .lightning, .growth: -1
         case .plasma, .aurora, .nebula, .truchet, .hexGrid, .codeRain, .wireframe, .moire: -1
         case .sunburst, .ridgeLines, .bokeh, .spiral, .voronoi, .lissajous, .fireworks, .fire: -1
+        case .ringEmitter: -1
         case .mirror: 0
         case .colorize: 1
         case .levels: 2
@@ -263,6 +270,7 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
         case .bloom, .kaleidoscope, .rgbSplit, .pixelate, .edgeNeon, .zoomBlur, .pixelSort, .datamosh, .ascii, .dither, .voronoiGlass, .reactionDiffusion, .laser, .synthwave, .logoParticles, .metaballs, .starfield, .fractal, .ripples, .lightning, .growth: return []
         case .plasma, .aurora, .nebula, .truchet, .hexGrid, .codeRain, .wireframe, .moire: return []
         case .sunburst, .ridgeLines, .bokeh, .spiral, .voronoi, .lissajous, .fireworks, .fire: return []
+        case .ringEmitter: return []
         case .mirror:
             return [
                 EffectParam(label: L("左右"), range: 0...2, defaultValue: 1, choices: [L("なし"), L("左を右へ"), L("右を左へ")]),
@@ -472,29 +480,32 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
             return [
                 EffectParam(label: L("数"), range: 1000...1_000_000, defaultValue: 500_000, perPoint: 1000, step: 1000,
                             format: { String(format: L("%.0f 万"), $0 / 10000) }, animRange: 100_000...600_000),
-                EffectParam(label: L("速さ"), range: 0...3, defaultValue: 0.8, perPoint: 0.005, format: { String(format: "%.2f", $0) }),
+                EffectParam(label: L("速さ"), range: 0...3, defaultValue: 0.8, perPoint: 0.005, format: { String(format: "%.2f", $0) },
+                            animRange: 0.4...2),
                 EffectParam(label: L("においをかぐ角度"), range: 5...120, defaultValue: 40, perPoint: 0.3,
                             format: { String(format: "%.0f°", $0) }, animRange: 15...60),
                 EffectParam(label: L("においをかぐ距離"), range: 2...80, defaultValue: 20, perPoint: 0.1,
                             format: { String(format: L("%.0f px（1080p）"), $0) }, animRange: 8...40),
                 EffectParam(label: L("曲がる角度"), range: 5...120, defaultValue: 20, perPoint: 0.3,
                             format: { String(format: "%.0f°", $0) }, animRange: 10...50),
-                EffectParam(label: L("跡の残る長さ"), range: 0...1, defaultValue: 0.6, format: EffectParam.percent),
+                EffectParam(label: L("跡の残る長さ"), range: 0...1, defaultValue: 0.6, format: EffectParam.percent, animRange: 0.3...0.95),
                 EffectParam(label: L("にじみ"), range: 0...1, defaultValue: 0.2, format: EffectParam.percent),
                 EffectParam(label: L("明るさ"), range: 0...4, defaultValue: 0.6, perPoint: 0.005, format: EffectParam.percent, animRange: 0.3...1.5),
                 EffectParam(label: L("色の付け方"), range: 0...1, defaultValue: 0, choices: [L("1 色"), L("パレット")]),
                 EffectParam(label: L("えさ"), range: 0...2, defaultValue: 0, choices: [L("なし"), L("動く点"), L("輪")]),
                 EffectParam(label: L("えさの強さ"), range: 0...1, defaultValue: 0.5, format: EffectParam.percent),
                 EffectParam(label: L("ゆらぎ"), range: 0...1, defaultValue: 0.1, format: EffectParam.percent),
-                EffectParam(label: L("始まりの形"), range: 0...2, defaultValue: 0, choices: [L("ばらばら"), L("円"), L("真ん中から")]),
+                // 始まりの形はやり直したときだけ効く（サイコロで変えても見た目が変わらない・真ん中から だと点 1 つから育て直しになる）
+                EffectParam(label: L("始まりの形"), range: 0...2, defaultValue: 0, choices: [L("ばらばら"), L("円"), L("真ん中から")], noDice: true),
             ]
         case .particleLife:
             // パーティクル・ライフ：種類どうしの好き嫌い（たねで決まる表）だけで動く
             return [
+                // 数は重さに効くので、サイコロでは変えない
                 EffectParam(label: L("数"), range: 2...6000, defaultValue: 2000, perPoint: 2, step: 1,
-                            format: { String(format: L("%.0f 粒"), $0) }),
+                            format: { String(format: L("%.0f 粒"), $0) }, noDice: true),
                 EffectParam(label: L("種類の数"), range: 1...8, defaultValue: 6, perPoint: 0.03, step: 1,
-                            format: { String(format: L("%.0f 色"), $0) }),
+                            format: { String(format: L("%.0f 色"), $0) }, animRange: 3...8),
                 EffectParam(label: L("たね（性格）"), range: 0...999, defaultValue: 1, perPoint: 0.1, step: 1,
                             format: { String(format: "%.0f", $0) }),
                 EffectParam(label: L("力の届く広さ"), range: 0.02...0.3, defaultValue: 0.09, perPoint: 0.0003,
@@ -502,14 +513,15 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
                 EffectParam(label: L("力の強さ"), range: 0...3, defaultValue: 1, perPoint: 0.005, format: EffectParam.percent),
                 EffectParam(label: L("ブレーキ"), range: 0...1, defaultValue: 0.5, format: EffectParam.percent),
                 EffectParam(label: L("速さ"), range: 0...3, defaultValue: 1, perPoint: 0.005, format: { String(format: "%.2f", $0) }),
+                // 大きな粒・明るさ・残像が重なると真っ白になるので、サイコロ・動きの範囲はほどほどに
                 EffectParam(label: L("粒の大きさ"), range: 1...40, defaultValue: 6, perPoint: 0.05,
-                            format: { String(format: L("%.0f px（1080p）"), $0) }),
-                EffectParam(label: L("光のにじみ"), range: 0...1, defaultValue: 0.3, format: EffectParam.percent),
+                            format: { String(format: L("%.0f px（1080p）"), $0) }, animRange: 3...14),
+                EffectParam(label: L("光のにじみ"), range: 0...1, defaultValue: 0.3, format: EffectParam.percent, animRange: 0...0.7),
                 EffectParam(label: L("色の付け方"), range: 0...1, defaultValue: 0, choices: [L("虹色"), L("パレット")]),
                 EffectParam(label: L("性格を入れ替える（拍）"), range: 0...6, defaultValue: 0,
                             choices: [L("しない"), "1", "2", "4", "8", "16", "32"]),
-                EffectParam(label: L("明るさ"), range: 0...3, defaultValue: 1, perPoint: 0.003, format: EffectParam.percent),
-                EffectParam(label: L("残像"), range: 0...0.98, defaultValue: 0, format: EffectParam.percent),
+                EffectParam(label: L("明るさ"), range: 0...3, defaultValue: 1, perPoint: 0.003, format: EffectParam.percent, animRange: 0.6...1.6),
+                EffectParam(label: L("残像"), range: 0...0.98, defaultValue: 0, format: EffectParam.percent, animRange: 0...0.7),
             ]
         case .fireflies:
             // ホタルの同期：1 匹ずつが自分の速さで光り、まわりの光に位相を少し合わせる
@@ -536,21 +548,26 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
         case .attractor:
             // ストレンジ・アトラクター：点を式で動かし続け、通った所の濃さを描く
             return [
-                EffectParam(label: L("種類"), range: 0...3, defaultValue: 0, choices: [L("クリフォード"), L("デ・ヨング"), L("トーマス"), L("アイザワ")]),
-                EffectParam(label: L("係数 a"), range: -3...3, defaultValue: -1.4, perPoint: 0.002, format: { String(format: "%+.3f", $0) }),
-                EffectParam(label: L("係数 b"), range: -3...3, defaultValue: 1.6, perPoint: 0.002, format: { String(format: "%+.3f", $0) }),
-                EffectParam(label: L("係数 c"), range: -3...3, defaultValue: 1.0, perPoint: 0.002, format: { String(format: "%+.3f", $0) }),
-                EffectParam(label: L("係数 d"), range: -3...3, defaultValue: 0.7, perPoint: 0.002, format: { String(format: "%+.3f", $0) }),
+                // 種類は、係数の意味ごと変わる（3D のアイザワに、平面用の係数のままだと点が 1 か所に集まって重くなる）。サイコロでは変えない
+                EffectParam(label: L("種類"), range: 0...3, defaultValue: 0, choices: [L("クリフォード"), L("デ・ヨング"), L("トーマス"), L("アイザワ")],
+                            noDice: true),
+                // 係数は形そのもの。0 に近いと点が 1 か所に集まって真っ暗・重くなるので、サイコロでは変えない（形は「変身」で動く）
+                EffectParam(label: L("係数 a"), range: -3...3, defaultValue: -1.4, perPoint: 0.002, format: { String(format: "%+.3f", $0) }, noDice: true),
+                EffectParam(label: L("係数 b"), range: -3...3, defaultValue: 1.6, perPoint: 0.002, format: { String(format: "%+.3f", $0) }, noDice: true),
+                EffectParam(label: L("係数 c"), range: -3...3, defaultValue: 1.0, perPoint: 0.002, format: { String(format: "%+.3f", $0) }, noDice: true),
+                EffectParam(label: L("係数 d"), range: -3...3, defaultValue: 0.7, perPoint: 0.002, format: { String(format: "%+.3f", $0) }, noDice: true),
                 EffectParam(label: L("変身の速さ"), range: 0...2, defaultValue: 0.2, perPoint: 0.002, format: { String(format: "%.2f", $0) }),
-                EffectParam(label: L("変身の大きさ"), range: 0...1, defaultValue: 0.3, format: EffectParam.percent),
+                EffectParam(label: L("変身の大きさ"), range: 0...1, defaultValue: 0.3, format: EffectParam.percent, animRange: 0...0.6),
                 EffectParam(label: L("濃さ"), range: 0...4, defaultValue: 1, perPoint: 0.005, format: EffectParam.percent, animRange: 0.5...2),
                 EffectParam(label: L("残り方"), range: 0...0.99, defaultValue: 0.9, format: EffectParam.percent),
-                EffectParam(label: L("大きさ"), range: 0.2...3, defaultValue: 1, perPoint: 0.003, format: { String(format: "%.2fx", $0) }),
+                EffectParam(label: L("大きさ"), range: 0.2...3, defaultValue: 1, perPoint: 0.003, format: { String(format: "%.2fx", $0) },
+                            animRange: 0.6...1.6),
                 EffectParam(label: L("回る速さ"), range: -60...60, defaultValue: 4, perPoint: 0.2,
                             format: { String(format: L("%+.0f°/秒"), $0) }),
                 EffectParam(label: L("色の付け方"), range: 0...2, defaultValue: 1, choices: [L("1 色"), L("パレット"), L("動きの向き")]),
+                // 点の数は重さに効く（4 で 4 倍）。サイコロ・動きはほどほどの範囲で
                 EffectParam(label: L("点の数"), range: 0.1...4, defaultValue: 1, perPoint: 0.005,
-                            format: { String(format: L("%.1f 百万/コマ"), $0) }),
+                            format: { String(format: L("%.1f 百万/コマ"), $0) }, animRange: 0.5...1.5),
             ]
         case .timeWarp:
             // 時間のずらし：場所ごとに何コマ前を見せるか
@@ -962,6 +979,7 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
         case .bloom, .kaleidoscope, .rgbSplit, .pixelate, .edgeNeon, .zoomBlur, .pixelSort, .datamosh, .ascii, .dither, .voronoiGlass, .reactionDiffusion, .laser, .synthwave, .logoParticles, .metaballs, .starfield, .fractal, .ripples, .lightning, .growth: ""
         case .plasma, .aurora, .nebula, .truchet, .hexGrid, .codeRain, .wireframe, .moire: ""
         case .sunburst, .ridgeLines, .bokeh, .spiral, .voronoi, .lissajous, .fireworks, .fire: ""
+        case .ringEmitter: ""
         case .mirror: L("画面の半分を反対側に折り返す")
         case .colorize: L("明るさをもとに、1 色で染める（カラー）か、パレットの色に置き換える（パレット）")
         case .levels: L("黒と白の位置・ガンマで明るさとコントラストを整える")
@@ -1274,6 +1292,10 @@ struct Effect: Codable, Identifiable, Equatable {
     static let maxPalette = 8
     /// 値のアニメーション（キーは値の番号。不透明度は "mix"）
     var anims: [String: ParamAnim] = [:]
+    /// サイコロを拍・音で自動に振る設定（nil = しない。AutoDice.swift）
+    var autoDice: AutoDice?
+    /// サイコロの「つなぎ」の途中（前の値から新しい値へ移る。保存しない・比べない）
+    var diceGlide = DiceGlide()
     /// エフェクトの不透明度（かかり具合）。0 = 元の絵のまま、1 = いっぱいにかかる
     var mix: Double = 1
     /// ジェネレーターの画質（0 = そのまま、1 = 3/4、2 = 半分の大きさで描いて引き伸ばす。GPU の負担を減らす）
@@ -1315,7 +1337,7 @@ struct Effect: Codable, Identifiable, Equatable {
 
     /// t の時点の値（アニメーション込み）
     func value(_ i: Int, at t: Double, beat: BeatClock, origin: Double) -> Double {
-        let base = value(i)
+        let base = glidedValue(i, at: t)
         guard let a = anims[String(i)], a.isOn, kind.params.indices.contains(i) else { return base }
         let p = kind.params[i]
         var v = a.value(base: base, at: t, beat: beat, origin: origin)
@@ -1375,7 +1397,7 @@ struct Effect: Codable, Identifiable, Equatable {
         return value(5, at: t, beat: beat, origin: origin) * (1 - decay * f / duty)
     }
 
-    enum CodingKeys: String, CodingKey { case id, kind, enabled, values, color, palette, anims, points, mix, text, quality }
+    enum CodingKeys: String, CodingKey { case id, kind, enabled, values, color, palette, anims, points, mix, text, quality, autoDice }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -1396,6 +1418,7 @@ struct Effect: Codable, Identifiable, Equatable {
         mix = try c.decodeIfPresent(Double.self, forKey: .mix) ?? 1
         text = try c.decodeIfPresent(String.self, forKey: .text) ?? TextLook.defaultText
         quality = min(max(try c.decodeIfPresent(Int.self, forKey: .quality) ?? 0, 0), 2)
+        autoDice = try? c.decodeIfPresent(AutoDice.self, forKey: .autoDice)
         // 値が足りない（あとから値が増えた）ときは初期値で埋める
         while values.count < kind.params.count { values.append(kind.params[values.count].defaultValue) }
         // 以前の「かかり具合」（反転・カラーライズ）は、エフェクトの不透明度に引き継ぐ（同じ働きなので 1 つにまとめた）
