@@ -32,6 +32,13 @@ enum Main {
             SelfTest.genPreview(kind: k, path: args[i + 2], time: nums.first ?? 8, values: Array(nums.dropFirst()), random: rnd)
             exit(0)
         }
+        if let i = args.firstIndex(of: "--clock-preview"), args.count > i + 1 {
+            // 開発用：時計・カウントダウンを、残り時間を決め打ちで書き出す（背景のジェネレーターに重ねられる）
+            //   VJPlayer --clock-preview out.png 背景（synthwave など。none = 無し） 残り秒 [0 になったときの文字] [番号=値 …]
+            //     [bg.番号=値 …] [bgt=背景の秒] [color=#RRGGBB] [palette=番号] [fx=エフェクト fx.番号=値 …]
+            SelfTest.clockPreview(path: args[i + 1], args: Array(args.dropFirst(i + 2)))
+            exit(0)
+        }
         if let i = args.firstIndex(of: "--blend-preview"), args.count > i + 3, let m = Int(args[i + 1]).flatMap(BlendMode.init) {
             // 開発用：重ね方を 1 枚書き出す  VJPlayer --blend-preview 番号 out.png 上のジェネレーター [下の画像] [値 値 …]
             let rest = Array(args.dropFirst(i + 4))
@@ -90,6 +97,31 @@ enum Main {
             CardPreview.writeDockTabs(list: !rest.contains("grid"), dragDX: rest.compactMap(Double.init).first, path: args[i + 1])
             exit(0)
         }
+        if let i = args.firstIndex(of: "--cue-preview"), args.count > i + 1 {
+            // 開発用：「キュー」パネルを、見本のキュー（ライブイベントの例）で書き出す  VJPlayer --cue-preview out.png [幅 高さ]
+            //   保存しない別のエンジンで作る（利用者のキューには触らない）
+            _ = NSApplication.shared
+            NSApp.setActivationPolicy(.prohibited)
+            // 暗い見た目で描く（このプロセスの中だけ）
+            NSApp.appearance = NSAppearance(named: .darkAqua)
+            let n = args.dropFirst(i + 2).compactMap(Double.init)
+            CardPreview.writeCues(width: n.first ?? 440, height: n.count > 1 ? n[1] : 520, path: args[i + 1])
+            exit(0)
+        }
+        if let i = args.firstIndex(of: "--workspace-preview"), args.count > i + 1 {
+            // 開発用：おすすめの並べ方を書き出す  VJPlayer --workspace-preview out.png [Show|VJ|Standard] [幅 高さ] [names]
+            //   決まった木と、見本のキューを入れた別のエンジンで描く（利用者のレイアウト・設定には触らない）。names = パネルの名前だけ
+            _ = NSApplication.shared
+            NSApp.setActivationPolicy(.prohibited)
+            // 暗い見た目で描く（このプロセスの中だけ）
+            NSApp.appearance = NSAppearance(named: .darkAqua)
+            let rest = Array(args.dropFirst(i + 2))
+            let tree: DockNode = rest.contains("VJ") ? .clubVJ : rest.contains("Standard") ? .standard : .cuePlayback
+            let n = rest.compactMap(Double.init)
+            CardPreview.writeWorkspace(tree, width: n.first ?? 1280, height: n.count > 1 ? n[1] : 720,
+                                       placeholders: rest.contains("names"), path: args[i + 1])
+            exit(0)
+        }
         if let i = args.firstIndex(of: "--dock-drag-preview"), args.count > i + 3,
            let x = Double(args[i + 2]), let y = Double(args[i + 3]) {
             // 開発用：自由レイアウト（VJ の並べ方）で、パネルを (x, y) までドラッグしている途中を書き出す
@@ -103,11 +135,19 @@ enum Main {
         }
         if let i = args.firstIndex(of: "--monitor-preview"), args.count > i + 1 {
             // 開発用：出力モニターとプレビューの枠・札を並べて書き出す（映像は代わりの黒）  VJPlayer --monitor-preview out.png
+            //   絵を渡すと、その絵を映像の代わりに入れる（枠も大きく）  VJPlayer --monitor-preview out.png 出力の絵 [プレビューの絵]
             _ = NSApplication.shared
             NSApp.setActivationPolicy(.prohibited)
+            let pics = args.dropFirst(i + 2).prefix(2).compactMap { NSImage(contentsOfFile: $0) }
+            let (sw, sh): (CGFloat, CGFloat) = pics.isEmpty ? (320, 180) : (480, 270)
             func screen(_ role: MonitorBadge.Role, active: Bool = true) -> some View {
-                LinearGradient(colors: [Color(white: 0.02), Color(red: 0.3, green: 0.1, blue: 0.4)], startPoint: .top, endPoint: .bottom)
-                    .frame(width: 320, height: 180)
+                let pic = role == .live ? pics.first : (pics.count > 1 ? pics[1] : nil)
+                return ZStack {
+                    LinearGradient(colors: [Color(white: 0.02), Color(red: 0.3, green: 0.1, blue: 0.4)], startPoint: .top, endPoint: .bottom)
+                    if let pic { Image(nsImage: pic).resizable().aspectRatio(contentMode: .fill) }
+                }
+                    .frame(width: sw, height: sh)
+                    .clipped()
                     .overlay(alignment: .topLeading) { MonitorBadge(role: role, active: active).padding(5) }
                     .overlay(Rectangle().strokeBorder((role == .live ? UI.liveTint : UI.previewTint).opacity(0.85), lineWidth: 2))
             }
@@ -115,7 +155,8 @@ enum Main {
                 VStack(alignment: .leading, spacing: 6) {
                     SectionTitle(L("出力"), icon: "display", tint: UI.liveTint)
                     screen(.live)
-                    screen(.live, active: false)
+                    // 絵を入れるときは、並べて見比べるだけ（出していないときの札は省く）
+                    if pics.isEmpty { screen(.live, active: false) }
                 }
                 VStack(alignment: .leading, spacing: 6) {
                     SectionTitle(L("プレビュー"), icon: "eye", tint: UI.previewTint)
@@ -608,6 +649,89 @@ enum CardPreview {
         guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
         view.cacheDisplay(in: view.bounds, to: rep)
         try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
+    }
+
+    /// 開発用：ポン出しの見本のキューを並べた、保存しない別のエンジン（ライブイベントの例。2 番目のキューを出しているところ）
+    static func demoCueEngine() -> Engine {
+        let engine = Engine(persistent: false)
+        func thumb(_ g: Effect) -> Data? {
+            GeneratorThumbnail.image(g)?.tiffRepresentation.flatMap { NSBitmapImageRep(data: $0)?.representation(using: .png, properties: [:]) }
+        }
+        // クリップ：（段, 列, ジェネレーター, 名前）
+        func clip(_ layer: Int, _ col: Int, _ g: Effect, _ title: String) -> Int {
+            let i = engine.slotIndex(deck: 0, layer: layer, column: col)
+            let s = ClipSlot(generator: g)
+            s.title = title
+            engine.setSlot(i, s)
+            return i
+        }
+        var cd = Effect(kind: .clock)
+        cd.values[15] = 19
+        let loop = clip(0, 0, Effect(kind: .aurora), "開場ループ")
+        let count = clip(1, 0, cd, "開演までのカウントダウン")
+        let open = clip(0, 1, Effect(kind: .synthwave), "オープニング映像")
+        let ending = clip(0, 2, Effect(kind: .nebula), "エンディング映像")
+        func scene(_ name: String, _ g: Effect, fade: Double) -> UUID {
+            var sc = engine.captureScene(name: name, fade: fade)
+            sc.thumbnail = thumb(g)
+            engine.scenes.append(sc)
+            return sc.id
+        }
+        var logo = Effect(kind: .text); logo.text = "HALO"
+        let band1 = scene("1 組目", Effect(kind: .tunnel), fade: 1)
+        let change = scene("転換（ロゴ＋タイマー 10 分）", logo, fade: 2)
+        let band2 = scene("2 組目", Effect(kind: .bokeh), fade: 1)
+        func clipCue(_ i: Int, fade: Double?, end: EndAction?, keep: Bool = false, note: String) -> Cue {
+            var c = Cue(kind: .clip(deck: engine.decks[0].id, layer: engine.layerOf(i), column: engine.columnOf(i)), fade: fade, note: note)
+            c.clipID = engine.slots[i]?.id
+            c.endAction = end
+            c.keepOthers = keep ? true : nil
+            return c
+        }
+        engine.cues = [
+            clipCue(loop, fade: 2, end: .loop, note: "開場から"),
+            clipCue(count, fade: 1, end: nil, keep: true, note: "開演 5 分前・19:00 まで"),
+            clipCue(open, fade: 0, end: .blackout, note: "MC の「それではどうぞ」で"),
+            Cue(kind: .scene(band1), note: "ここからは VJ"),
+            Cue(kind: .scene(change), fade: 2, note: "1 組目の最後の曲が終わったら"),
+            Cue(kind: .scene(band2), note: "暗転のあと"),
+            clipCue(ending, fade: 2, end: .hold, note: "アンコールのあと"),
+            Cue(kind: .stopAll, fade: 3, note: "終演"),
+        ]
+        engine.currentCue = 1
+        return engine
+    }
+
+    /// 開発用：「キュー」パネルを、見本のキューで画像に（保存しない別のエンジンで）
+    static func writeCues(width: Double, height: Double, path: String) {
+        let engine = demoCueEngine()
+        let root = CuePanel()
+            .padding(10)
+            .frame(width: width, height: height, alignment: .top)
+            .background(UI.panelBackground)
+            .background(Color(white: 0.11))
+            .environment(\.colorScheme, .dark)
+            .environmentObject(engine)
+        let view = NSHostingView(rootView: root)
+        view.appearance = NSAppearance(named: .darkAqua)
+        snapshot(view, size: NSSize(width: width, height: height), path: path)
+    }
+
+    /// 開発用：決まった並べ方（ワークスペース）を、本物のパネルで画像に（見本のキューを入れた別のエンジン。利用者の設定には触らない）
+    static func writeWorkspace(_ tree: DockNode, width: Double, height: Double, placeholders: Bool, path: String) {
+        let engine = demoCueEngine()
+        // パネルの見せ方の設定は、使い捨ての置き場に（利用者の設定に書かない）
+        let store = UserDefaults(suiteName: "halovj.devpreview")!
+        let root = DockRootView(previewTree: tree, drag: DockDragState.preview(tree: tree), placeholders: placeholders)
+            .frame(width: width, height: height)
+            .background(Color(white: 0.08))
+            .environment(\.colorScheme, .dark)
+            .defaultAppStorage(store)
+            .environmentObject(engine)
+        let view = NSHostingView(rootView: root)
+        view.appearance = NSAppearance(named: .darkAqua)
+        snapshot(view, size: NSSize(width: width, height: height), path: path)
+        store.removePersistentDomain(forName: "halovj.devpreview")
     }
 
     /// 開発用：区画のタブとシーンの一覧を画像に（保存しない別のエンジン・使い捨ての設定で）

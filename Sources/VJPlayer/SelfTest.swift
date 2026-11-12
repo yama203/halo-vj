@@ -5117,6 +5117,69 @@ enum SelfTest {
         print(String(format: "書き出しました: %@（GPU %.2f ms / %d×%d）", path, ms, W, H))
     }
 
+    /// 開発用：時計・カウントダウンを、残り時間を決め打ちで描いて 1 枚書き出す（背景のジェネレーターの上に重ねられる）
+    ///   残り時間はタイマーのモードで作る（トリガーした時刻と今を、この中だけで決める。製品の動きはそのまま）
+    ///   args：背景の種類（none なら暗い下地だけ） 残り秒 [文字] [番号=値 …] [bg.番号=値 …] [bgt=背景の秒]
+    ///         [color=#RRGGBB] [palette=番号] [fx=エフェクトの種類（文字のレイヤーにかける。いくつでも）]
+    ///   残り秒が 0 以下なら「0 になったとき」（文字があればその文字）。整数ちょうどなら、数字が変わった瞬間（弾み）
+    static func clockPreview(path: String, args: [String]) {
+        let ctx = MetalContext.shared
+        let sz = ProcessInfo.processInfo.environment["VJ_PREVIEW_SIZE"]?.split(separator: "x").compactMap { Int($0) }
+        let W = sz?.count == 2 ? sz![0] : 1280, H = sz?.count == 2 ? sz![1] : 720
+        let td = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: W, height: H, mipmapped: false)
+        td.usage = [.shaderRead]
+        let blank = ctx.device.makeTexture(descriptor: td)!
+        let bgKind = args.first.flatMap(EffectKind.init(rawValue:))
+        let remaining = args.count > 1 ? Double(args[1]) ?? 754 : 754
+        var clock = Effect(kind: .clock)
+        var bg = bgKind.map { Effect(kind: $0) }
+        var bgTime = 8.0
+        var fx: [Effect] = []
+        for a in args.dropFirst(2) {
+            let kv = a.split(separator: "=", maxSplits: 1).map(String.init)
+            guard kv.count == 2 else { clock.text = a.replacingOccurrences(of: "\\n", with: "\n"); continue }
+            let (k, v) = (kv[0], kv[1])
+            if k == "bgt" { bgTime = Double(v) ?? bgTime }
+            else if k == "color", let c = RGB(hex: v) { clock.color = c }
+            else if k == "palette", let n = Int(v), PalettePreset.all.indices.contains(n) { clock.palette = PalettePreset.all[n].colors }
+            else if k == "fx", let fk = EffectKind(rawValue: v) { fx.append(Effect(kind: fk)) }
+            else if k.hasPrefix("fx."), let n = Int(k.dropFirst(3)), let d = Double(v), !fx.isEmpty, n < fx[fx.count - 1].values.count {
+                fx[fx.count - 1].values[n] = d
+            }
+            else if k.hasPrefix("bg."), let n = Int(k.dropFirst(3)), let d = Double(v), bg != nil, n < bg!.values.count { bg!.values[n] = d }
+            else if let n = Int(k), let d = Double(v), n < clock.values.count { clock.values[n] = d }
+        }
+        // タイマーで、残りが remaining になる時刻を作る（タイマーの長さは残りより少し長く）
+        let total = max(ceil(remaining) + 1, 1)
+        clock.values[12] = 2
+        clock.values[18] = floor(total / 60)
+        clock.values[19] = total.truncatingRemainder(dividingBy: 60)
+        let origin = 100.0
+        let now = origin + total - remaining
+        let fxp = EffectProcessor(), bgp = EffectProcessor()
+        let comp = Compositor()
+        comp.storageMode = .shared
+        var out: MTLTexture?
+        for k in 0..<22 {
+            let cb = ctx.queue.makeCommandBuffer()!
+            var groups: [LayerGroup] = []
+            if let bg {
+                let t = bgp.apply(EffectStack(effects: [bg]), to: blank, key: "bg", cb: cb, now: bgTime + Double(k) / 60)
+                groups.append(LayerGroup(draws: [LayerDraw(texture: t, opacity: 1, blend: .normal, holder: nil)],
+                                         opacity: 1, blend: .normal, key: 0))
+            }
+            let ct = fxp.apply(EffectStack(effects: [clock] + fx, origin: origin), to: blank, key: "clock", cb: cb, now: now)
+            groups.append(LayerGroup(draws: [LayerDraw(texture: ct, opacity: 1, blend: .normal, holder: nil)],
+                                     opacity: 1, blend: .normal, key: 1))
+            out = comp.composite(groups, effects: EffectStack(), width: W, height: H, cb: cb, now: now)
+            cb.commit(); cb.waitUntilCompleted()
+        }
+        guard let out else { return }
+        writePNG(out, W: W, H: H, path: path)
+        let shown = ClockText.at(clock, wall: Date(), elapsed: total - remaining).text
+        print("書き出しました: \(path)（「\(shown)」）")
+    }
+
     /// 開発用：絵を PNG に（透明な所は、ごく暗い灰色の上に）
     private static func writePNG(_ out: MTLTexture, W: Int, H: Int, path: String) {
         var px = [UInt8](repeating: 0, count: W * H * 4)

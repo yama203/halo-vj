@@ -878,7 +878,8 @@ static float4 effectBody(VOut in, constant EffectUniforms& u, texture2d<float> t
         float2 p = (px - 0.5 * u.size) / u.size.y;
         float texA = u.pts[0].x, texLines = max(u.pts[0].y, 1.0), punch = u.pts[0].z, t = u.pts[0].w;
         int m = int(u.a.x + 0.5);
-        float lineH = u.a.y * (m == 5 ? punch : 1.0);
+        // 弾みは、動きが「拍で弾む」のときと、時計の最後の 10 秒だけ 1 より大きい（ほかは 1）。動きの種類では絞らない
+        float lineH = u.a.y * punch;
         float H = lineH * texLines, W = H * texA;
         if (H <= 1e-5) return float4(0.0);
         // 時計：流さないときに画面の幅からはみ出す文字（終わったときの文字など）は、幅に収まるように縮める
