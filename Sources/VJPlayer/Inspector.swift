@@ -487,13 +487,17 @@ struct ParameterPanel: View {
                         rotation: Float(clip.rotation * .pi / 180)))
                 }
             }
-            Text(previewCaption(clip: clip, clipIndex: clipIndex))
-                .font(.system(size: 10, weight: .semibold))
-                .padding(.horizontal, 6).padding(.vertical, 2)
-                .background(Color.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 4))
-                .padding(5)
+            HStack(spacing: 4) {
+                MonitorBadge(role: .preview)
+                Text(previewCaption(clip: clip, clipIndex: clipIndex))
+                    .font(.system(size: 10, weight: .semibold))
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(Color.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 4))
+            }
+            .padding(5)
         }
-        .overlay(Rectangle().stroke(Color.gray.opacity(0.35)))
+        // 枠はプレビューの色（グリッドの選択と同じ）
+        .overlay(Rectangle().strokeBorder(UI.previewTint.opacity(0.85), lineWidth: 2))
     }
 
     /// 設定（タブごとの数値とエフェクト。縦にスクロール）

@@ -101,6 +101,30 @@ enum Main {
             CardPreview.writeDockDrag(panel: p, at: CGPoint(x: x, y: y), path: args[i + 1])
             exit(0)
         }
+        if let i = args.firstIndex(of: "--monitor-preview"), args.count > i + 1 {
+            // 開発用：出力モニターとプレビューの枠・札を並べて書き出す（映像は代わりの黒）  VJPlayer --monitor-preview out.png
+            _ = NSApplication.shared
+            NSApp.setActivationPolicy(.prohibited)
+            func screen(_ role: MonitorBadge.Role, active: Bool = true) -> some View {
+                LinearGradient(colors: [Color(white: 0.02), Color(red: 0.3, green: 0.1, blue: 0.4)], startPoint: .top, endPoint: .bottom)
+                    .frame(width: 320, height: 180)
+                    .overlay(alignment: .topLeading) { MonitorBadge(role: role, active: active).padding(5) }
+                    .overlay(Rectangle().strokeBorder((role == .live ? UI.liveTint : UI.previewTint).opacity(0.85), lineWidth: 2))
+            }
+            let v = HStack(alignment: .top, spacing: 14) {
+                VStack(alignment: .leading, spacing: 6) {
+                    SectionTitle(L("出力"), icon: "display", tint: UI.liveTint)
+                    screen(.live)
+                    screen(.live, active: false)
+                }
+                VStack(alignment: .leading, spacing: 6) {
+                    SectionTitle(L("プレビュー"), icon: "eye", tint: UI.previewTint)
+                    screen(.preview)
+                }
+            }.padding(12)
+            CardPreview.writeView(AnyView(v), path: args[i + 1])
+            exit(0)
+        }
         if let i = args.firstIndex(of: "--fold-preview"), args.count > i + 1 {
             // 開発用：畳める節（開いたもの・畳んだもの）を並べて書き出す  VJPlayer --fold-preview out.png
             _ = NSApplication.shared

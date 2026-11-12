@@ -15,6 +15,27 @@ enum UI {
     static let paramsWidth: CGFloat = paramColumnWidth * 2 + 16
 }
 
+/// モニターの映像の隅に重ねる札（出力は「● LIVE」、プレビューは「PREVIEW」）。
+/// パネルを動かしても、映像そのものを見ればどちらか分かるように
+struct MonitorBadge: View {
+    enum Role { case live, preview }
+    let role: Role
+    /// 出力：出力先がある（無ければ灰色）
+    var active = true
+    var body: some View {
+        HStack(spacing: 3) {
+            if role == .live { Circle().frame(width: 6, height: 6) }
+            Text(role == .live ? "LIVE" : "PREVIEW")
+                .font(.system(size: 9, weight: .heavy)).tracking(0.6)
+        }
+        .foregroundStyle(role == .live || !active ? Color.black : Color.white)
+        .padding(.horizontal, 5).padding(.vertical, 2)
+        .background(!active ? Color.gray : role == .live ? UI.liveTint : UI.previewTint,
+                    in: RoundedRectangle(cornerRadius: 3))
+        .allowsHitTesting(false)
+    }
+}
+
 struct SectionTitle: View {
     let text: String
     var icon: String? = nil
@@ -88,6 +109,10 @@ extension UI {
     /// ジェネレーター（自分で絵を描く）とエフェクト（絵に手を加える）の色。ぱっと見で見分けられるように
     static let generatorTint = Color(red: 0.25, green: 0.82, blue: 0.80)
     static let effectTint = Color(red: 0.72, green: 0.45, blue: 1.0)
+    /// 出力モニターの色（グリッドの「出力中」の印と同じ緑）
+    static let liveTint = Color.green
+    /// プレビューの色（グリッドの選択と同じ色）
+    static let previewTint = Color.accentColor
 }
 
 struct ContentView: View {
@@ -200,7 +225,7 @@ struct OutputMonitor: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
-                SectionTitle(L("出力"))
+                SectionTitle(L("出力"), icon: "display", tint: UI.liveTint)
                 Circle()
                     .fill(output.target == .none ? Color.gray : Color.green)
                     .frame(width: 7, height: 7)
@@ -256,9 +281,15 @@ struct OutputMonitor: View {
                 }
             }
             .overlay { OutputFlashOverlay() }
-            .overlay(Rectangle().stroke(engine.isBlackout || engine.compMuted ? Color.red
-                                        : editCorners ? Color.yellow.opacity(0.6) : Color.gray.opacity(0.35),
-                                        lineWidth: engine.isBlackout || engine.compMuted ? 2 : 1))
+            .overlay(alignment: .topLeading) {
+                MonitorBadge(role: .live, active: output.target != .none).padding(5)
+            }
+            // 枠は出力の色（緑）。ブラックアウト・ミュートの赤、四隅の調整の黄が先
+            .overlay(Rectangle().strokeBorder(engine.isBlackout || engine.compMuted ? Color.red
+                                              : editCorners ? Color.yellow.opacity(0.6) : UI.liveTint.opacity(0.85),
+                                              lineWidth: 2))
+            // 区画が横に広いときは真ん中に（プレビューと揃える）
+            .frame(maxWidth: .infinity)
             Spacer(minLength: 0)
         }
     }

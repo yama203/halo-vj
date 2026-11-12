@@ -24,6 +24,15 @@ enum DockPanel: String, Codable, CaseIterable, Identifiable {
         }
     }
 
+    /// タブのアイコンの色（出力モニターとプレビューだけ。映像の枠・札と同じ色）
+    var tint: Color? {
+        switch self {
+        case .monitor: UI.liveTint
+        case .preview: UI.previewTint
+        default: nil
+        }
+    }
+
     var icon: String {
         switch self {
         case .grid: "square.grid.3x3"
@@ -1106,6 +1115,7 @@ private struct DockTab: View {
     var body: some View {
         HStack(spacing: 4) {
             Image(systemName: panel.icon).font(.system(size: 10))
+                .foregroundStyle(panel.tint.map { AnyShapeStyle($0) } ?? AnyShapeStyle(.foreground))
             if titled {
                 Text(panel.title).font(.system(size: 11, weight: .semibold)).lineLimit(1)
             }
