@@ -25,6 +25,16 @@ struct Cue: Codable, Identifiable, Equatable {
     /// クリップのキュー：クリップの目印。グリッドの中で動かしても、別のデッキへ移しても、これで探す
     /// （nil = 前に作ったキュー。場所で探す）
     var clipID: UUID?
+    /// このキューを出したあと、自動で次へ進む（nil = 進まない）
+    var follow: Follow?
+    struct Follow: Codable, Equatable {
+        /// 秒数（after のとき）。nil = クリップが終わったら
+        var after: Double?
+    }
+    /// この時刻になったら自動で出す（その日の 時:分:秒。nil = なし）
+    var at: TimeOfDay?
+
+    static let followChoices: [Double] = [1, 2, 3, 5, 10, 15, 30, 60]
 
     static let fadeChoices: [Double?] = [nil, 0, 0.5, 1, 2, 3, 5, 8]
     static func fadeLabel(_ f: Double?) -> String {
@@ -70,6 +80,10 @@ extension Engine {
         guard cues.indices.contains(i) else { return }
         let c = cues[i]
         currentCue = i
+        // 前のキューの自動送りの予約は消える（人が先に動かしたときも、自動で進んだときも）
+        cueFollow = nil
+        // 予備機への知らせ（追う側は送らない）
+        if !cueFollower { onCueFired?(i) }
         switch c.kind {
         case .scene(let id):
             recallScene(id, fade: c.fade)
@@ -89,10 +103,18 @@ extension Engine {
                 let others = layers.indices.filter { $0 != layer && activeByLayer[$0] != nil }
                 fadeOutAndStop(others, duration: c.fade ?? layers[layer].fadeTime)
             }
+            // 終わったら次へ：今のアウト点に着いた回数を覚えておき、増えたら進む
+            if let f = c.follow, f.after == nil, cueAutoEnabled, !cueFollower, let slot = slots[idx], !slot.isStill {
+                cueFollow = CueFollowPending(cueID: c.id, fireAt: nil, clipID: slot.id, endCount: slot.endCount)
+            }
         case .stopAll:
             // フェードがあれば、だんだん暗くしてから止める
             finishCueFade()
             fadeOutAndStop(layers.indices.filter { activeByLayer[$0] != nil }, duration: c.fade ?? 0)
+        }
+        // ○秒後に次へ
+        if let after = c.follow?.after, cueAutoEnabled, !cueFollower {
+            cueFollow = CueFollowPending(cueID: c.id, fireAt: CACurrentMediaTime() + max(after, 0), clipID: nil, endCount: 0)
         }
     }
 
@@ -297,6 +319,15 @@ extension Engine {
 
 // MARK: - 画面
 
+/// キューのパネルが狭いか（行の札を詰める）
+private struct CueCompactKey: EnvironmentKey { static let defaultValue = false }
+extension EnvironmentValues {
+    var cueCompact: Bool {
+        get { self[CueCompactKey.self] }
+        set { self[CueCompactKey.self] = newValue }
+    }
+}
+
 /// キューの一覧の場所（グリッドの名前の帯からドラッグしてきたクリップを受けるため。ウィンドウの中の位置）
 final class CueDropTarget: ObservableObject {
     static let shared = CueDropTarget()
@@ -310,15 +341,20 @@ final class CueDropTarget: ObservableObject {
 
 /// キューリストのパネル：今・次、次へ・戻る、一覧
 struct CuePanel: View {
+    /// これより狭いと、行の札を詰める
+    static let compactWidth: CGFloat = 380
     @EnvironmentObject var engine: Engine
     @ObservedObject private var dropTarget = CueDropTarget.shared
     @State private var sceneDropTargeted = false
+    /// パネルの幅（狭いときは行の札を詰める）
+    @State private var width: CGFloat = 440
 
     var body: some View {
         content
+            .environment(\.cueCompact, width < CuePanel.compactWidth)
             .background(GeometryReader { g in
-                Color.clear.onAppear { dropTarget.frame = g.frame(in: .global) }
-                    .onChange(of: g.frame(in: .global)) { _, f in dropTarget.frame = f }
+                Color.clear.onAppear { dropTarget.frame = g.frame(in: .global); width = g.size.width }
+                    .onChange(of: g.frame(in: .global)) { _, f in dropTarget.frame = f; width = f.width }
             })
             // グリッドの名前の帯・シーンからドラッグしてきたら、緑の枠
             .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.green, lineWidth: 3)
@@ -336,6 +372,8 @@ struct CuePanel: View {
 
     @ViewBuilder private var content: some View {
         VStack(alignment: .leading, spacing: 8) {
+            // リハーサル中・予備機として追っている
+            ShowBanners()
             // 今・次
             HStack(spacing: 8) {
                 nowNext(L("今"), engine.currentCue, tint: .green)
@@ -379,6 +417,7 @@ struct CuePanel: View {
                     Label(L("キューを足す"), systemImage: "plus")
                 }
                 .fixedSize()
+                CueAutoControls()
                 Spacer(minLength: 0)
                 Text(L("スペースで次へ・⇧スペースで戻る・ダブルクリックで飛ぶ"))
                     .font(.system(size: 10))
@@ -410,7 +449,12 @@ struct CuePanel: View {
 
     private func nowNext(_ label: String, _ i: Int?, tint: Color) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(label).font(.system(size: 10, weight: .bold)).foregroundStyle(tint)
+            HStack(spacing: 4) {
+                Text(label).font(.system(size: 10, weight: .bold)).foregroundStyle(tint)
+                Spacer(minLength: 0)
+                // 今：自動送りの残り。次：時刻のキューまで（1 時間以内）
+                if label == L("今") { CueFollowCountdown() } else { NextTimedCueCountdown() }
+            }
             if let i, engine.cues.indices.contains(i) {
                 let c = engine.cues[i]
                 Text("\(i + 1). " + engine.cueTitle(c))
@@ -433,19 +477,23 @@ struct CuePanel: View {
 /// キュー 1 行：番号・種類・名前・フェード・メモ
 private struct CueRow: View {
     @EnvironmentObject var engine: Engine
+    @Environment(\.cueCompact) private var compact
     let index: Int
     let cue: Cue
     @State private var dropTargeted = false
+    @State private var showTime = false
 
     var body: some View {
         let now = engine.currentCue == index
         let next = engine.nextCue == index
         HStack(spacing: 8) {
-            // つまみ：ドラッグで並べ替え（行のどこをつかんでもよい）
-            Image(systemName: "line.3.horizontal")
-                .font(.system(size: 11))
-                .foregroundStyle(.tertiary)
-                .frame(width: 14)
+            // つまみ：ドラッグで並べ替え（行のどこをつかんでもよい。狭いときは出さずに名前に回す）
+            if !compact {
+                Image(systemName: "line.3.horizontal")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
+                    .frame(width: 14)
+            }
             Text("\(index + 1)")
                 .font(.system(size: 12, weight: .bold).monospacedDigit())
                 .frame(width: 22, alignment: .trailing)
@@ -455,15 +503,24 @@ private struct CueRow: View {
                     CueModeIcons(cue: cue)
                     Text(engine.cueTitle(cue)).font(.system(size: 12, weight: .semibold)).lineLimit(1)
                 }
-                if !cue.note.isEmpty {
-                    Text(cue.note).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
+                if !cue.note.isEmpty || cue.at != nil {
+                    HStack(spacing: 4) {
+                        // 時刻の札（押すと変える）。横幅を取らないように、メモと同じ 2 行目に
+                        if let at = cue.at {
+                            CueTimeBadge(at: at).layoutPriority(1).onTapGesture { showTime = true }
+                        }
+                        Text(cue.note).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
+                    }
                 }
             }
             Spacer(minLength: 0)
-            // その場で変えられる：「終わったら」（クリップのキュー）とフェード
+            // その場で変えられる：「終わったら」（クリップのキュー）・自動送り・フェード
             if case .clip = cue.kind { CueEndActionButton(cue: cue) }
+            // 自動送り：狭いときは、決めてあるキューだけ印を出す（右クリックからも決められる）
+            if !compact || cue.follow != nil { CueFollowButton(cue: cue) }
             CueFadeButton(cue: cue)
         }
+        .popover(isPresented: $showTime, arrowEdge: .bottom) { CueTimePopover(cue: cue).environmentObject(engine) }
         .padding(.vertical, 3)
         .padding(.horizontal, 4)
         .background(RoundedRectangle(cornerRadius: 5)
@@ -497,6 +554,11 @@ private struct CueRow: View {
                     get: { cue.keepOthers ?? false },
                     set: { v in engine.updateCue(cue.id) { $0.keepOthers = v ? true : nil } }))
                 Menu(L("終わったら（\(cue.endAction?.label ?? L("クリップの設定"))）")) { CueEndActionMenu(cue: cue) }
+            }
+            Menu(L("自動で次へ（\(engine.cueFollowLabel(cue) ?? L("なし"))）")) { CueFollowMenuItems(cue: cue) }
+            Button(cue.at.map { L("時刻で出す（\($0.label)）…") } ?? L("時刻で出す…")) { showTime = true }
+            if cue.at != nil {
+                Button(L("時刻を消す")) { engine.updateCue(cue.id) { $0.at = nil } }
             }
             Button(L("メモを書く…")) {
                 if let n = askText(title: L("キュー \(index + 1) のメモ（きっかけなど）"), initial: cue.note) {

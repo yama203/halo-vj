@@ -24,10 +24,12 @@
 - `/halo/bpm 数`
 - `/halo/tap`
 - `/halo/resync`
-- `/halo/pad/N 1/0`（押す・離す）
+- `/halo/pad/N 1/0`（押す・離す。ラッチのパッドは 1 で入切）
+- `/halo/pad/N/latch 0/1`（パッドを入れる・切る。入れたままになる）
 - `/halo/cue/next`
 - `/halo/cue/back`
 - `/halo/cue/N`
+- `/halo/cue/current N`（予備機：本番機が今 N 番目のキューにいる。「予備機として追う」のときだけ。→ [キュー](cues.md)）
 - `/halo/scene/N`
 - `/halo/deck/N`
 - `/halo/record [0/1]`
@@ -56,8 +58,13 @@
 
 - `/halo/layer/L/clip`（名前）
 
+キューを出したとき・ブラックアウトを入切したときは、次の値も送ります（予備機が追うため）。
+
+- `/halo/cue/current`（番号。1 から）
+- `/halo/blackout`（1 / 0）
+
 TouchDesigner では、OSC In CHOP で受信します。
 
 ## 保存
 
-設定は Mac ごとに保存され、プロジェクトには含まれません（各値の動かし方の設定はプロジェクトに含まれます）。
+「予備機として追う」も含めて、設定は Mac ごとに保存され、プロジェクトには含まれません（各値の動かし方の設定はプロジェクトに含まれます）。

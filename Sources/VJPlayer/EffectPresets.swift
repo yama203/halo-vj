@@ -21,10 +21,19 @@ final class EffectPresets: ObservableObject {
     /// 保存先（nil ならファイルに書かない）
     let url: URL?
     @Published private(set) var all: [EffectPreset] = []
+    /// このアプリでは読めなかった項目（新しい版で作った種類など）。消さずに、書くときにそのまま戻す
+    private var unreadable: [Any] = []
 
     init(url: URL?) {
         self.url = url
-        all = Self.read(url) ?? []
+        reload()
+    }
+
+    /// ファイルから読み直す（読めなければ今のまま）
+    private func reload() {
+        guard let r = Self.read(url) else { return }
+        all = r.presets
+        unreadable = r.unreadable
     }
 
     static var defaultURL: URL? {
@@ -44,18 +53,40 @@ final class EffectPresets: ObservableObject {
         return args.contains { $0 == "--selftest" || $0 == "--od-bench" || $0 == "--kind-sheet" || $0.hasSuffix("-preview") }
     }
 
-    /// ファイルを読む（無い・壊れているときは nil。壊れたファイルは、次に保存するまでそのまま）
-    private static func read(_ url: URL?) -> [EffectPreset]? {
-        guard let url, let data = try? Data(contentsOf: url) else { return nil }
-        return try? JSONDecoder().decode([EffectPreset].self, from: data)
+    /// ファイルを読む（無い・全体が壊れているときは nil）。
+    /// 1 件ずつ読むので、読めない項目（知らない種類など）が混ざっていても、ほかは読める。読めない項目は元の形のまま返す
+    private static func read(_ url: URL?) -> (presets: [EffectPreset], unreadable: [Any])? {
+        guard let url, let data = try? Data(contentsOf: url),
+              let items = try? JSONSerialization.jsonObject(with: data) as? [Any] else { return nil }
+        var presets: [EffectPreset] = [], unreadable: [Any] = []
+        let dec = JSONDecoder()
+        for item in items {
+            if JSONSerialization.isValidJSONObject(item),
+               let d = try? JSONSerialization.data(withJSONObject: item),
+               let p = try? dec.decode(EffectPreset.self, from: d) {
+                presets.append(p)
+            } else {
+                unreadable.append(item)
+            }
+        }
+        return (presets, unreadable)
     }
 
     private func write() {
         guard let url else { return }
-        let enc = JSONEncoder()
-        enc.outputFormatting = [.prettyPrinted, .sortedKeys]
-        guard let data = try? enc.encode(all) else { return }
-        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let fm = FileManager.default
+        // ファイルはあるのに全体が読めない（壊れている）ときは、上書きで消さないように横へよけてから書く
+        if fm.fileExists(atPath: url.path), Self.read(url) == nil {
+            let f = DateFormatter(); f.dateFormat = "yyyyMMdd-HHmmss"
+            let side = url.deletingPathExtension().appendingPathExtension("broken-\(f.string(from: Date())).json")
+            try? fm.moveItem(at: url, to: side)
+        }
+        // 読めなかった項目も一緒に書く（新しい版で作ったものを、古い版で消さない）
+        guard let mine = try? JSONEncoder().encode(all),
+              let mineObj = try? JSONSerialization.jsonObject(with: mine) as? [Any] else { return }
+        let items = mineObj + unreadable.filter { JSONSerialization.isValidJSONObject([$0]) }
+        guard let data = try? JSONSerialization.data(withJSONObject: items, options: [.prettyPrinted, .sortedKeys]) else { return }
+        try? fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try? data.write(to: url, options: .atomic)
     }
 
@@ -69,7 +100,7 @@ final class EffectPresets: ObservableObject {
     @discardableResult
     func save(name: String, effect: Effect) -> EffectPreset {
         // ほかの窓（別に開いたアプリ）で足したものを消さないように、読み直してから足す
-        if let disk = Self.read(url) { all = disk }
+        reload()
         let kind = effect.kind
         var name = name.trimmingCharacters(in: .whitespacesAndNewlines)
         if name.isEmpty {
@@ -98,7 +129,7 @@ final class EffectPresets: ObservableObject {
     }
 
     func delete(_ id: UUID) {
-        if let disk = Self.read(url) { all = disk }
+        reload()
         all.removeAll { $0.id == id }
         write()
     }

@@ -511,6 +511,8 @@ enum SelfTest {
         testFavorites(check: check)
         testTabsScenes(check: check)
         testEffectMove(check: check)
+        testReview2(check: check)
+        testShowControl(paths: paths, check: check, wait: wait)
 
         let out = AudioOutput.shared.engine.outputNode
         let feeding = AudioOutput.shared.engine.inputConnectionPoint(for: out, inputBus: 0)?.node as? AVAudioMixerNode
@@ -1278,7 +1280,8 @@ enum SelfTest {
             let fa = alpha(fin)
             check(lit(fa, x0: 0, x1: W) > 150 && lit(fa, x0: 0, x1: 2) == 0 && lit(fa, x0: W - 2, x1: W) == 0,
                   "時計：終わったときの長い文字は、画面の幅に収まるように縮める")
-            check(EffectKind.clock.params.count == 21 && Effect(kind: .clock).reset.text == ClockText.defaultFinish,
+            // 値は 21 個 ＋「0 になったら」（21 番）
+            check(EffectKind.clock.params.count == 22 && Effect(kind: .clock).reset.text == ClockText.defaultFinish,
                   "時計：値の数・リセットしても終わりの文字は残る")
             // 1/100 秒：毎コマ描き直しても軽いか（1080p）
             do {

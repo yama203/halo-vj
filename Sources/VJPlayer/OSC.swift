@@ -121,6 +121,16 @@ final class OSCHub: ObservableObject {
     @Published var sendOn = false { didSet { if oldValue != sendOn { restartSender(); save() } } }
     @Published var sendHost = "127.0.0.1" { didSet { if oldValue != sendHost { restartSender(); save() } } }
     @Published var sendPort: Int = 7000 { didSet { if oldValue != sendPort { restartSender(); save() } } }
+    /// 予備機として追う：届いた /halo/cue/current N で同じキューを出す（既定は切。開発用の起動では読み書きしない）
+    @Published var followCues = false {
+        didSet {
+            guard oldValue != followCues else { return }
+            if !forTests && !EffectPresets.isDevRun {
+                UserDefaults.standard.set(followCues, forKey: "osc.followCues")
+                Engine.shared.cueFollower = followCues
+            }
+        }
+    }
     @Published private(set) var status = ""
     /// 最近届いたメッセージ（画面に出す。新しい順）。届くたびに変わるので、別の入れ物にしておく
     /// （ここが @Published だと、OSCHub を見ている上のバーの「連携」ボタンなどまで描き直してしまう）
@@ -152,11 +162,17 @@ final class OSCHub: ObservableObject {
         sendOn = d.bool(forKey: "osc.send")
         if let h = d.string(forKey: "osc.sendHost"), !h.isEmpty { sendHost = h }
         if d.object(forKey: "osc.sendPort") != nil { sendPort = d.integer(forKey: "osc.sendPort") }
+        if !EffectPresets.isDevRun { followCues = d.bool(forKey: "osc.followCues") }
     }
 
     func startIfNeeded() {
         restartListener()
         restartSender()
+        // 予備機として追う設定を、エンジンに渡す。本番機として送る口もここでつなぐ
+        let e = Engine.shared
+        e.cueFollower = followCues
+        e.onCueFired = { [weak self] i in self?.send(OSCMessage(address: "/halo/cue/current", args: [.int(Int32(i + 1))])) }
+        e.onBlackoutChanged = { [weak self] on in self?.send(OSCMessage(address: "/halo/blackout", args: [.int(on ? 1 : 0)])) }
     }
 
     private func save() {
@@ -359,8 +375,10 @@ enum OSCCommands {
         (L("/halo/bpm 数"), L("BPM を決める")),
         ("/halo/tap", L("タップテンポ")),
         ("/halo/resync", L("今を 1 拍目に")),
-        ("/halo/pad/N 1/0", L("N 番目のパッドを押す・離す")),
+        ("/halo/pad/N 1/0", L("N 番目のパッドを押す・離す（ラッチのパッドは 1 で入切）")),
+        ("/halo/pad/N/latch 0/1", L("N 番目のパッドを入れる・切る（押したまま・ラッチと同じ）")),
         (L("/halo/cue/next ・/halo/cue/back ・/halo/cue/N"), L("キューを次へ・戻る・N 番目へ")),
+        ("/halo/cue/current N", L("予備機：本番機が今 N 番目のキュー（「予備機として追う」のときだけ）")),
         ("/halo/scene/N", L("N 番目のシーンを呼ぶ")),
         ("/halo/deck/N", L("N 番目のデッキにする")),
         ("/halo/record [0/1]", L("録画を始める・止める")),
@@ -377,7 +395,8 @@ enum OSCCommands {
         let v = m.number
         // ボタンを離した（0）ときは、押す系の操作をしない
         let pressed = v == nil || v! > 0.5
-        func n(_ i: Int) -> Int? { p.count > i ? Int(p[i]).map { $0 - 1 } : nil }
+        // 番号は 1 から。0 以下（Int.min だと引き算であふれて落ちる）や数字でないものは捨てる
+        func n(_ i: Int) -> Int? { p.count > i ? Int(p[i]).flatMap { $0 >= 1 ? $0 - 1 : nil } : nil }
         switch p.count >= 2 ? p[1] : "" {
         case "layer":
             guard let r = n(2), e.layers.indices.contains(r) else { return }
@@ -411,10 +430,19 @@ enum OSCCommands {
             if pressed { e.resyncBeat() }
         case "pad":
             guard let i = n(2), e.pads.indices.contains(i) else { return }
-            if pressed { e.padDown(e.pads[i].id) } else { e.padUp(e.pads[i].id) }
+            if p.count > 3 && p[3] == "latch" {
+                // /halo/pad/N/latch 0/1：入・切を直接決める（値なしは切り替え）
+                let id = e.pads[i].id
+                e.setPadEngaged(id, v.map { $0 > 0.5 } ?? !e.isPadHeld(id))
+            } else if pressed { e.padDown(e.pads[i].id) } else { e.padUp(e.pads[i].id) }
         case "cue":
-            guard pressed else { return }
             let w = p.count > 2 ? p[2] : ""
+            // 予備機：本番機からの「今ここにいる」（命令の /halo/cue/N とは別。追っていなければ無視）
+            if w == "current" {
+                if let v, v.rounded() >= 1, v.rounded() <= 100_000 { e.followRemoteCue(Int(v.rounded())) }
+                return
+            }
+            guard pressed else { return }
             if w == "next" { e.goCue() } else if w == "back" { e.backCue() } else if let i = n(2) { e.fireCue(i) }
         case "scene":
             if pressed, let i = n(2), e.scenes.indices.contains(i) { e.recallScene(e.scenes[i].id) }
@@ -499,6 +527,12 @@ struct LinkSettings: View {
                         .font(.system(size: 11)).foregroundStyle(.secondary).textSelection(.enabled)
                     Text(L("どの値も、波形ボタンで動かし方を「OSC」にして「覚える」を押し、iPad のフェーダーを動かすと、そのフェーダーで動く"))
                         .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    Toggle(L("予備機として追う"), isOn: $osc.followCues)
+                        .help(L("本番機から届く /halo/cue/current N で、同じ番号のキューを出す。追っている間は、自動送り・時刻・時計の 0 では進まない"))
+                    if osc.followCues {
+                        Text(L("本番機の「拍・音の値を送る」の送り先を、この Mac・このポートにする。ブラックアウトも合わせる（コマ単位では合わせない）"))
+                            .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    }
                     OSCRecentList(recent: osc.recent)
                     DisclosureGroup(L("決まったアドレス"), isExpanded: $showHelp) {
                         VStack(alignment: .leading, spacing: 2) {
@@ -525,7 +559,7 @@ struct LinkSettings: View {
                         TextField("127.0.0.1", text: $osc.sendHost).frame(width: 120)
                         TextField("7000", value: $osc.sendPort, format: .number.grouping(.never)).frame(width: 64)
                     }
-                    Text(L("1 秒に 30 回：/halo/bpm・/halo/beat（拍の数）・/halo/beat/phase・/halo/bar/phase（0〜1）・/halo/audio/level・low・mid・high・attack。クリップを出したとき：/halo/layer/L/clip（名前）。TouchDesigner では OSC In CHOP（ポートを合わせる）"))
+                    Text(L("1 秒に 30 回：/halo/bpm・/halo/beat（拍の数）・/halo/beat/phase・/halo/bar/phase（0〜1）・/halo/audio/level・low・mid・high・attack。クリップを出したとき：/halo/layer/L/clip（名前）。キューを出したとき：/halo/cue/current（番号）、ブラックアウト：/halo/blackout（予備機が追う）。TouchDesigner では OSC In CHOP（ポートを合わせる）"))
                         .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 }
                 .padding(4)

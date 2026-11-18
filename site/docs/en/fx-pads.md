@@ -23,6 +23,17 @@ Set per pad, from the right-click menu or the settings.
 
 The shape at the top right of the pad shows this: a vertical line = instant, a slope = gradual. If you press again while it is fading out, it rises again from the current strength.
 
+### Latch (toggle on each press)
+
+Set “Behavior” in the right-click menu to “Toggle on each press (latch)”. Press once to turn it on, press again to turn it off (releasing does not turn it off).
+
+- Keys, clicks, MIDI and OSC all work the same way.
+- Attack and Release still apply.
+- A lock mark appears at the bottom right of the pad; it closes while the pad is on.
+- The names of latched pads are shown at the bottom left of the output monitor, so you don't forget them.
+- Blackout (`Esc`), Stop All (`⇧Esc`) and recalling a scene do not turn them off.
+- “Turn Off All Latches” is in the pad's right-click menu (and in the right-click menu of the “FX” heading).
+
 ## Pressing with the keyboard
 
 - By default, `1`–`9` and `0` in pad order.

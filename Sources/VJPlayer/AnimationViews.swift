@@ -724,7 +724,7 @@ struct EffectCard: View {
             // モード・表示・細かさは上の欄で。目標の時刻はカウントダウン、長さはタイマー、弾みは数えるときだけ
             let mode = Int(effect.value(12).rounded())
             if [12, 13, 14].contains(i) { return false }
-            if (15...19).contains(i) { return false }
+            if (15...19).contains(i) || i == 21 { return false }
             if i == 20 { return mode == 1 || mode == 2 }
         }
         if effect.kind.isText {
@@ -839,6 +839,13 @@ struct EffectCard: View {
                 labeled(L("目標の時刻")) { timeFields([(15, L("時")), (16, L("分")), (17, L("秒"))]) }
             } else if mode == 2 {
                 labeled(L("長さ")) { timeFields([(18, L("分")), (19, L("秒"))]) }
+            }
+            if mode == 1 || mode == 2 {
+                labeled(L("0 になったら")) {
+                    ChoiceButtons(selection: valueBinding(21),
+                                  items: ClockText.zeroActions.indices.map { (Double($0), ClockText.zeroActions[$0]) })
+                        .help(L("次のキューへ：出力で出しているこの時計が 0 になった瞬間に、キューを 1 つ進める（キューのパネルの「自動」を切ると進まない）"))
+                }
             }
             labeled(L("表示")) {
                 ChoiceButtons(selection: valueBinding(13),

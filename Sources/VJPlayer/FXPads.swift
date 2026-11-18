@@ -39,6 +39,8 @@ final class FXPad: ObservableObject, Identifiable, EffectHolder {
     @Published var attack: Double = 0 { didSet { onChanged?() } }
     /// 離してから消え切るまでの秒数（0 = すぐ消える）
     @Published var release: Double = 0 { didSet { onChanged?() } }
+    /// ラッチ：押すと入り、もう一度押すと切れる（離しても切れない）。false = 押している間だけ
+    @Published var latch = false { didSet { if oldValue != latch { onChanged?() } } }
     static let timeChoices: [Double] = [0, 0.25, 0.5, 1, 2, 4]
     static func timeLabel(_ s: Double) -> String { s <= 0 ? L("すぐ") : (s < 1 ? String(format: L("%.2g秒"), s) : String(format: L("%.0f秒"), s)) }
     var onChanged: (() -> Void)?
@@ -68,6 +70,8 @@ extension Engine {
         var release: Double?
         /// キー（"" = なし、無ければ並び順の既定）
         var key: String?
+        /// ラッチ（押すたびに入切。無ければ押している間だけ）
+        var latch: Bool?
     }
 
     /// パッドに割り当てられるキーと、そのキーコード（US・JIS 配列で同じ位置のもの）
@@ -97,12 +101,33 @@ extension Engine {
         return !hit.isEmpty
     }
 
-    /// 全部離す（アプリから離れたときなど、キーを離したのが届かないことがあるので）
+    /// 全部離す（アプリから離れたときなど、キーを離したのが届かないことがあるので）。ラッチで入っているものはそのまま
     func releaseAllPads() {
-        guard !heldPads.isEmpty || !releasingPads.isEmpty else { return }
-        heldPads = [:]
+        let keep = heldPads.filter { id, _ in pads.first { $0.id == id }?.latch == true }
+        guard heldPads.count != keep.count || !releasingPads.isEmpty else { return }
+        heldPads = keep
         releasingPads = [:]
         syncRenderState()
+    }
+
+    /// ラッチで入っているパッドを全部切る（消え方の秒数は効く）
+    func releaseAllLatches() {
+        for p in pads where p.latch && heldPads[p.id] != nil { padRelease(p.id) }
+    }
+
+    /// ラッチで入っているパッドがあるか
+    var hasLatchedPads: Bool { pads.contains { $0.latch && heldPads[$0.id] != nil } }
+
+    /// パッドのラッチを変える（切ったときに入っていれば、そこで離す）
+    func setPadLatch(_ id: UUID, _ on: Bool) {
+        guard let p = pads.first(where: { $0.id == id }) else { return }
+        p.latch = on
+        if !on { padRelease(id) }
+    }
+
+    /// パッドを入れる・切るを直接決める（OSC の /halo/pad/N/latch）
+    func setPadEngaged(_ id: UUID, _ on: Bool) {
+        if on { padPress(id) } else { padRelease(id) }
     }
 
     /// パッドのキーを変える（同じキーの別のパッドからは外す）
@@ -111,8 +136,20 @@ extension Engine {
         pads.first { $0.id == id }?.key = key
     }
 
-    /// パッドを押した（押している間だけ効く。効き始めの秒数があれば、だんだん効く）
+    /// パッドを押した（キー・クリック・MIDI・OSC の入口）。ラッチのパッドは、押すたびに入切
     func padDown(_ id: UUID) {
+        guard let pad = pads.first(where: { $0.id == id }) else { return }
+        if pad.latch && heldPads[id] != nil { padRelease(id) } else { padPress(id) }
+    }
+
+    /// パッドを離した（入口）。ラッチのパッドは離しても切れない
+    func padUp(_ id: UUID) {
+        if pads.first(where: { $0.id == id })?.latch == true { return }
+        padRelease(id)
+    }
+
+    /// 効かせ始める（効き始めの秒数があれば、だんだん効く）
+    func padPress(_ id: UUID) {
         guard let pad = pads.first(where: { $0.id == id }), heldPads[id] == nil else { return }
         let now = CACurrentMediaTime()
         if let r = releasingPads.removeValue(forKey: id) {
@@ -127,8 +164,8 @@ extension Engine {
         syncRenderState()
     }
 
-    /// パッドを離した（消え方の秒数があれば、だんだん消える）
-    func padUp(_ id: UUID) {
+    /// 効かせるのをやめる（消え方の秒数があれば、だんだん消える）
+    func padRelease(_ id: UUID) {
         guard let down = heldPads.removeValue(forKey: id) else { return }
         let now = CACurrentMediaTime()
         if let pad = pads.first(where: { $0.id == id }), pad.release > 0, !pad.effects.isEmpty {
@@ -201,6 +238,7 @@ extension Engine {
                           key: s.key.map { $0.isEmpty ? nil : $0 } ?? Self.defaultPadKey(i))
             p.attack = max(s.attack ?? 0, 0)
             p.release = max(s.release ?? 0, 0)
+            p.latch = s.latch ?? false
             return p
         }
         let all = ps.isEmpty ? (0..<Self.defaultPadCount).map { FXPad(key: Self.defaultPadKey($0)) } : Array(ps)
@@ -211,7 +249,7 @@ extension Engine {
     var savedPads: [SavedPad] {
         pads.map { SavedPad(name: $0.name.isEmpty ? nil : $0.name, effects: $0.effects.isEmpty ? nil : $0.effects,
                             attack: $0.attack > 0 ? $0.attack : nil, release: $0.release > 0 ? $0.release : nil,
-                            key: $0.key ?? "") }
+                            key: $0.key ?? "", latch: $0.latch ? true : nil) }
     }
 }
 
@@ -249,6 +287,9 @@ struct FXPadBar: View {
                 .foregroundStyle(.purple)
                 .frame(width: 26)
                 .contextMenu {
+                    Button(L("全部のラッチを切る")) { engine.releaseAllLatches() }
+                        .disabled(!engine.hasLatchedPads)
+                    Divider()
                     Button(L("FX パッドを閉じる")) { LayoutManager.shared.close(.pads) }
                     Button(L("別ウィンドウに出す")) { LayoutManager.shared.detach(.pads) }
                 }
@@ -325,6 +366,14 @@ struct FXPadButton: View {
                     .padding(.trailing, -1)
                     .opacity(pad.attack > 0 || pad.release > 0 ? 1 : 0.55)
             }
+            // ラッチ（押すたびに入切）の印：右下の小さな錠。入っている間は閉じた錠
+            if pad.latch {
+                Image(systemName: held ? "lock.fill" : "lock.open")
+                    .font(.system(size: 8, weight: .bold))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                    .padding(.bottom, 3)
+                    .padding(.trailing, -1)
+            }
         }
         .foregroundStyle(held ? Color.white : (empty ? Color.secondary : Color.primary))
         .padding(.horizontal, 6)
@@ -373,6 +422,7 @@ struct FXPadButton: View {
             EffectDrop.handle(providers) { k in pad.addEffect(k) }
         }
         .help((empty ? L("クリックでエフェクトを選んで登録（「エフェクト」パネルからドラッグ・右クリックの「エフェクトを追加」でも）")
+               : pad.latch ? L("押すたびに「\(pad.displayName)」を入れる・切る（ラッチ。右クリックで設定）")
                : L("押している間だけ「\(pad.displayName)」（右クリックで設定）"))
               + (pad.key.map { L("\nキー \($0.uppercased()) を押している間も効く") } ?? ""))
         .popover(isPresented: $showSettings, arrowEdge: .top) {
@@ -503,6 +553,13 @@ private struct PadContextMenu: View {
                 ControlMenuItems(address: "/halo/pad/\(index + 1)", verb: L("押す"), title: L("パッド \(pad.displayName) を押す"))
             }
             PadTimeMenus(pad: pad)
+            Menu(L("効かせ方（\(pad.latch ? L("押すたびに入切") : L("押している間だけ"))）")) {
+                Button((pad.latch ? "" : "✓ ") + L("押している間だけ")) { engine.setPadLatch(pad.id, false) }
+                Button((pad.latch ? "✓ " : "") + L("押すたびに入切（ラッチ）")) { engine.setPadLatch(pad.id, true) }
+            }
+            if engine.hasLatchedPads {
+                Button(L("全部のラッチを切る")) { engine.releaseAllLatches() }
+            }
             Button(L("空にする")) { pad.effects = [] }
                 .disabled(empty)
             Divider()

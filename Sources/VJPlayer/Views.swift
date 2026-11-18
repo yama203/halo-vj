@@ -284,6 +284,8 @@ struct OutputMonitor: View {
             .overlay(alignment: .topLeading) {
                 MonitorBadge(role: .live, active: output.target != .none).padding(5)
             }
+            // 隅の札：リハーサル中の時計・入っているラッチのパッド（切り忘れに気づけるように）
+            .overlay(alignment: .bottomLeading) { OutputShowBadges().padding(5) }
             // 枠は出力の色（緑）。ブラックアウト・ミュートの赤、四隅の調整の黄が先
             .overlay(Rectangle().strokeBorder(engine.isBlackout || engine.compMuted ? Color.red
                                               : editCorners ? Color.yellow.opacity(0.6) : UI.liveTint.opacity(0.85),

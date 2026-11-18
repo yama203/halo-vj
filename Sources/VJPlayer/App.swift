@@ -104,8 +104,10 @@ enum Main {
             NSApp.setActivationPolicy(.prohibited)
             // 暗い見た目で描く（このプロセスの中だけ）
             NSApp.appearance = NSAppearance(named: .darkAqua)
-            let n = args.dropFirst(i + 2).compactMap(Double.init)
-            CardPreview.writeCues(width: n.first ?? 440, height: n.count > 1 ? n[1] : 520, path: args[i + 1])
+            //   続けて rehearsal（時計をずらした見た目）・follower（予備機）・off（自動を止めた見た目）も書ける
+            let rest = Array(args.dropFirst(i + 2))
+            let n = rest.compactMap(Double.init)
+            CardPreview.writeCues(width: n.first ?? 440, height: n.count > 1 ? n[1] : 520, path: args[i + 1], options: Set(rest))
             exit(0)
         }
         if let i = args.firstIndex(of: "--workspace-preview"), args.count > i + 1 {
@@ -654,6 +656,8 @@ enum CardPreview {
     /// 開発用：ポン出しの見本のキューを並べた、保存しない別のエンジン（ライブイベントの例。2 番目のキューを出しているところ）
     static func demoCueEngine() -> Engine {
         let engine = Engine(persistent: false)
+        // 書き出しの間に、自動の発火で見本が動かないように
+        engine.showTimerEnabled = false
         func thumb(_ g: Effect) -> Data? {
             GeneratorThumbnail.image(g)?.tiffRepresentation.flatMap { NSBitmapImageRep(data: $0)?.representation(using: .png, properties: [:]) }
         }
@@ -667,6 +671,7 @@ enum CardPreview {
         }
         var cd = Effect(kind: .clock)
         cd.values[15] = 19
+        cd.values[21] = 1   // 0 になったら次のキューへ
         let loop = clip(0, 0, Effect(kind: .aurora), "開場ループ")
         let count = clip(1, 0, cd, "開演までのカウントダウン")
         let open = clip(0, 1, Effect(kind: .synthwave), "オープニング映像")
@@ -698,13 +703,25 @@ enum CardPreview {
             clipCue(ending, fade: 2, end: .hold, note: "アンコールのあと"),
             Cue(kind: .stopAll, fade: 3, note: "終演"),
         ]
+        // 自動で進める：開場は 18:30 に、オープニングは開演の時刻（見本では今から 12 分半後）に出す。
+        // カウントダウンは 0 で次へ（上の時計）。転換は 3 秒後に次へ、エンディングは 30 秒後に終演へ
+        engine.cues[0].at = TimeOfDay(h: 18, m: 30, s: 0)
+        engine.cues[1].follow = Cue.Follow(after: 15)
+        engine.cues[2].at = TimeOfDay(Date().addingTimeInterval(750))
+        engine.cues[4].follow = Cue.Follow(after: 3)
+        engine.cues[6].follow = Cue.Follow(after: 30)
         engine.currentCue = 1
+        // 「今」の自動送りの残り（見本：あと 12 秒）
+        engine.cueFollow = CueFollowPending(cueID: engine.cues[1].id, fireAt: CACurrentMediaTime() + 12, clipID: nil, endCount: 0)
         return engine
     }
 
     /// 開発用：「キュー」パネルを、見本のキューで画像に（保存しない別のエンジンで）
-    static func writeCues(width: Double, height: Double, path: String) {
+    static func writeCues(width: Double, height: Double, path: String, options: Set<String> = []) {
         let engine = demoCueEngine()
+        if options.contains("rehearsal") { engine.setShowClockOffset(3 * 3600 + 12 * 60 + 5) }
+        if options.contains("follower") { engine.cueFollower = true }
+        if options.contains("off") { engine.cueAutoEnabled = false }
         let root = CuePanel()
             .padding(10)
             .frame(width: width, height: height, alignment: .top)

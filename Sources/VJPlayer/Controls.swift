@@ -261,7 +261,7 @@ final class ControlHub: ObservableObject {
     static func isOn(_ address: String, engine e: Engine) -> Bool {
         let p = address.split(separator: "/").map(String.init)
         guard p.count >= 2, p[0] == "halo" else { return false }
-        func n(_ i: Int) -> Int? { p.count > i ? Int(p[i]).map { $0 - 1 } : nil }
+        func n(_ i: Int) -> Int? { p.count > i ? Int(p[i]).flatMap { $0 >= 1 ? $0 - 1 : nil } : nil }
         switch p[1] {
         case "layer":
             guard p.count > 4, p[3] == "clip", let r = n(2), let c = n(4), e.layers.indices.contains(r) else { return false }

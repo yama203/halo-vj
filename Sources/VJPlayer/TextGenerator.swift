@@ -71,7 +71,8 @@ struct TextFrame: Equatable {
     static func at(_ e: Effect, t: Double, beat: BeatClock, origin: Double) -> TextFrame {
         if e.kind == .clock {
             // 時計：時刻（t の時点の壁の時計）と、トリガーしてからの秒から文字を決める
-            let wall = Date(timeIntervalSinceNow: t - CACurrentMediaTime())
+            // リハーサルで時計をずらしていれば、ずらした時刻（ShowClock）
+            let wall = ShowClock.wall(atHost: t)
             let c = ClockText.at(e, wall: wall, elapsed: max(t - origin, 0))
             var f = TextFrame(text: c.text, visible: nil, punch: c.punch)
             if Int(e.value(0).rounded()) == 5 {
@@ -260,6 +261,14 @@ enum ClockText {
     static let modes = [L("今の時刻"), L("カウントダウン（時刻まで）"), L("タイマー"), L("ストップウォッチ")]
     static let formats = [L("自動"), L("時:分:秒"), L("時:分"), L("分:秒"), L("秒", note: "表示")]
     static let defaultFinish = "HAPPY NEW YEAR"
+    /// 0 になったら（値の番号 21。並びは足すときも後ろへ）
+    static let zeroActions = [L("何もしない"), L("次のキューへ")]
+    /// 0 になったら次のキューへ進む時計か（カウントダウン・タイマーのときだけ）
+    static func advancesCue(_ e: Effect) -> Bool {
+        guard e.kind == .clock else { return false }
+        let mode = Int(e.value(12).rounded())
+        return (mode == 1 || mode == 2) && Int(e.value(21).rounded()) == 1
+    }
 
     /// 文字と、弾み（最後の 10 秒で 1 秒ごとに大きく）
     static func at(_ e: Effect, wall: Date, elapsed: Double) -> (text: String, punch: Double, remaining: Double?) {

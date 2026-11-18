@@ -112,6 +112,10 @@ extension Engine {
             && (state.decks?.map(\.id) ?? []) == decks.map(\.id)
         if sameShape {
             lightRestore(state)
+        } else if reshapeForUndo(to: state) {
+            // 形だけ先に合わせた（残るクリップは再生を続ける）。あとは形が同じときと同じ
+            lightRestore(state)
+            currentDeck = min(max(currentDeck, 0), decks.count - 1)
         } else {
             // 形が変わる：全体を作り直す（戻した中身を、覚えている今の中身として残す）
             let h = undoHistory
@@ -128,6 +132,60 @@ extension Engine {
             h.past = past; h.future = future; h.committed = committed
         }
         scheduleSaveWithoutUndo()
+    }
+
+    /// 戻す先の形（段・列・デッキの数）に、今のグリッドを合わせる。残るレイヤー・デッキ・クリップは作り直さない
+    /// （再生中のものは止まらない）。目印が無い古い中身などで合わせられないときは false（何も変えない）
+    private func reshapeForUndo(to state: SavedState) -> Bool {
+        guard let savedLayers = state.layers, !savedLayers.isEmpty, savedLayers.count <= Self.maxLayers,
+              let savedDecks = state.decks, !savedDecks.isEmpty else { return false }
+        let newColumns = state.columns ?? Self.defaultColumns
+        guard (1...Self.maxColumns).contains(newColumns),
+              state.slots.count == savedDecks.count * savedLayers.count * newColumns else { return false }
+        // レイヤー：同じ目印のものはそのまま使う。目印が欠けている・重なっているなら合わせない
+        let layerIDs = savedLayers.compactMap(\.id)
+        guard layerIDs.count == savedLayers.count, Set(layerIDs).count == layerIDs.count,
+              Set(savedDecks.map(\.id)).count == savedDecks.count else { return false }
+        let oldLayers = layers, oldDecks = decks, oldColumns = columns, oldGrid = max(gridSize, 1)
+        var made: [Layer] = []
+        let newLayers = layerIDs.enumerated().map { r, id -> Layer in
+            if let l = oldLayers.first(where: { $0.id == id }) { return l }
+            let l = Layer(index: r, id: id); made.append(l); return l
+        }
+        let layerTo: [Int?] = oldLayers.map { l in layerIDs.firstIndex(of: l.id) }
+        let deckTo: [Int?] = oldDecks.map { d in savedDecks.firstIndex { $0.id == d.id } }
+        // 列：目印が無いので、中のクリップの行き先で決める（その列のクリップがいちばん多く移る先）。
+        // 決まらない列は、空いている列へ左から。入りきらない列は消える
+        var whereTo: [UUID: Int] = [:]
+        for (i, s) in state.slots.enumerated() { if let id = s?.id { whereTo[id] = i % newColumns } }
+        var votes = [[Int: Int]](repeating: [:], count: oldColumns)
+        for (i, s) in slots.enumerated() {
+            guard let s, let c = whereTo[s.id] else { continue }
+            votes[(i % oldGrid) % oldColumns][c, default: 0] += 1
+        }
+        var columnTo = [Int?](repeating: nil, count: oldColumns)
+        var taken = Set<Int>()
+        let order = (0..<oldColumns).sorted { (votes[$0].values.max() ?? 0) > (votes[$1].values.max() ?? 0) }
+        for c in order {
+            guard let best = votes[c].filter({ !taken.contains($0.key) }).max(by: { ($0.value, -$0.key) < ($1.value, -$1.key) })
+            else { continue }
+            columnTo[c] = best.key; taken.insert(best.key)
+        }
+        var free = (0..<newColumns).filter { !taken.contains($0) }
+        for c in 0..<oldColumns where columnTo[c] == nil && votes[c].isEmpty && !free.isEmpty { columnTo[c] = free.removeFirst() }
+
+        // restructure は自動保存を予約して戻す歩を作ろうとするので、歴史は呼ぶ前のまま保つ
+        let h = undoHistory
+        let past = h.past, future = h.future, committed = h.committed
+        made.forEach(wire)
+        restructure(layers: newLayers, columns: newColumns,
+                    layerMap: { layerTo.indices.contains($0) ? layerTo[$0] : nil },
+                    columnMap: { columnTo.indices.contains($0) ? columnTo[$0] : nil },
+                    decks: savedDecks.map { Deck(id: $0.id, name: $0.name) },
+                    deckMap: { deckTo.indices.contains($0) ? deckTo[$0] : nil })
+        h.pending?.cancel(); h.pending = nil
+        h.past = past; h.future = future; h.committed = committed
+        return true
     }
 
     /// 自動保存はするが、戻す歩には数えない
@@ -158,7 +216,7 @@ extension Engine {
         if let c = currentCue, !cues.indices.contains(c) { currentCue = nil }
         bpm = state.bpm ?? bpm
         outputFormat = state.outputFormat ?? OutputFormat()
-        corners = state.corners.count == 4 ? state.corners.map { SIMD2($0[0], $0[1]) } : Engine.defaultCorners
+        corners = Engine.decodeCorners(state.corners)
         outputMap = state.outputMap ?? OutputMap()
         dmxMap = state.dmxMap ?? DMXMap()
         autopilot = state.autopilot ?? AutoPilot()
@@ -209,9 +267,17 @@ extension Engine {
     }
 
     private func restorePads(_ p: [SavedPad]?) {
+        // ラッチで入っているパッドは、戻したあとも同じ並びのラッチのパッドなら入ったままにする（元に戻すたびに切れないように）
+        let latched = pads.enumerated().compactMap { i, pad in
+            pad.latch ? heldPads[pad.id].map { (i, $0, padOrigins[pad.id]) } : nil
+        }
         heldPads = [:]
         releasingPads = [:]
         pads = makePads(p)
+        for (i, down, origin) in latched where pads.indices.contains(i) && pads[i].latch {
+            heldPads[pads[i].id] = down
+            padOrigins[pads[i].id] = origin ?? down
+        }
     }
 
     private static func sameMedia(_ s: ClipSlot, _ saved: SavedSlot) -> Bool {

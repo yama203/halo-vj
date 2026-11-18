@@ -288,6 +288,15 @@ final class ClipSlot: ObservableObject, Identifiable, Animatable, EffectHolder {
     var loop: Bool { endAction == .loop }
     /// .blackout で最後まで来た（Engine がレイヤーを止める）
     var onBlackoutEnd: (() -> Void)?
+    /// 順向きにアウト点へ着いた回数（メインスレッド。保存しない）
+    private(set) var endCount = 0
+    /// アウト点までの残り（秒。再生中で順向きのときだけ。速さ込みの実際の秒）
+    func remainingToOut(at host: Double) -> Double? {
+        guard isPlaying, !isReversing, duration > 0 else { return nil }
+        let r = effectiveSpeed
+        guard r > 0 else { return nil }
+        return (outTime - clock.position(at: host)) / r
+    }
 
     // MARK: イン点・アウト点（秒）
     /// 再生を始める位置
@@ -737,6 +746,9 @@ final class ClipSlot: ObservableObject, Identifiable, Animatable, EffectHolder {
     deinit {
         _active?.cancel()
         standby?.cancel()
+        // 往復の待機と、ジャンプ待ちのストリームも止める（止めないと、デコードのスレッドとコマが残り続ける）
+        reverseStandby?.cancel()
+        _pendingJump?.stream.cancel()
         progressTimer?.invalidate()
         if let restartObserver { NotificationCenter.default.removeObserver(restartObserver) }
     }
@@ -760,7 +772,8 @@ final class ClipSlot: ObservableObject, Identifiable, Animatable, EffectHolder {
                 throw NSError(domain: "VJPlayer", code: 2, userInfo: [NSLocalizedDescriptionKey: L("映像トラックがありません")])
             }
             let fps = (try? await vt.load(.nominalFrameRate)) ?? 30
-            let audioFile = try await AudioCache.file(for: asset, url: url)
+            // 音が読めなくても（空の音声トラック・読めない形式）、映像だけで使えるようにする
+            let audioFile = (try? await AudioCache.file(for: asset, url: url)) ?? nil
             await MainActor.run {
                 self.duration = d.isFinite ? d : 0
                 let dur = self.duration
@@ -1027,6 +1040,8 @@ final class ClipSlot: ObservableObject, Identifiable, Animatable, EffectHolder {
             return
         }
         guard pos >= outTime else { return }
+        // アウト点に着いた回数（キューの「終わったら次へ」が見る。ループ・往復でも数える）
+        endCount += 1
         switch currentEndAction {
         case .loop:
             playFromStart()

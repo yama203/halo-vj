@@ -887,6 +887,9 @@ enum EffectKind: String, Codable, CaseIterable, Identifiable {
                 n(L("目標の時"), 0...23, 0, L("時")), n(L("目標の分"), 0...59, 0, L("分")), n(L("目標の秒"), 0...59, 0, L("秒")),
                 n(L("タイマーの分"), 0...999, 10, L("分")), n(L("タイマーの秒"), 0...59, 0, L("秒")),
                 EffectParam(label: L("最後の 10 秒を弾ませる"), range: 0...1, defaultValue: 1, isToggle: true),
+                // 21：カウントダウン・タイマーが 0 になったら（出力で出しているときだけ。Engine の見回りが見る）
+                EffectParam(label: L("0 になったら"), range: 0...Double(ClockText.zeroActions.count - 1), defaultValue: 0,
+                            choices: ClockText.zeroActions),
             ]
         case .text:
             // 文字は Effect.text。0〜5 はシェーダーで、6 以降は文字を描くとき（CPU）に使う

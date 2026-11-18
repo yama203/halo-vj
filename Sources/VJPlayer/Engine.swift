@@ -87,7 +87,9 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
     @Published private(set) var slots: [ClipSlot?] = Array(repeating: nil, count: Engine.defaultLayers * Engine.defaultColumns)
     @Published private(set) var layers: [Layer] = (0..<Engine.defaultLayers).map { Layer(index: $0) }
     /// 各レイヤーで再生中のスロット番号
-    @Published private(set) var activeByLayer: [Int?] = Array(repeating: nil, count: Engine.defaultLayers)
+    @Published private(set) var activeByLayer: [Int?] = Array(repeating: nil, count: Engine.defaultLayers) {
+        didSet { updateShowTimer() }
+    }
     /// 選択中のレイヤー（最後にトリガー or レイヤー欄をクリック）。速度パネルとレイヤータブの対象
     @Published var selectedLayer = 0 {
         didSet { if oldValue != selectedLayer { syncRenderState() } }
@@ -171,11 +173,39 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
     /// シーンを切り替えている途中なら 0〜1
     @Published var sceneProgress: Double?
     /// キューリスト（GO で上から順に出す）
-    @Published var cues: [Cue] = [] { didSet { scheduleSave() } }
+    @Published var cues: [Cue] = [] { didSet { scheduleSave(); cuesChangedForShow() } }
     /// 今出しているキュー（nil = まだ何も出していない）
     @Published var currentCue: Int?
     /// GO の連打よけ：最後に GO した時刻
     var lastGoHost = 0.0
+    // MARK: 進行を自動で進める（ShowControl.swift）
+    /// 「自動で進める」：切ると、自動送り・時刻・0 での発火はどれも起きない（保存しない・起動時はオン）
+    @Published var cueAutoEnabled = true { didSet { if oldValue != cueAutoEnabled { cueAutoChanged() } } }
+    /// 自動送りの予約（出したキューに自動送りがあるときだけ。1 つだけ持つ）
+    @Published var cueFollow: CueFollowPending? { didSet { updateShowTimer() } }
+    /// 予備機として追っている（本番機から来る /halo/cue/current だけで進む。自動の発火はしない。保存しない）
+    @Published var cueFollower = false {
+        didSet {
+            guard oldValue != cueFollower else { return }
+            // 切り替えたときに残っている予約は捨てる（追っている間に入った予約が、あとで勝手に出ないように）
+            cueFollow = nil
+            updateShowTimer()
+        }
+    }
+    /// リハーサル用の時計のずらし（秒。ShowClock.offset と同じ値を画面のために持つ。保存しない）
+    @Published var showClockOffset: TimeInterval = 0
+    /// 見回り：時計のクリップの前の残り（クリップの id → 秒）
+    var clockRemaining: [UUID: Double] = [:]
+    /// 見回り：前の見回りの時刻（時刻のキューの「またいだ」判定に使う。nil = まだ見ていない）
+    var showLastTick: Date?
+    /// 見回りのタイマー（予約が 1 つも無いときは止める）
+    var showTimer: Timer?
+    /// テスト用：false ならタイマーを回さない（見回りは showTick を直接呼ぶ）
+    var showTimerEnabled = true
+    /// キューを出したときの知らせ（番号は 0 から。予備機への送りに使う。Engine.shared だけ App がつなぐ）
+    var onCueFired: ((Int) -> Void)?
+    /// ブラックアウトを入切したときの知らせ（予備機への送り）
+    var onBlackoutChanged: ((Bool) -> Void)?
     /// 押している間だけ効くエフェクトのパッド（グリッドの下）
     @Published var pads: [FXPad] = []
     /// 押しているパッドと、押した時刻
@@ -220,6 +250,8 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
                                    fullDuration: isBlackout ? blackoutFadeOut : blackoutFadeIn, now: now)
             syncRenderState()
             updateAudioFades()
+            // 予備機への知らせ（追う側は送らない。2 台で送り合わないように）
+            if !cueFollower { onBlackoutChanged?(isBlackout) }
         }
     }
     /// ブラックアウトにかける時間・解除にかける時間（秒。設定ウィンドウで変える）
@@ -520,7 +552,7 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
         resetUndo()
     }
 
-    private func wire(_ layer: Layer) {
+    func wire(_ layer: Layer) {
         layer.onChanged = { [weak self] in
             self?.syncRenderState()
             self?.scheduleSave()
@@ -719,7 +751,7 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
     func deckIndex(_ id: UUID?) -> Int? { id.flatMap { id in decks.firstIndex { $0.id == id } } }
 
     /// グリッドの形を変える。layerMap / columnMap / deckMap は「前の段・列・デッキ → 新しい段・列・デッキ（nil = 消える）」
-    private func restructure(layers newLayers: [Layer], columns newColumns: Int,
+    func restructure(layers newLayers: [Layer], columns newColumns: Int,
                              layerMap: (Int) -> Int?, columnMap: (Int) -> Int? = { $0 },
                              decks newDecks: [Deck]? = nil, deckMap: (Int) -> Int? = { $0 }) {
         // シーン・キューのフェードは古い段数のまま動くので、形を変える前に最後まで進めて終える
@@ -826,6 +858,8 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
         cancelCueFade(layer: r)
         // キューで一時的に決めた「終わったら」は、出し直すと外れる（キューから出すときは、この後でまた入れる）
         slot.endActionOverride = nil
+        // 時計の「前の残り」は出し直したら忘れる（出した時に既に 0 以下なら進まない）
+        clockRemaining[slot.id] = nil
         // 消えかけのクリップをもう一度押した → それは頭から出し直す（クロスフェードの相手ではなくなる）
         if outgoing[r] == index { dropOutgoing(r, stop: false) }
         let fadeTime = fadeOverride ?? layers[r].fadeTime
@@ -1904,6 +1938,8 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
     }
 
     func scheduleSave() {
+        // 時計のクリップの「0 になったら」などを変えたら、見回りが要るかを決め直す
+        updateShowTimer()
         guard !isRestoring else { return }
         noteUndoChange()
         if !isDirty {
@@ -2083,12 +2119,14 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
         pads = makePads(state.pads)
         cues = state.cues ?? []
         currentCue = nil
+        // 開いたときに既に過ぎている時刻・0 は出さない（見回りを最初から）
+        resetShowWatch()
         activeSceneID = nil
         closeSceneEditor()
         bpm = state.bpm ?? 120
         outputFormat = state.outputFormat ?? OutputFormat()
         masterSpeed = 1
-        corners = state.corners.count == 4 ? state.corners.map { SIMD2($0[0], $0[1]) } : Engine.defaultCorners
+        corners = Engine.decodeCorners(state.corners)
         outputMap = state.outputMap ?? OutputMap()
         dmxMap = state.dmxMap ?? DMXMap()
         autopilot = state.autopilot ?? AutoPilot()
@@ -2119,6 +2157,12 @@ final class Engine: ObservableObject, Animatable, EffectHolder {
         adoptSceneClipIDs()
         syncRenderState()
         resetUndo()
+    }
+
+    /// 保存した四隅（4 点・それぞれ x, y・有限の数）。形がおかしければ初期の四隅
+    static func decodeCorners(_ c: [[Float]]) -> [SIMD2<Float>] {
+        guard c.count == 4, c.allSatisfy({ $0.count >= 2 && $0[0].isFinite && $0[1].isFinite }) else { return defaultCorners }
+        return c.map { SIMD2($0[0], $0[1]) }
     }
 
     /// 保存したクリップから、クリップを作る

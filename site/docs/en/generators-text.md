@@ -54,6 +54,8 @@ The clip's name is the first line. Text is redrawn only when it changes, and mot
 ### Other
 
 - Text shown at 0: if empty, it stays at 0. If it is wider than the screen, it is scaled down.
+- At zero: “Nothing” or “Next cue” (for countdown and timer). With “Next cue”, the cue list advances by one the moment it reaches 0 while on the output. It does not advance when it is only in the preview. → [Cues](cues.md)
+- The time can be shifted with the rehearsal clock in the Cues panel.
 - In the last 10 seconds the number bounces each time it changes (can be turned off).
 - Digits are drawn with equal widths, so they don't shift sideways.
 - Font, motion, wave, glitch, colors and so on are the same as Text.

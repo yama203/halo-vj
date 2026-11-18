@@ -24,10 +24,12 @@ Numbers start at 1.
 - `/halo/bpm <number>`
 - `/halo/tap`
 - `/halo/resync`
-- `/halo/pad/N 1/0` (press / release)
+- `/halo/pad/N 1/0` (press / release; a latch pad toggles on 1)
+- `/halo/pad/N/latch 0/1` (turn a pad on / off; it stays on)
 - `/halo/cue/next`
 - `/halo/cue/back`
 - `/halo/cue/N`
+- `/halo/cue/current N` (backup: the main machine is now on cue N; only with “Follow as backup”. → [Cues](cues.md))
 - `/halo/scene/N`
 - `/halo/deck/N`
 - `/halo/record [0/1]`
@@ -56,8 +58,13 @@ Sent when a clip is triggered:
 
 - `/halo/layer/L/clip` (name)
 
+Sent when a cue fires or blackout turns on/off (for a backup machine to follow):
+
+- `/halo/cue/current` (number, from 1)
+- `/halo/blackout` (1 / 0)
+
 In TouchDesigner, receive them with the OSC In CHOP.
 
 ## Saving
 
-Settings are per Mac (not stored in the project; motion settings are).
+Settings, including “Follow as backup”, are per Mac (not stored in the project; motion settings are).
